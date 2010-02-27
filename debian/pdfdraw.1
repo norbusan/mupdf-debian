@@ -1,0 +1,51 @@
+.\"                                      Hey, EMACS: -*- nroff -*-
+.\" First parameter, NAME, should be all caps
+.\" Second parameter, SECTION, should be 1-8, maybe w/ subsection
+.\" other parameters are allowed: see man(7), man(1)
+.TH PDFDRAW 1 "2010-02-27" mupdf
+.\" Please adjust this date whenever revising the manpage.
+.\"
+.\" Some roff macros, for reference:
+.\" .nh        disable hyphenation
+.\" .hy        enable hyphenation
+.\" .ad l      left justify
+.\" .ad b      justify to both left and right margins
+.\" .nf        disable filling
+.\" .fi        enable filling
+.\" .br        insert line break
+.\" .sp <n>    insert n+1 empty lines
+.\" for manpage-specific macros, see man(7)
+.SH NAME
+pdfdraw \- Renderer tool to convert a PDF file to PNM image files.
+.SH SYNOPSIS
+.B pdfdraw
+[\fIoptions\fR] [\fIfile.pdf pages ...\fR]
+.SH OPTIONS
+.TP
+.B \-b \fIN\fR
+draw page in N bands
+.TP
+.B \-d \fIpassword\fR
+password for decryption
+.TP
+.B \-o \fIpattern\fR
+pattern (%d for page number) for output file
+.TP
+.B \-r \fIdpi\fR
+resolution in dpi
+.TP
+.B \-t
+utf-8 text output instead of graphics
+.TP
+.B \-x
+xml dump of display tree
+.TP
+.B \-m
+print benchmark results
+.SH EXAMPLE
+pdfdraw -o output%03d.pnm input.pdf 1-3,5,9-
+.SH AUTHOR
+pdfdraw was written by Artifex Software, Inc.
+.PP
+This manual page was written by Kan-Ru Chen <koster@debian.org.tw>,
+for the Debian project (and may be used by others).

@@ -1,0 +1,39 @@
+.\"                                      Hey, EMACS: -*- nroff -*-
+.\" First parameter, NAME, should be all caps
+.\" Second parameter, SECTION, should be 1-8, maybe w/ subsection
+.\" other parameters are allowed: see man(7), man(1)
+.TH PDFCLEAN 1 "2010-02-27" mupdf
+.\" Please adjust this date whenever revising the manpage.
+.\"
+.\" Some roff macros, for reference:
+.\" .nh        disable hyphenation
+.\" .hy        enable hyphenation
+.\" .ad l      left justify
+.\" .ad b      justify to both left and right margins
+.\" .nf        disable filling
+.\" .fi        enable filling
+.\" .br        insert line break
+.\" .sp <n>    insert n+1 empty lines
+.\" for manpage-specific macros, see man(7)
+.SH NAME
+pdfclean \- Tool that rewrites PDF files.
+.SH SYNOPSIS
+.B pdfclean
+[\fIoptions\fR] \fIinput.pdf\fR [\fIoutfile.pdf\fR]
+.SH DESCRIPTION
+\fBpdfclean\fR can be used to decrypt, encrypt and decompress PDF files.
+.SH OPTIONS
+.TP
+.B \-p \fIpassword\fR
+password for decryption
+.TP
+.B \-g
+garbage collect unused objects
+.TP
+.B \-x
+expand compressed streams
+.SH AUTHOR
+pdfclean was written by Artifex Software, Inc.
+.PP
+This manual page was written by Kan-Ru Chen <koster@debian.org.tw>,
+for the Debian project (and may be used by others).
