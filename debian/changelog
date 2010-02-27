@@ -1,0 +1,5 @@
+mupdf (0.5-1) UNRELEASED; urgency=low
+
+  * Initial release. (Closes: #559906)
+
+ -- Kan-Ru Chen <koster@debian.org.tw>  Sat, 27 Feb 2010 21:31:58 +0800
