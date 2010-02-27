@@ -1,0 +1,108 @@
+ABOUT
+
+MuPDF is a lightweight PDF viewer and toolkit written in portable C.
+
+The renderer in MuPDF is tailored for high quality anti-aliased
+graphics.  MuPDF renders text with metrics and spacing accurate to
+within fractions of a pixel for the highest fidelity in reproducing
+the look of a printed page on screen.
+
+MuPDF has a small footprint.  A binary that includes the standard
+Roman fonts is only one megabyte.  A build with full CJK support
+(including an Asian font) is approximately five megabytes.
+
+MuPDF has support for all non-interactive PDF 1.7 features, and the
+toolkit provides a simple API for accessing the internal structures of
+the PDF document.  Example code for navigating interactive links and
+bookmarks, encrypting PDF files, extracting fonts, images, and
+searchable text, and rendering pages to image files is provided.
+
+LICENSE
+
+MuPDF -- PDF parsing, rendering and viewing toolkit.
+
+Copyright (C) 2009 Artifex Software, Inc.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+PREREQUISITES
+
+Before compiling MuPDF you need to install thirdy party dependencies.
+
+	zlib
+	libjpeg
+	freetype2
+
+There are a few optional dependencies that you don't strictly need.
+
+	jbig2dec
+	OpenJPEG
+
+MuPDF uses the Perforce Jam build tool. You need the Perforce version 2.5
+or later. FTJam will also work. If you do not have a compiled
+binary for your system, you can find the Jam and FTJam web sites here:
+
+	http://www.perforce.com/jam/jam.html
+	http://www.freetype.org/jam/index.html
+
+I use Mingw and MSYS to compile for Windows. If you use anything
+else, you are on your own.
+
+COMPILING
+
+If all of that is installed, compiling should be a cinch.
+Issue the command 'jam' in the root of the project directory.
+Add a parameter '-sBUILD=release' or '-sBUILD=profile' to
+build release or profile versions.
+
+	$ jam '-sBUILD=release'
+
+If the build fails because it cannot find header files or libraries,
+look first in Jamrules to see if there is anything wrong with the
+search paths or compiler flags for your system.
+
+To compile in the optional jbig2 and jpeg2000 support, you need
+to add the following arguments to jam:
+
+	$ jam '-sHAVE_JBIG2DEC=yes' '-sHAVE_OPENJPEG=yes'
+
+If you want a crippled version without the builtin CJK fonts and data files,
+to shave a few megabytes off the binary size, add:
+
+	$ jam '-sDEFINES=NOCJK'
+
+DOWNLOAD
+
+The latest development source is available directly from the darcs repository.
+Browse the source or use the following command line to check out the source:
+
+    darcs get http://mupdf.com/repos/mupdf
+
+INSTALLING
+
+There is no install. Just copy the resulting binary from the build
+directory to a directory in your path.
+
+REPORTING BUGS AND PROBLEMS
+
+Report bugs on the ghostscript bugzilla, with MuPDF as the
+selected component.
+
+	http://bugs.ghostscript.com/
+
+If you are reporting a problem with PDF parsing,
+please include the problematic file as an attachment.
+
+-- tor
+
