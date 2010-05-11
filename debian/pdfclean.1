@@ -1,39 +1,41 @@
-.\"                                      Hey, EMACS: -*- nroff -*-
-.\" First parameter, NAME, should be all caps
-.\" Second parameter, SECTION, should be 1-8, maybe w/ subsection
-.\" other parameters are allowed: see man(7), man(1)
-.TH PDFCLEAN 1 "2010-02-27" mupdf
+.TH PDFCLEAN 1 "March 24, 2010"
 .\" Please adjust this date whenever revising the manpage.
-.\"
-.\" Some roff macros, for reference:
-.\" .nh        disable hyphenation
-.\" .hy        enable hyphenation
-.\" .ad l      left justify
-.\" .ad b      justify to both left and right margins
-.\" .nf        disable filling
-.\" .fi        enable filling
-.\" .br        insert line break
-.\" .sp <n>    insert n+1 empty lines
-.\" for manpage-specific macros, see man(7)
 .SH NAME
-pdfclean \- Tool that rewrites PDF files.
+pdfclean \- garbage collect, decompress and pretty print a PDF file
 .SH SYNOPSIS
 .B pdfclean
-[\fIoptions\fR] \fIinput.pdf\fR [\fIoutfile.pdf\fR]
+.RI [ options ]
+.RI PDFfile
+.RI [ output ]
 .SH DESCRIPTION
-\fBpdfclean\fR can be used to decrypt, encrypt and decompress PDF files.
+This manual page briefly describes the
+.B pdfclean
+command. Unless any options that modify the behaviour are specified the
+input PDF file is pretty printed and stored under the output PDF file name
+(out.pdf if no file name is given).
+.PP
 .SH OPTIONS
+A description of each of the supported options is included below.
 .TP
-.B \-p \fIpassword\fR
-password for decryption
+.B \-p password
+Uses the given password during decryption of an encrypted PDF file.
+The password is tried both as user and owner password.
 .TP
 .B \-g
-garbage collect unused objects
+Enables garbage collection of PDF objects that have no references from
+other objects.
 .TP
 .B \-x
-expand compressed streams
+Expands compressed PDF object streams. This may make a file much larger,
+but provides easy access to all PDF object streams. Note that encrypted
+files requires the password to be set using
+.B \-p .
+.SH SEE ALSO
+.BR mupdf (1),
+.BR pdfdraw (1).
+.BR pdfshow (1).
 .SH AUTHOR
-pdfclean was written by Artifex Software, Inc.
+MuPDF was written by Tor Andersson <tor@ghostscript.com>.
+MuPDF is Copyright 2006-2010 Artifex Software, Inc.
 .PP
-This manual page was written by Kan-Ru Chen <koster@debian.org.tw>,
-for the Debian project (and may be used by others).
+This manual page was written by Sebastian Rasmussen <sebras@hotmail.com>.
