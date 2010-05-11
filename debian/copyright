@@ -1,6 +1,6 @@
 Format-Specification: http://dep.debian.net/deps/dep5/
 Name: mupdf
-Maintainer: Kan-Ru Chen <koster@debian.org.tw>
+Maintainer: Kan-Ru Chen <koster@debian.org>
 Source: http://mupdf.com
 
 Files: *
@@ -8,7 +8,7 @@ Copyright: 2006-2010, Artifex Software, Inc.
 License: GPL-2+
 
 Files: debian/*
-Copyright: 2010, Kan-Ru Chen <koster@debian.org.tw>
+Copyright: 2010, Kan-Ru Chen <koster@debian.org>
 License: GPL-2+
 
 License: GPL-2+
