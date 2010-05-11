@@ -1,7 +1,7 @@
 Source: mupdf
 Section: text
 Priority: extra
-Maintainer: Kan-Ru Chen <koster@debian.org.tw>
+Maintainer: Kan-Ru Chen <koster@debian.org>
 Build-Depends: debhelper (>= 7.0.50~), ftjam, libfreetype6-dev,
  libjpeg-dev, libx11-dev, libxext-dev, zlib1g-dev
 Standards-Version: 3.8.4
