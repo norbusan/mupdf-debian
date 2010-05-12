@@ -78,6 +78,10 @@ Files: debian/*
 Copyright: 2010, Kan-Ru Chen <koster@debian.org>
 License: GPL-3+
 
+Files: debian/*.1
+Copyright: 2006-2010, Artifex Software, Inc.
+License: GPL-3+
+
 License: GPL-2+
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
