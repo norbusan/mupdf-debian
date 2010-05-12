@@ -1,9 +1,5 @@
 build/*-release/mupdf usr/bin
 build/*-release/pdfclean usr/bin
 build/*-release/pdfshow usr/bin
-build/*-release/mupdf usr/bin
-build/*-release/fontdump usr/bin
-build/*-release/cmapdump usr/bin
-build/*-release/pdfinfo usr/bin
 build/*-release/pdfdraw usr/bin
-build/*-release/pdfextract usr/bin
+
