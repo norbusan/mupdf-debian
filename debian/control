@@ -1,11 +1,13 @@
 Source: mupdf
 Section: text
-Priority: extra
+Priority: optional
 Maintainer: Kan-Ru Chen <koster@debian.org>
 Build-Depends: debhelper (>= 7.0.50~), ftjam, libfreetype6-dev,
  libjpeg-dev, libx11-dev, libxext-dev, zlib1g-dev
 Standards-Version: 3.8.4
 Homepage: http://mupdf.com/
+Vcs-Git: git://git.debian.org/git/users/koster/mupdf.git
+Vcs-Browser: http://git.debian.org/?p=users/koster/mupdf.git;a=summary
 
 Package: mupdf
 Architecture: any
