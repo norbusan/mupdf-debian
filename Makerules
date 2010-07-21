@@ -1,0 +1,54 @@
+# Configuration for the Makefile
+
+OS := $(shell uname)
+OS := $(OS:MINGW%=MINGW)
+
+LIBS := -ljbig2dec -lopenjpeg -ljpeg -lz -lm
+CFLAGS := -Wall --std=gnu99 -Ifitz -Imupdf $(THIRD_INCS)
+LDFLAGS =
+CC = cc
+LD = $(CC)
+AR = ar
+
+ifeq "$(build)" "debug"
+CFLAGS += -g -O0
+endif
+
+ifeq "$(build)" "release"
+CFLAGS += -O3
+endif
+
+ifeq "$(OS)" "Linux"
+ifeq "$(freetype_dir)" ""
+CFLAGS += `pkg-config --cflags freetype2`
+LDFLAGS += `pkg-config --libs freetype2`
+endif
+X11LIBS = -lX11 -lXext
+PDFVIEW_EXE = $(X11VIEW_EXE)
+ifeq  "$(build)" "release"
+CFLAGS += -mmmx -ftree-vectorize -msse -msse2 -march=k8 -DARCH_X86
+ARCH_SRC = archx86.c
+endif
+endif
+
+ifeq "$(OS)" "Darwin"
+CFLAGS += -I$(HOME)/include -I/usr/X11R6/include
+LDFLAGS += -L$(HOME)/lib -L/usr/X11R6/lib
+ifeq "$(freetype_dir)" ""
+CFLAGS += -I/usr/X11R6/include/freetype2
+endif
+X11LIBS = -lX11 -lXext
+PDFVIEW_EXE = $(X11VIEW_EXE)
+ifeq  "$(build)" "release"
+CFLAGS += -DARCH_X86_64
+ARCH_SRC = archx86.c
+endif
+endif
+
+# MinGW build depends on thirdparty
+ifeq "$(OS)" "MINGW"
+CC = gcc
+W32LIBS = -lgdi32 -lcomdlg32 -luser32 -ladvapi32 -lshell32 -mwindows
+PDFVIEW_EXE = $(WINVIEW_EXE)
+endif
+

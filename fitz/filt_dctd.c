@@ -1,8 +1,6 @@
-#include "fitz_base.h"
-#include "fitz_stream.h"
+#include "fitz.h"
 
 #include <jpeglib.h>
-
 #include <setjmp.h>
 
 typedef struct fz_dctd_s fz_dctd;
@@ -19,7 +17,7 @@ static void myerrexit(j_common_ptr cinfo)
 	struct myerrmgr *err = (struct myerrmgr *)cinfo->err;
 	char msgbuf[JMSG_LENGTH_MAX];
 	err->super.format_message(cinfo, msgbuf);
-	strlcpy(err->msg, msgbuf, sizeof err->msg);
+	fz_strlcpy(err->msg, msgbuf, sizeof err->msg);
 	longjmp(err->jb, 1);
 }
 
@@ -123,10 +121,6 @@ fz_newdctd(fz_obj *params)
 	d->src.super.next_input_byte = nil;
 	d->src.skip = 0;
 
-	/* speed up jpeg decoding a bit */
-	d->cinfo.dct_method = JDCT_FASTEST;
-	d->cinfo.do_fancy_upsampling = FALSE;
-
 	return (fz_filter *)d;
 }
 
@@ -179,6 +173,10 @@ fz_processdctd(fz_filter *filter, fz_buffer *in, fz_buffer *out)
 		i = jpeg_read_header(&d->cinfo, TRUE);
 		if (i == JPEG_SUSPENDED)
 			goto needinput;
+
+		/* speed up jpeg decoding a bit */
+		d->cinfo.dct_method = JDCT_FASTEST;
+		d->cinfo.do_fancy_upsampling = FALSE;
 
 		/* default value if ColorTransform is not set */
 		if (d->colortransform == -1)
