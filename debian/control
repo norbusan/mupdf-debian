@@ -2,7 +2,7 @@ Source: mupdf
 Section: text
 Priority: optional
 Maintainer: Kan-Ru Chen <koster@debian.org>
-Build-Depends: debhelper (>= 7.0.50~), libfreetype6-dev,
+Build-Depends: debhelper (>= 7.0.50~), libfreetype6-dev, pkg-config,
  libjpeg-dev, libjbig2dec-dev, libopenjpeg-dev, libx11-dev, libxext-dev, zlib1g-dev
 Standards-Version: 3.9.0
 Homepage: http://mupdf.com/
