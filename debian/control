@@ -9,14 +9,35 @@ Homepage: http://mupdf.com/
 Vcs-Git: git://git.debian.org/git/users/koster/mupdf.git
 Vcs-Browser: http://git.debian.org/?p=users/koster/mupdf.git;a=summary
 
+Package: libmupdf-dev
+Architecture: any
+Section: libdevel
+Depends: ${misc:Depends}
+Description: development files for the MuPDF viewer
+ MuPDF is a lightweight PDF viewer and toolkit written in portable C.
+ .
+ This package contains the static library and headers.
+
 Package: mupdf
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: lightweight PDF viewer and toolkit written in portable C
- The renderer in MuPDF is tailored for high quality anti-aliased
- graphics. It renders text with metrics and spacing accurate to within
- fractions of a pixel for the highest fidelity in reproducing the look
- of a printed page on screen.
+Description: lightweight PDF viewer
+ MuPDF is a lightweight PDF viewer and toolkit written in portable C.
+ .
+ The renderer in MuPDF is tailored for high quality anti-aliased graphics.
+ It renders text with metrics and spacing accurate to within fractions of a
+ pixel for the highest fidelity in reproducing the look of a printed page
+ on screen.
+
+Package: mupdf-tools
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: commmand line tools for the MuPDF viewer
+ MuPDF is a lightweight PDF viewer and toolkit written in portable C.
+ .
+ This package contains command line utilities using the MuPDF library:
+ .
+ pdfdraw to render pages to a PNM image files.
  .
  MuPDF has a small footprint. A binary that includes the standard
  Roman fonts is only one megabyte. A build with full CJK support
