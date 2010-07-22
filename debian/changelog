@@ -1,5 +1,5 @@
-mupdf (0.5-1) unstable; urgency=low
+mupdf (0.6-1) unstable; urgency=low
 
   * Initial release. (Closes: #559906)
 
- -- Kan-Ru Chen <koster@debian.org>  Wed, 12 May 2010 18:08:31 +0800
+ -- Kan-Ru Chen <koster@debian.org>  Thu, 22 Jul 2010 08:23:00 +0800

@@ -4,6 +4,9 @@
  * uses a number of callbacks to the GUI app.
  */
 
+#define MINRES 54
+#define MAXRES 300
+
 typedef struct pdfapp_s pdfapp_t;
 
 enum { ARROW, HAND, WAIT };
@@ -18,21 +21,22 @@ extern char* winpassword(pdfapp_t*, char *filename);
 extern void winopenuri(pdfapp_t*, char *s);
 extern void wincursor(pdfapp_t*, int curs);
 extern void windocopy(pdfapp_t*);
+extern void winreloadfile(pdfapp_t*);
 
 struct pdfapp_s
 {
 	/* current document params */
-	char *filename;
 	char *doctitle;
 	pdf_xref *xref;
 	pdf_outline *outline;
-	fz_renderer *rast;
 	int pagecount;
+	fz_glyphcache *cache;
 
 	/* current view params */
-	float zoom;
+	int resolution;
 	int rotate;
 	fz_pixmap *image;
+	fz_textspan *text;
 
 	/* current page params */
 	int pageno;
@@ -56,14 +60,14 @@ struct pdfapp_s
 
 	int iscopying;
 	int selx, sely;
-	fz_irect selr;
+	fz_bbox selr;
 
 	/* client context storage */
 	void *userdata;
 };
 
 void pdfapp_init(pdfapp_t *app);
-void pdfapp_open(pdfapp_t *app, char *filename);
+void pdfapp_open(pdfapp_t *app, char *filename, int fd);
 void pdfapp_close(pdfapp_t *app);
 
 char *pdfapp_usage(pdfapp_t *app);
