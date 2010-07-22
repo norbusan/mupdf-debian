@@ -11,7 +11,8 @@ Vcs-Browser: http://git.debian.org/?p=users/koster/mupdf.git;a=summary
 
 Package: libmupdf-dev
 Architecture: any
-Depends: ${shlibs:Depends}
+Section: libdevel
+Depends: ${misc:Depends}
 Description: development files for the MuPDF viewer
  MuPDF is a lightweight PDF viewer and toolkit written in portable C.
  .
@@ -30,7 +31,7 @@ Description: lightweight PDF viewer
 
 Package: mupdf-tools
 Architecture: any
-Depends: ${shlibs:Depends}
+Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: commmand line tools for the MuPDF viewer
  MuPDF is a lightweight PDF viewer and toolkit written in portable C.
  .
