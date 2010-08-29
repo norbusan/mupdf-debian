@@ -2,6 +2,7 @@
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_STROKER_H
 
 static void fz_finalizefreetype(void);
 
@@ -18,12 +19,12 @@ fz_newfont(void)
 	font->ftsubstitute = 0;
 	font->fthint = 0;
 
-	font->t3matrix = fz_identity();
+	font->t3matrix = fz_identity;
 	font->t3resources = nil;
 	font->t3procs = nil;
 	font->t3widths = nil;
 	font->t3xref = nil;
-	font->t3runcontentstream = nil;
+	font->t3run = nil;
 
 	font->bbox.x0 = 0;
 	font->bbox.y0 = 0;
@@ -238,22 +239,23 @@ fz_renderftglyph(fz_font *font, int gid, fz_matrix trm)
 		if (fterr)
 			fz_warn("freetype failed to load glyph: %s", ft_errorstring(fterr));
 
-		realw = ((FT_Face)font->ftface)->glyph->advance.x;
+		realw = ((FT_Face)font->ftface)->glyph->metrics.horiAdvance;
 		subw = font->widthtable[gid];
 		if (realw)
 			scale = (float) subw / realw;
 		else
-			scale = 1.0;
+			scale = 1;
 
-		trm = fz_concat(fz_scale(scale, 1.0), trm);
+		trm = fz_concat(fz_scale(scale, 1), trm);
 	}
 
-	/* freetype mutilates complex glyphs if they are loaded
-	 * with FT_Set_Char_Size 1.0. it rounds the coordinates
-	 * before applying transformation. to get more precision in
-	 * freetype, we shift part of the scale in the matrix
-	 * into FT_Set_Char_Size instead
-	 */
+	/*
+	Freetype mutilates complex glyphs if they are loaded
+	with FT_Set_Char_Size 1.0. it rounds the coordinates
+	before applying transformation. to get more precision in
+	freetype, we shift part of the scale in the matrix
+	into FT_Set_Char_Size instead
+	*/
 
 	m.xx = trm.a * 64; /* should be 65536 */
 	m.yx = trm.b * 64;
@@ -269,13 +271,14 @@ fz_renderftglyph(fz_font *font, int gid, fz_matrix trm)
 
 	if (font->fthint)
 	{
-		/* Enable hinting, but keep the huge char size so that
-		 * it is hinted for a character. This will in effect nullify
-		 * the effect of grid fitting. This form of hinting should
-		 * only be used for DynaLab and similar tricky TrueType fonts,
-		 * so that we get the correct outline shape.
-		 */
-#ifdef USE_HINTING
+		/*
+		Enable hinting, but keep the huge char size so that
+		it is hinted for a character. This will in effect nullify
+		the effect of grid fitting. This form of hinting should
+		only be used for DynaLab and similar tricky TrueType fonts,
+		so that we get the correct outline shape.
+		*/
+#ifdef GRIDFIT
 		/* If you really want grid fitting, enable this code. */
 		float scale = fz_matrixexpansion(trm);
 		m.xx = trm.a * 65536 / scale;
@@ -298,12 +301,18 @@ fz_renderftglyph(fz_font *font, int gid, fz_matrix trm)
 	{
 		fterr = FT_Load_Glyph(face, gid, FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING);
 		if (fterr)
+		{
 			fz_warn("freetype load glyph (gid %d): %s", gid, ft_errorstring(fterr));
+			return nil;
+		}
 	}
 
 	fterr = FT_Render_Glyph(face->glyph, ft_render_mode_normal);
 	if (fterr)
+	{
 		fz_warn("freetype render glyph (gid %d): %s", gid, ft_errorstring(fterr));
+		return nil;
+	}
 
 	glyph = fz_newpixmap(NULL,
 		face->glyph->bitmap_left,
@@ -319,6 +328,99 @@ fz_renderftglyph(fz_font *font, int gid, fz_matrix trm)
 	}
 
 	return glyph;
+}
+
+fz_pixmap *
+fz_renderftstrokedglyph(fz_font *font, int gid, fz_matrix trm, fz_matrix ctm, fz_strokestate *state)
+{
+	FT_Face face = font->ftface;
+	float expansion = fz_matrixexpansion(ctm);
+	int linewidth = state->linewidth * expansion * 64 / 2;
+	FT_Matrix m;
+	FT_Vector v;
+	FT_Error fterr;
+	FT_Stroker stroker;
+	FT_Glyph glyph;
+	FT_BitmapGlyph bitmap;
+	fz_pixmap *pix;
+	int y;
+
+	m.xx = trm.a * 64; /* should be 65536 */
+	m.yx = trm.b * 64;
+	m.xy = trm.c * 64;
+	m.yy = trm.d * 64;
+	v.x = trm.e * 64;
+	v.y = trm.f * 64;
+
+	fterr = FT_Set_Char_Size(face, 65536, 65536, 72, 72); /* should be 64, 64 */
+	if (fterr)
+	{
+		fz_warn("FT_Set_Char_Size: %s", ft_errorstring(fterr));
+		return nil;
+	}
+
+	FT_Set_Transform(face, &m, &v);
+
+	fterr = FT_Load_Glyph(face, gid, FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING);
+	if (fterr)
+	{
+		fz_warn("FT_Load_Glyph(gid %d): %s", gid, ft_errorstring(fterr));
+		return nil;
+	}
+
+	fterr = FT_Stroker_New(fz_ftlib, &stroker);
+	if (fterr)
+	{
+		fz_warn("FT_Stroker_New: %s", ft_errorstring(fterr));
+		return nil;
+	}
+
+	FT_Stroker_Set(stroker, linewidth, state->linecap, state->linejoin, state->miterlimit * 65536);
+
+	fterr = FT_Get_Glyph(face->glyph, &glyph);
+	if (fterr)
+	{
+		fz_warn("FT_Get_Glyph: %s", ft_errorstring(fterr));
+		FT_Stroker_Done(stroker);
+		return nil;
+	}
+
+	fterr = FT_Glyph_Stroke(&glyph, stroker, 1);
+	if (fterr)
+	{
+		fz_warn("FT_Glyph_Stroke: %s", ft_errorstring(fterr));
+		FT_Done_Glyph(glyph);
+		FT_Stroker_Done(stroker);
+		return nil;
+	}
+
+	fterr = FT_Glyph_To_Bitmap(&glyph, FT_RENDER_MODE_NORMAL, 0, 1);
+	if (fterr)
+	{
+		fz_warn("FT_Glyph_To_Bitmap: %s", ft_errorstring(fterr));
+		FT_Done_Glyph(glyph);
+		FT_Stroker_Done(stroker);
+		return nil;
+	}
+
+	bitmap = (FT_BitmapGlyph)glyph;
+	pix = fz_newpixmap(NULL,
+		bitmap->left,
+		bitmap->top - bitmap->bitmap.rows,
+		bitmap->bitmap.width,
+		bitmap->bitmap.rows);
+
+	for (y = 0; y < pix->h; y++)
+	{
+		memcpy(pix->samples + y * pix->w,
+			bitmap->bitmap.buffer + (pix->h - y - 1) * bitmap->bitmap.pitch,
+			pix->w);
+	}
+
+	FT_Done_Glyph(glyph);
+	FT_Stroker_Done(stroker);
+
+	return pix;
 }
 
 /*
@@ -356,6 +458,7 @@ fz_rendert3glyph(fz_font *font, int gid, fz_matrix trm)
 	fz_device *dev;
 	fz_glyphcache *cache;
 	fz_pixmap *glyph;
+	fz_pixmap *result;
 
 	if (gid < 0 || gid > 255)
 		return NULL;
@@ -366,23 +469,26 @@ fz_rendert3glyph(fz_font *font, int gid, fz_matrix trm)
 
 	ctm = fz_concat(font->t3matrix, trm);
 	dev = fz_newbboxdevice(&bbox);
-	error = font->t3runcontentstream(dev, ctm, font->t3xref, font->t3resources, contents);
+	error = font->t3run(font->t3xref, font->t3resources, contents, dev, ctm);
 	if (error)
 		fz_catch(error, "cannot draw type3 glyph");
 	fz_freedevice(dev);
 
-	glyph = fz_newpixmap(nil, bbox.x0-1, bbox.y0-1, bbox.x1 - bbox.x0 + 1, bbox.y1 - bbox.y0 + 1);
-	fz_clearpixmap(glyph, 0x00);
+	glyph = fz_newpixmap(fz_devicegray, bbox.x0-1, bbox.y0-1, bbox.x1 - bbox.x0 + 1, bbox.y1 - bbox.y0 + 1);
+	fz_clearpixmap(glyph, 0);
 
 	cache = fz_newglyphcache();
 	dev = fz_newdrawdevice(cache, glyph);
-	error = font->t3runcontentstream(dev, ctm, font->t3xref, font->t3resources, contents);
+	error = font->t3run(font->t3xref, font->t3resources, contents, dev, ctm);
 	if (error)
 		fz_catch(error, "cannot draw type3 glyph");
 	fz_freedevice(dev);
 	fz_freeglyphcache(cache);
 
-	return glyph;
+	result = fz_alphafromgray(glyph, 0);
+	fz_droppixmap(glyph);
+
+	return result;
 }
 
 void
@@ -392,22 +498,21 @@ fz_debugfont(fz_font *font)
 
 	if (font->ftface)
 	{
-		printf("  freetype face %p\n", font->ftface);
+		printf("\tfreetype face %p\n", font->ftface);
 		if (font->ftsubstitute)
-			printf("  substitute font\n");
+			printf("\tsubstitute font\n");
 	}
 
 	if (font->t3procs)
 	{
-		printf("  type3 matrix [%g %g %g %g]\n",
+		printf("\ttype3 matrix [%g %g %g %g]\n",
 			font->t3matrix.a, font->t3matrix.b,
 			font->t3matrix.c, font->t3matrix.d);
 	}
 
-	printf("  bbox [%g %g %g %g]\n",
+	printf("\tbbox [%g %g %g %g]\n",
 		font->bbox.x0, font->bbox.y0,
 		font->bbox.x1, font->bbox.y1);
 
 	printf("}\n");
 }
-

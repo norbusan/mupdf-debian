@@ -312,7 +312,8 @@ skip:
 		case PDF_TNULL: val = fz_newnull(); break;
 
 		case PDF_TINT:
-			a = atoi(buf);
+			/* 64-bit to allow for numbers > INT_MAX and overflow */
+			a = (int) strtoll(buf, 0, 10);
 			error = pdf_lex(&tok, file, buf, cap, &len);
 			if (error)
 			{
@@ -503,13 +504,7 @@ skip:
 			if (c != '\n')
 				fz_warn("line feed missing after stream begin marker (%d %d R)", num, gen);
 			else
-				c = fz_readbyte(file);
-		}
-		error = fz_readerror(file);
-		if (error)
-		{
-			fz_dropobj(obj);
-			return fz_rethrow(error, "cannot parse indirect object (%d %d R)", num, gen);
+				fz_readbyte(file);
 		}
 		stmofs = fz_tell(file);
 	}
@@ -529,4 +524,3 @@ skip:
 	*op = obj;
 	return fz_okay;
 }
-

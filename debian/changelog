@@ -1,3 +1,9 @@
+mupdf (0.7-1) unstable; urgency=low
+
+  * New upstream release
+
+ --
+
 mupdf (0.6-1) unstable; urgency=low
 
   * Initial release. (Closes: #559906)

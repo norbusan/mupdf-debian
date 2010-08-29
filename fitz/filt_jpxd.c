@@ -3,19 +3,6 @@
 #define OPJ_STATIC
 #include <openjpeg.h>
 
-typedef struct fz_jpxd_s fz_jpxd;
-
-struct fz_jpxd_s
-{
-	fz_filter super;
-	opj_event_mgr_t evtmgr;
-	opj_dparameters_t params;
-	opj_dinfo_t *info;
-	opj_image_t *image;
-	int stage;
-	int x, y, k;
-};
-
 static void fz_opj_error_callback(const char *msg, void *client_data)
 {
 	fprintf(stderr, "openjpeg error: %s", msg);
@@ -28,136 +15,103 @@ static void fz_opj_warning_callback(const char *msg, void *client_data)
 
 static void fz_opj_info_callback(const char *msg, void *client_data)
 {
-	/* fprintf(stdout, "openjpeg info: %s", msg); */
-}
-
-
-fz_filter *
-fz_newjpxd(fz_obj *params)
-{
-	FZ_NEWFILTER(fz_jpxd, d, jpxd);
-
-	d->info = nil;
-	d->image = nil;
-	d->stage = 0;
-
-	d->x = 0;
-	d->y = 0;
-	d->k = 0;
-
-	memset(&d->evtmgr, 0, sizeof(d->evtmgr));
-	d->evtmgr.error_handler = fz_opj_error_callback;
-	d->evtmgr.warning_handler = fz_opj_warning_callback;
-	d->evtmgr.info_handler = fz_opj_info_callback;
-
-	opj_set_default_decoder_parameters(&d->params);
-
-	d->info = opj_create_decompress(CODEC_JP2);
-	if (!d->info)
-		fz_warn("assert: opj_create_decompress failed");
-
-	opj_set_event_mgr((opj_common_ptr)d->info, &d->evtmgr, stderr);
-	opj_setup_decoder(d->info, &d->params);
-
-	return (fz_filter*)d;
-}
-
-void
-fz_dropjpxd(fz_filter *filter)
-{
-	fz_jpxd *d = (fz_jpxd*)filter;
-	if (d->image) opj_image_destroy(d->image);
-	if (d->info) opj_destroy_decompress(d->info);
+	/* fprintf(stderr, "openjpeg info: %s", msg); */
 }
 
 fz_error
-fz_processjpxd(fz_filter *filter, fz_buffer *in, fz_buffer *out)
+fz_loadjpximage(fz_pixmap **imgp, unsigned char *data, int size)
 {
-	fz_jpxd *d = (fz_jpxd*)filter;
-	int n, w, h, depth, sgnd;
-	int k, v;
-
+	fz_pixmap *img;
+	opj_event_mgr_t evtmgr;
+	opj_dparameters_t params;
+	opj_dinfo_t *info;
 	opj_cio_t *cio;
+	opj_image_t *jpx;
+	fz_colorspace *colorspace;
+	unsigned char *p;
+	int format;
+	int n, w, h, depth, sgnd;
+	int x, y, k, v;
 
-	switch (d->stage)
-	{
-	case 0: goto input;
-	case 1: goto decode;
-	case 2: goto output;
-	}
+	if (size < 2)
+		return fz_throw("not enough data to determine image format");
 
-input:
-	/* Wait until we have the entire file in the input buffer */
-	if (!in->eof)
-		return fz_ioneedin;
+	/* Check for SOC marker -- if found we have a bare J2K stream */
+	if (data[0] == 0xFF && data[1] == 0x4F)
+		format = CODEC_J2K;
+	else
+		format = CODEC_JP2;
 
-	d->stage = 1;
+	memset(&evtmgr, 0, sizeof(evtmgr));
+	evtmgr.error_handler = fz_opj_error_callback;
+	evtmgr.warning_handler = fz_opj_warning_callback;
+	evtmgr.info_handler = fz_opj_info_callback;
 
-decode:
-	cio = opj_cio_open((opj_common_ptr)d->info, in->rp, in->wp - in->rp);
-	in->rp = in->wp;
+	opj_set_default_decoder_parameters(&params);
 
-	d->image = opj_decode(d->info, cio);
-	if (!d->image)
-	{
-		opj_cio_close(cio);
-		return fz_throw("opj_decode failed");
-	}
+	info = opj_create_decompress(format);
+	opj_set_event_mgr((opj_common_ptr)info, &evtmgr, stderr);
+	opj_setup_decoder(info, &params);
+
+	cio = opj_cio_open((opj_common_ptr)info, data, size);
+
+	jpx = opj_decode(info, cio);
 
 	opj_cio_close(cio);
+	opj_destroy_decompress(info);
 
-	d->stage = 2;
+	if (!jpx)
+		return fz_throw("opj_decode failed");
 
-	for (k = 1; k < d->image->numcomps; k++)
+	for (k = 1; k < jpx->numcomps; k++)
 	{
-		if (d->image->comps[k].w != d->image->comps[0].w)
+		if (jpx->comps[k].w != jpx->comps[0].w)
 			return fz_throw("image components have different width");
-		if (d->image->comps[k].h != d->image->comps[0].h)
+		if (jpx->comps[k].h != jpx->comps[0].h)
 			return fz_throw("image components have different height");
-		if (d->image->comps[k].prec != d->image->comps[0].prec)
+		if (jpx->comps[k].prec != jpx->comps[0].prec)
 			return fz_throw("image components have different precision");
 	}
 
+	n = jpx->numcomps;
+	w = jpx->comps[0].w;
+	h = jpx->comps[0].h;
+	depth = jpx->comps[0].prec;
+	sgnd = jpx->comps[0].sgnd;
+
+	switch (n)
 	{
-		n = d->image->numcomps;
-		w = d->image->comps[0].w;
-		h = d->image->comps[0].h;
-		depth = d->image->comps[0].prec;
+	case 1: colorspace = fz_devicegray; break;
+	case 3: colorspace = fz_devicergb; break;
+	case 4: colorspace = fz_devicecmyk; break;
+	default:
+		/* TODO: SMaskInData */
+		opj_image_destroy(jpx);
+		return fz_throw("unknown jpx colorspace (%d components)", n);
 	}
 
-output:
-	n = d->image->numcomps;
-	w = d->image->comps[0].w;
-	h = d->image->comps[0].h;
-	depth = d->image->comps[0].prec;
-	sgnd = d->image->comps[0].sgnd;
+	img = fz_newpixmap(colorspace, 0, 0, w, h);
 
-	while (d->y < h)
+	p = img->samples;
+	for (y = 0; y < h; y++)
 	{
-		while (d->x < w)
+		for (x = 0; x < w; x++)
 		{
-			while (d->k < n)
+			for (k = 0; k < n; k++)
 			{
-				if (out->wp == out->ep)
-					return fz_ioneedout;
-
-				v = d->image->comps[d->k].data[d->y * w + d->x];
+				v = jpx->comps[k].data[y * w + x];
 				if (sgnd)
 					v = v + (1 << (depth - 1));
 				if (depth > 8)
 					v = v >> (depth - 8);
-
-				*out->wp++ = v;
-
-				d->k ++;
+				*p++ = v;
 			}
-			d->x ++;
-			d->k = 0;
+			*p++ = 255; /* TODO: SMaskInData */
 		}
-		d->y ++;
-		d->x = 0;
 	}
 
-	return fz_iodone;
-}
+	opj_image_destroy(jpx);
 
+	*imgp = img;
+	return fz_okay;
+}

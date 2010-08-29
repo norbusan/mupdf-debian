@@ -1,282 +1,145 @@
-/*
- * Input streams.
- */
-
 #include "fitz.h"
 
-fz_error
-fz_readimp(fz_stream *stm)
+int
+fz_read(fz_stream *stm, unsigned char *buf, int len)
 {
-	fz_buffer *buf = stm->buffer;
-	fz_error error;
-	fz_error reason;
-	int produced;
-	int n;
+	int avail, count;
+
+	avail = stm->wp - stm->rp;
+	if (avail)
+	{
+		count = MIN(len, avail);
+		memcpy(buf, stm->rp, count);
+		stm->rp += count;
+	}
+	else
+	{
+		count = 0;
+	}
 
 	if (stm->dead)
-		return fz_throw("assert: read from dead stream");
+		return count;
 
-	if (buf->eof)
-		return fz_okay;
-
-	fz_rewindbuffer(buf);
-	if (buf->ep - buf->wp == 0)
-		fz_growbuffer(buf);
-
-	switch (stm->kind)
+	while (len > count)
 	{
-
-	case FZ_SFILE:
-		n = read(stm->file, buf->wp, buf->ep - buf->wp);
-		if (n == -1)
+		int n = stm->read(stm, buf + count, len - count);
+		if (n < 0)
 		{
 			stm->dead = 1;
-			return fz_throw("syserr: read: %s", strerror(errno));
+			return fz_rethrow(n, "read error");
 		}
-
 		if (n == 0)
-			buf->eof = 1;
-		buf->wp += n;
-
-		return fz_okay;
-
-	case FZ_SFILTER:
-		produced = 0;
-
-		while (1)
-		{
-			reason = fz_process(stm->filter, stm->chain->buffer, buf);
-
-			if (stm->filter->produced)
-				produced = 1;
-
-			if (reason == fz_ioneedin)
-			{
-				error = fz_readimp(stm->chain);
-				if (error)
-				{
-					stm->dead = 1;
-					return fz_rethrow(error, "cannot read from input stream");
-				}
-			}
-
-			else if (reason == fz_ioneedout)
-			{
-				if (produced)
-					return 0;
-
-				if (buf->rp > buf->bp)
-					fz_rewindbuffer(buf);
-				else
-					fz_growbuffer(buf);
-			}
-
-			else if (reason == fz_iodone)
-			{
-				return fz_okay;
-			}
-
-			else
-			{
-				stm->dead = 1;
-				return fz_rethrow(reason, "cannot process filter");
-			}
-		}
-
-	case FZ_SBUFFER:
-		return fz_okay;
-
-	default:
-		return fz_throw("assert: unknown stream type");
+			break;
+		stm->pos += n;
+		count += n;
 	}
+
+	return count;
+}
+
+void
+fz_fillbuffer(fz_stream *stm)
+{
+	int n;
+
+	assert(stm->rp == stm->wp);
+
+	n = fz_read(stm, stm->bp, stm->ep - stm->bp);
+	if (n < 0)
+		fz_catch(n, "read error; treating as end of file");
+	else
+	{
+		stm->rp = stm->bp;
+		stm->wp = stm->bp + n;
+	}
+}
+
+fz_error
+fz_readall(fz_buffer **bufp, fz_stream *stm, int initial)
+{
+	fz_buffer *buf;
+	int n;
+
+	if (initial < 1024)
+		initial = 1024;
+
+	buf = fz_newbuffer(initial);
+
+	while (1)
+	{
+		if (buf->len == buf->cap)
+			fz_growbuffer(buf);
+
+		n = fz_read(stm, buf->data + buf->len, buf->cap - buf->len);
+		if (n < 0)
+		{
+			fz_dropbuffer(buf);
+			return fz_rethrow(n, "read error");
+		}
+		if (n == 0)
+			break;
+
+		buf->len += n;
+	}
+
+	*bufp = buf;
+	return fz_okay;
+}
+
+void
+fz_readline(fz_stream *stm, char *mem, int n)
+{
+	char *s = mem;
+	int c = EOF;
+	while (n > 1)
+	{
+		c = fz_readbyte(stm);
+		if (c == EOF)
+			break;
+		if (c == '\r') {
+			c = fz_peekbyte(stm);
+			if (c == '\n')
+				fz_readbyte(stm);
+			break;
+		}
+		if (c == '\n')
+			break;
+		*s++ = c;
+		n--;
+	}
+	if (n)
+		*s = '\0';
 }
 
 int
 fz_tell(fz_stream *stm)
 {
-	fz_buffer *buf = stm->buffer;
-	int t;
-
-	if (stm->dead)
-		return EOF;
-
-	switch (stm->kind)
-	{
-	case FZ_SFILE:
-		t = lseek(stm->file, 0, 1);
-		if (t < 0)
-		{
-			fz_warn("syserr: lseek: %s", strerror(errno));
-			stm->dead = 1;
-			return EOF;
-		}
-		return t - (buf->wp - buf->rp);
-
-	case FZ_SFILTER:
-		return stm->filter->count - (buf->wp - buf->rp);
-
-	case FZ_SBUFFER:
-		return buf->rp - buf->bp;
-
-	default:
-		return EOF;
-	}
+	return stm->pos - (stm->wp - stm->rp);
 }
 
-fz_error
+void
 fz_seek(fz_stream *stm, int offset, int whence)
 {
-	fz_error error;
-	fz_buffer *buf = stm->buffer;
-	int t, c;
-
-	if (stm->dead)
-		return fz_throw("assert: seek in dead stream");
-
-	if (whence == 1)
+	if (stm->seek)
 	{
-		int cur = fz_tell(stm);
-		if (cur < 0)
-			return fz_throw("cannot tell current position");
-		offset = cur + offset;
-		whence = 0;
-	}
-
-	buf->eof = 0;
-
-	switch (stm->kind)
-	{
-	case FZ_SFILE:
-		t = lseek(stm->file, offset, whence);
-		if (t < 0)
+		if (whence == 1)
 		{
-			stm->dead = 1;
-			return fz_throw("syserr: lseek: %s", strerror(errno));
+			offset = fz_tell(stm) + offset;
+			whence = 0;
 		}
 
-		buf->rp = buf->bp;
-		buf->wp = buf->bp;
-
-		return fz_okay;
-
-	case FZ_SFILTER:
+		stm->seek(stm, offset, whence);
+	}
+	else if (whence != 2)
+	{
 		if (whence == 0)
-		{
-			if (offset < fz_tell(stm))
-			{
-				stm->dead = 1;
-				return fz_throw("assert: seek backwards in filter");
-			}
-			while (fz_tell(stm) < offset)
-			{
-				c = fz_readbyte(stm);
-				if (c == EOF)
-				{
-					error = fz_readerror(stm);
-					if (error)
-						return fz_rethrow(error, "cannot seek forward in filter");
-					break;
-				}
-			}
-			return fz_okay;
-		}
-
-		stm->dead = 1;
-		return fz_throw("assert: relative seek in filter");
-
-	case FZ_SBUFFER:
-		if (whence == 0)
-			buf->rp = CLAMP(buf->bp + offset, buf->bp, buf->ep);
-		else
-			buf->rp = CLAMP(buf->ep + offset, buf->bp, buf->ep);
-		return fz_okay;
-
-	default:
-		return fz_throw("unknown stream type");
+			offset -= fz_tell(stm);
+		if (offset < 0)
+			fz_warn("cannot seek backwards");
+		/* dog slow, but rare enough */
+		while (offset-- > 0)
+			fz_readbyte(stm);
 	}
-}
-
-fz_error
-fz_read(int *np, fz_stream *stm, unsigned char *mem, int n)
-{
-	fz_error error;
-	fz_buffer *buf = stm->buffer;
-	int i = 0;
-
-	while (i < n)
-	{
-		while (buf->rp < buf->wp && i < n)
-			mem[i++] = *buf->rp++;
-
-		if (buf->rp == buf->wp)
-		{
-			if (buf->eof)
-			{
-				*np = i;
-				return fz_okay;
-			}
-
-			error = fz_readimp(stm);
-			if (error)
-				return fz_rethrow(error, "cannot produce data");
-		}
-	}
-
-	*np = i;
-	return fz_okay;
-}
-
-fz_error
-fz_readerror(fz_stream *stm)
-{
-	fz_error error;
-	if (stm->error)
-	{
-		error = stm->error;
-		stm->error = fz_okay;
-		return fz_rethrow(error, "delayed read error");
-	}
-	return fz_okay;
-}
-
-int
-fz_readbytex(fz_stream *stm)
-{
-	fz_buffer *buf = stm->buffer;
-
-	if (buf->rp == buf->wp)
-	{
-		if (!buf->eof && !stm->error)
-		{
-			fz_error error = fz_readimp(stm);
-			if (error)
-				stm->error = fz_rethrow(error, "cannot read data");
-		}
-	}
-
-	return buf->rp < buf->wp ? *buf->rp++ : EOF ;
-}
-
-int
-fz_peekbytex(fz_stream *stm)
-{
-	fz_buffer *buf = stm->buffer;
-
-	if (buf->rp == buf->wp)
-	{
-		if (!buf->eof && !stm->error)
-		{
-			fz_error error = fz_readimp(stm);
-			if (error)
-				stm->error = fz_rethrow(error, "cannot read data");
-		}
-	}
-
-	return buf->rp < buf->wp ? *buf->rp : EOF ;
-}
-
-void fz_unreadbytex(fz_stream *stm)
-{
-	fz_buffer *buf = stm->buffer;
-	buf->rp--;
+	else
+		fz_warn("cannot seek");
 }

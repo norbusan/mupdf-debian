@@ -53,12 +53,11 @@ enum
 enum { CNS, GB, Japan, Korea };
 enum { MINCHO, GOTHIC };
 
-static const struct
-{
+static const struct {
 	const char *name;
 	const unsigned char *cff;
 	const unsigned int *len;
-	} basefonts[] = {
+} basefonts[] = {
 	{ "Courier",
 		pdf_font_NimbusMonL_Regu_cff_buf,
 		&pdf_font_NimbusMonL_Regu_cff_len },
@@ -144,9 +143,10 @@ loadsystemcidfont(pdf_fontdesc *fontdesc, int ros, int kind)
 {
 #ifndef NOCJK
 	fz_error error;
-	/* We only have one builtin fallback font, we'd really like
-	 * to have one for each combination of ROS and Kind.
-	 */
+	/*
+	We only have one builtin fallback font.
+	We'd really like to have one for each combination of ROS and Kind.
+	*/
 	pdf_logfont("loading builtin CJK font\n");
 	error = fz_newfontfrombuffer(&fontdesc->font,
 		(unsigned char *)pdf_font_DroidSansFallback_ttf_buf,
@@ -277,18 +277,17 @@ pdf_loadembeddedfont(pdf_fontdesc *fontdesc, pdf_xref *xref, fz_obj *stmref)
 	if (error)
 		return fz_rethrow(error, "cannot load font stream (%d %d R)", fz_tonum(stmref), fz_togen(stmref));
 
-	error = fz_newfontfrombuffer(&fontdesc->font, buf->rp, buf->wp - buf->rp, 0);
+	error = fz_newfontfrombuffer(&fontdesc->font, buf->data, buf->len, 0);
 	if (error)
 	{
 		fz_dropbuffer(buf);
 		return fz_rethrow(error, "cannot load embedded font (%d %d R)", fz_tonum(stmref), fz_togen(stmref));
 	}
 
-	fontdesc->buffer = buf->rp; /* save the buffer so we can free it later */
+	fontdesc->buffer = buf->data; /* save the buffer so we can free it later */
 	fz_free(buf); /* only free the fz_buffer struct, not the contained data */
 
 	fontdesc->isembedded = 1;
 
 	return fz_okay;
 }
-
