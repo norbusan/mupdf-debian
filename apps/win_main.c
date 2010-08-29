@@ -2,8 +2,12 @@
 #include <mupdf.h>
 #include "pdfapp.h"
 
+#ifndef UNICODE
 #define UNICODE
+#endif
+#ifndef _UNICODE
 #define _UNICODE
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <commdlg.h>
@@ -26,8 +30,6 @@ static HCURSOR arrowcurs, handcurs, waitcurs;
 static LRESULT CALLBACK frameproc(HWND, UINT, WPARAM, LPARAM);
 static LRESULT CALLBACK viewproc(HWND, UINT, WPARAM, LPARAM);
 
-static int bmpstride = 0;
-static unsigned char *bmpdata = NULL;
 static int justcopied = 0;
 
 static pdfapp_t gapp;
@@ -46,8 +48,9 @@ void winwarn(pdfapp_t *app, char *msg)
 
 void winerror(pdfapp_t *app, fz_error error)
 {
+	/* TODO: redirect stderr to a log file and display here */
 	fz_catch(error, "displaying error message to user");
-	MessageBoxA(hwndframe, fz_errorbuf, "MuPDF: Error", MB_ICONERROR);
+	MessageBoxA(hwndframe, "An error has occurred.", "MuPDF: Error", MB_ICONERROR);
 	exit(1);
 }
 
@@ -56,12 +59,12 @@ void win32error(char *msg)
 	LPSTR buf;
 	int code = GetLastError();
 	FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |
-		FORMAT_MESSAGE_FROM_SYSTEM | 
+		FORMAT_MESSAGE_FROM_SYSTEM |
 		FORMAT_MESSAGE_IGNORE_INSERTS,
 		NULL,
 		code,
 		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-		&buf, 0, NULL);
+		(LPSTR)&buf, 0, NULL);
 	winerror(&gapp, fz_throw("%s:\n%s", msg, buf));
 }
 
@@ -222,7 +225,7 @@ dlogaboutproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 	switch(message)
 	{
 	case WM_INITDIALOG:
-		SetDlgItemTextA(hwnd, 2, "MuPDF is Copyright (C) 2006-2008 artofcode, LLC");
+		SetDlgItemTextA(hwnd, 2, "MuPDF is Copyright (C) 2006-2010 Artifex Software Inc.");
 		SetDlgItemTextA(hwnd, 3, pdfapp_usage(&gapp));
 		return TRUE;
 	case WM_COMMAND:
@@ -232,7 +235,7 @@ dlogaboutproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 	return FALSE;
 }
 
-void help()
+void winhelp(pdfapp_t*app)
 {
 	int code = DialogBoxW(NULL, L"IDD_DLOGABOUT", hwndframe, dlogaboutproc);
 	if (code <= 0)
@@ -301,7 +304,7 @@ void winopen()
 	assert(dibinf != NULL);
 	dibinf->bmiHeader.biSize = sizeof(dibinf->bmiHeader);
 	dibinf->bmiHeader.biPlanes = 1;
-	dibinf->bmiHeader.biBitCount = 24;
+	dibinf->bmiHeader.biBitCount = 32;
 	dibinf->bmiHeader.biCompression = BI_RGB;
 	dibinf->bmiHeader.biXPelsPerMeter = 2834;
 	dibinf->bmiHeader.biYPelsPerMeter = 2834;
@@ -344,6 +347,12 @@ void winopen()
 	SetCursor(arrowcurs);
 }
 
+void winclose(pdfapp_t *app)
+{
+	pdfapp_close(app);
+	exit(0);
+}
+
 void wincursor(pdfapp_t *app, int curs)
 {
 	if (curs == ARROW)
@@ -372,56 +381,21 @@ void wintitle(pdfapp_t *app, char *title)
 	SetWindowTextW(hwndframe, wide);
 }
 
-void winconvert(pdfapp_t *app, fz_pixmap *image)
+void windrawrect(pdfapp_t *app, int x0, int y0, int x1, int y1)
 {
-	int y, x;
-
-	if (bmpdata)
-		fz_free(bmpdata);
-
-	bmpstride = ((image->w * 3 + 3) / 4) * 4;
-	bmpdata = fz_malloc(image->h * bmpstride);
-
-	for (y = 0; y < image->h; y++)
-	{
-		unsigned char *p = bmpdata + y * bmpstride;
-		unsigned char *s = image->samples + y * image->w * 4;
-		for (x = 0; x < image->w; x++)
-		{
-			p[x * 3 + 0] = s[x * 4 + 3];
-			p[x * 3 + 1] = s[x * 4 + 2];
-			p[x * 3 + 2] = s[x * 4 + 1];
-		}
-	}
+	RECT r;
+	r.left = x0;
+	r.top = y0;
+	r.right = x1;
+	r.bottom = y1;
+	FillRect(hdc, &r, (HBRUSH)GetStockObject(WHITE_BRUSH));
 }
 
-void invertcopyrect(void)
+void windrawstring(pdfapp_t *app, int x, int y, char *s)
 {
-	unsigned char *p;
-	int x0 = gapp.selr.x0 - gapp.panx;
-	int x1 = gapp.selr.x1 - gapp.panx;
-	int y0 = gapp.selr.y0 - gapp.pany;
-	int y1 = gapp.selr.y1 - gapp.pany;
-	int x, y;
-
-	x0 = CLAMP(x0, 0, gapp.image->w - 1);
-	x1 = CLAMP(x1, 0, gapp.image->w - 1);
-	y0 = CLAMP(y0, 0, gapp.image->h - 1);
-	y1 = CLAMP(y1, 0, gapp.image->h - 1);
-
-	for (y = y0; y < y1; y++)
-	{
-		p = bmpdata + y * bmpstride + x0 * 3;
-		for (x = x0; x < x1; x++)
-		{
-			p[0] = 255 - p[0];
-			p[1] = 255 - p[1];
-			p[2] = 255 - p[2];
-			p += 3;
-		}
-	}
-
-	justcopied = 1;
+	HFONT font = (HFONT)GetStockObject(ANSI_FIXED_FONT);
+	SelectObject(hdc, font);
+	TextOutA(hdc, x, y - 12, s, strlen(s));
 }
 
 void winblit()
@@ -432,30 +406,53 @@ void winblit()
 	int y1 = gapp.pany + gapp.image->h;
 	RECT r;
 
-	if (bmpdata)
+	if (gapp.image)
 	{
 		if (gapp.iscopying || justcopied)
-			invertcopyrect();
+		{
+			pdfapp_invert(&gapp, gapp.selr);
+			justcopied = 1;
+		}
+
+		pdfapp_inverthit(&gapp);
 
 		dibinf->bmiHeader.biWidth = gapp.image->w;
 		dibinf->bmiHeader.biHeight = -gapp.image->h;
-		dibinf->bmiHeader.biSizeImage = gapp.image->h * bmpstride;
-		SetDIBitsToDevice(hdc,
-		gapp.panx, /* destx */
-		gapp.pany, /* desty */
-		gapp.image->w, /* destw */
-		gapp.image->h, /* desth */
-		0, /* srcx */
-		0, /* srcy */
-		0, /* startscan */
-		gapp.image->h, /* numscans */
-		bmpdata, /* pBits */
-		dibinf, /* pInfo */
-		DIB_RGB_COLORS /* color use flag */
-		);
+		dibinf->bmiHeader.biSizeImage = gapp.image->h * 4;
+
+		if (gapp.image->n == 2)
+		{
+			int i = gapp.image->w * gapp.image->h;
+			unsigned char *color = malloc(i*4);
+			unsigned char *s = gapp.image->samples;
+			unsigned char *d = color;
+			for (; i > 0 ; i--)
+			{
+				d[2] = d[1] = d[0] = *s++;
+				d[3] = *s++;
+				d += 4;
+			}
+			SetDIBitsToDevice(hdc,
+				gapp.panx, gapp.pany, gapp.image->w, gapp.image->h,
+				0, 0, 0, gapp.image->h, color,
+				dibinf, DIB_RGB_COLORS);
+			free(color);
+		}
+		if (gapp.image->n == 4)
+		{
+			SetDIBitsToDevice(hdc,
+				gapp.panx, gapp.pany, gapp.image->w, gapp.image->h,
+				0, 0, 0, gapp.image->h, gapp.image->samples,
+				dibinf, DIB_RGB_COLORS);
+		}
+
+		pdfapp_inverthit(&gapp);
 
 		if (gapp.iscopying || justcopied)
-			invertcopyrect();
+		{
+			pdfapp_invert(&gapp, gapp.selr);
+			justcopied = 1;
+		}
 	}
 
 	/* Grey background */
@@ -481,6 +478,14 @@ void winblit()
 	r.top = y0 + 2;
 	r.bottom = y1;
 	FillRect(hdc, &r, shbrush);
+
+	if (gapp.isediting)
+	{
+		char buf[sizeof(gapp.search) + 50];
+		sprintf(buf, "Search: %s", gapp.search);
+		windrawrect(&gapp, 0, 0, gapp.winw, 30);
+		windrawstring(&gapp, 10, 20, buf);
+	}
 }
 
 void winresize(pdfapp_t *app, int w, int h)
@@ -529,20 +534,20 @@ void windocopy(pdfapp_t *app)
 
 void winreloadfile(pdfapp_t *app)
 {
-       int fd;
+	int fd;
 
-       pdfapp_close(app);
+	pdfapp_close(app);
 
-       fd = _wopen(wbuf, O_BINARY | O_RDONLY, 0666);
-       if (fd < 0)
-               winerror(&gapp, fz_throw("cannot reload file '%s'", filename));
+	fd = _wopen(wbuf, O_BINARY | O_RDONLY, 0666);
+	if (fd < 0)
+		winerror(&gapp, fz_throw("cannot reload file '%s'", filename));
 
-       pdfapp_open(app, filename, fd);
+	pdfapp_open(app, filename, fd);
 }
 
 void winopenuri(pdfapp_t *app, char *buf)
 {
-	ShellExecute(hwndframe, "open", buf, 0, 0, SW_SHOWNORMAL);
+	ShellExecuteA(hwndframe, "open", buf, 0, 0, SW_SHOWNORMAL);
 }
 
 void handlekey(int c)
@@ -557,24 +562,23 @@ void handlekey(int c)
 	}
 
 	/* translate VK into ascii equivalents */
-	switch (c)
+	if (c > 256)
 	{
-	case VK_F1: c = '?'; break;
-	case VK_ESCAPE: c = 'q'; break;
-	case VK_DOWN: c = 'd'; break;
-	case VK_UP: c = 'u'; break;
-	case VK_LEFT: c = 'p'; break;
-	case VK_RIGHT: c = 'n'; break;
-	case VK_PRIOR: c = 'b'; break;
-	case VK_NEXT: c = ' '; break;
+		switch (c - 256)
+		{
+		case VK_F1: c = '?'; break;
+		case VK_ESCAPE: c = '\033'; break;
+		case VK_DOWN: c = 'j'; break;
+		case VK_UP: c = 'k'; break;
+		case VK_LEFT: c = 'b'; break;
+		case VK_RIGHT: c = ' '; break;
+		case VK_PRIOR: c = ','; break;
+		case VK_NEXT: c = '.'; break;
+		}
 	}
 
-	if (c == 'q')
-		exit(0);
-	else if (c == '?' || c == 'h')
-		help();
-	else
-		pdfapp_onkey(&gapp, c);
+	pdfapp_onkey(&gapp, c);
+	winrepaint(&gapp);
 }
 
 void handlemouse(int x, int y, int btn, int state)
@@ -612,7 +616,7 @@ frameproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_SYSCOMMAND:
 		if (wParam == ID_ABOUT)
 		{
-			help();
+			winhelp(&gapp);
 			return 0;
 		}
 		if (wParam == ID_DOCINFO)
@@ -623,15 +627,15 @@ frameproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 		break;
 
 	case WM_SIZE:
-		{
-			// More generally, you should use GetEffectiveClientRect
-			// if you have a toolbar etc.
-				RECT rect;
-			GetClientRect(hwnd, &rect);
-			MoveWindow(hwndview, rect.left, rect.top,
-			rect.right-rect.left, rect.bottom-rect.top, TRUE);
-		}
+	{
+		// More generally, you should use GetEffectiveClientRect
+		// if you have a toolbar etc.
+		RECT rect;
+		GetClientRect(hwnd, &rect);
+		MoveWindow(hwndview, rect.left, rect.top,
+		rect.right-rect.left, rect.bottom-rect.top, TRUE);
 		return 0;
+	}
 
 	case WM_SIZING:
 		gapp.shrinkwrap = 0;
@@ -667,15 +671,15 @@ viewproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 	 * so we don't need to do any fancy waiting to defer repainting.
 	 */
 	case WM_PAINT:
-		{
-			//puts("WM_PAINT");
-			PAINTSTRUCT ps;
-			hdc = BeginPaint(hwnd, &ps);
-			winblit();
-			hdc = NULL;
-			EndPaint(hwnd, &ps);
-			return 0;
-		}
+	{
+		//puts("WM_PAINT");
+		PAINTSTRUCT ps;
+		hdc = BeginPaint(hwnd, &ps);
+		winblit();
+		hdc = NULL;
+		EndPaint(hwnd, &ps);
+		return 0;
+	}
 
 	case WM_ERASEBKGND:
 		return 1; // well, we don't need to erase to redraw cleanly
@@ -720,9 +724,9 @@ viewproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 	case WM_MOUSEWHEEL:
 		if ((signed short)HIWORD(wParam) > 0)
-			handlekey(LOWORD(wParam) & MK_SHIFT ? '+' : 'u');
+			handlekey(LOWORD(wParam) & MK_SHIFT ? '+' : 'k');
 		else
-			handlekey(LOWORD(wParam) & MK_SHIFT ? '-' : 'd');
+			handlekey(LOWORD(wParam) & MK_SHIFT ? '-' : 'j');
 		return 0;
 
 	/* Keyboard events */
@@ -739,7 +743,7 @@ viewproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 		case VK_DOWN:
 		case VK_NEXT:
 		case VK_ESCAPE:
-			handlekey(wParam);
+			handlekey(wParam + 256);
 			handlemouse(oldx, oldy, 0, 0);	/* update cursor */
 			return 0;
 		}
@@ -747,8 +751,11 @@ viewproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 	/* unicode encoded chars, including escape, backspace etc... */
 	case WM_CHAR:
-		handlekey(wParam);
-		handlemouse(oldx, oldy, 0, 0);	/* update cursor */
+		if (wParam < 256)
+		{
+			handlekey(wParam);
+			handlemouse(oldx, oldy, 0, 0);	/* update cursor */
+		}
 		return 0;
 	}
 
@@ -762,14 +769,11 @@ int WINAPI
 WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
 {
 	int argc;
-	LPWSTR *argv;
+	LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
 	MSG msg;
 	int fd;
 	int code;
 
-	argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-
-	fz_cpudetect();
 	fz_accelerate();
 
 	pdfapp_init(&gapp);

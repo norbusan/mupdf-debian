@@ -1,109 +1,28 @@
 #include "fitz.h"
 
-typedef unsigned char byte;
+/* Unpack image samples and optionally pad pixels with opaque alpha */
 
-/*
- * Apply decode parameters
- */
+#define get1(buf,x) ((buf[x >> 3] >> ( 7 - (x & 7) ) ) & 1 )
+#define get2(buf,x) ((buf[x >> 2] >> ( ( 3 - (x & 3) ) << 1 ) ) & 3 )
+#define get4(buf,x) ((buf[x >> 1] >> ( ( 1 - (x & 1) ) << 2 ) ) & 15 )
+#define get8(buf,x) (buf[x])
+#define get16(buf,x) (buf[x << 1])
 
-static void decodetile(fz_pixmap *pix, int skip, float *decode)
+static unsigned char get1tab1[256][8];
+static unsigned char get1tab1p[256][16];
+static unsigned char get1tab255[256][8];
+static unsigned char get1tab255p[256][16];
+
+static void
+initget1tables(void)
 {
-	int min[FZ_MAXCOLORS];
-	int max[FZ_MAXCOLORS];
-	int sub[FZ_MAXCOLORS];
-	int needed = 0;
-	int n = pix->n;
-	byte *p = pix->samples;
-	int wh = pix->w * pix->h;
-	int i;
-	int justinvert = 1;
-
-	min[0] = 0;
-	max[0] = 255;
-	sub[0] = 255;
-
-	for (i = skip; i < n; i++)
-	{
-		min[i] = decode[(i - skip) * 2] * 255;
-		max[i] = decode[(i - skip) * 2 + 1] * 255;
-		sub[i] = max[i] - min[i];
-		needed |= (min[i] != 0) |  (max[i] != 255);
-		justinvert &= min[i] == 255 && max[i] == 0 && sub[i] == -255;
-	}
-
-	if (!needed)
-		return;
-
-	switch (n) {
-	case 1:
-		while (wh--)
-		{
-			p[0] = min[0] + fz_mul255(sub[0], p[0]);
-			p ++;
-		}
-		break;
-	case 2:
-		if (justinvert) {
-			unsigned *wp = (unsigned *)p;
-
-			if ((((char *)wp - (char *)0) & 3) == 0) {
-				int hwh = wh / 2;
-				wh = wh - 2 * hwh;
-				while(hwh--) {
-					unsigned in = *wp;
-#if BYTE_ORDER == LITTLE_ENDIAN
-					unsigned out = in ^ 0xff00ff00;
-#else
-					unsigned out = in ^ 0x00ff00ff;
-#endif
-					*wp++ = out;
-				}
-				p = (byte *)wp;
-			}
-			if (wh--) {
-				p[0] = p[0];
-				p[1] = 255 - p[1];
-				p += 2;
-			}
-		}
-		else
-			while (wh--)
-		{
-			p[0] = min[0] + fz_mul255(sub[0], p[0]);
-			p[1] = min[1] + fz_mul255(sub[1], p[1]);
-			p += 2;
-		}
-		break;
-	default:
-		while (wh--)
-		{
-			for (i = 0; i < n; i++)
-				p[i] = min[i] + fz_mul255(sub[i], p[i]);
-			p += n;
-		}
-	}
-}
-
-/*
- * Unpack image samples and optionally pad pixels with opaque alpha
- */
-
-#define tbit(buf,x) ((buf[x >> 3] >> ( 7 - (x & 7) ) ) & 1 ) * 255
-#define ttwo(buf,x) ((buf[x >> 2] >> ( ( 3 - (x & 3) ) << 1 ) ) & 3 ) * 85
-#define tnib(buf,x) ((buf[x >> 1] >> ( ( 1 - (x & 1) ) << 2 ) ) & 15 ) * 17
-#define toct(buf,x) (buf[x])
-#define thex(buf,x) (buf[x << 1])
-
-static byte t1pad0[256][8];
-static byte t1pad1[256][16];
-
-static void init1(void)
-{
-	static int inited = 0;
-	byte bits[1];
+	static int once = 0;
+	unsigned char bits[1];
 	int i, k, x;
 
-	if (inited)
+	/* TODO: mutex lock here */
+
+	if (once)
 		return;
 
 	for (i = 0; i < 256; i++)
@@ -111,125 +30,196 @@ static void init1(void)
 		bits[0] = i;
 		for (k = 0; k < 8; k++)
 		{
-			x = tbit(bits, k);
-			t1pad0[i][k] = x;
-			t1pad1[i][k * 2 + 0] = 255;
-			t1pad1[i][k * 2 + 1] = x;
+			x = get1(bits, k);
+
+			get1tab1[i][k] = x;
+			get1tab1p[i][k * 2] = x;
+			get1tab1p[i][k * 2 + 1] = 255;
+
+			get1tab255[i][k] = x * 255;
+			get1tab255p[i][k * 2] = x * 255;
+			get1tab255p[i][k * 2 + 1] = 255;
 		}
 	}
 
-	inited = 1;
+	once = 1;
 }
 
-static void loadtile1(byte * restrict src, int sw, byte * restrict dst, int dw, int w, int h, int pad)
+void
+fz_unpacktile(fz_pixmap *dst, unsigned char * restrict src, int n, int depth, int stride, int scale)
 {
-	byte *sp;
-	byte *dp;
-	int x;
+	int pad, x, y, k;
+	int w = dst->w;
 
-	init1();
+	pad = 0;
+	if (dst->n > n)
+		pad = 255;
 
-	if (pad == 0)
+	if (depth == 1)
+		initget1tables();
+
+	for (y = 0; y < dst->h; y++)
 	{
-		int w3 = w >> 3;
-		while (h--)
+		unsigned char *sp = src + y * stride;
+		unsigned char *dp = dst->samples + y * (dst->w * dst->n);
+
+		/* Specialized loops */
+
+		if (n == 1 && depth == 1 && scale == 1 && !pad)
 		{
-			sp = src;
-			dp = dst;
+			int w3 = w >> 3;
 			for (x = 0; x < w3; x++)
 			{
-				memcpy(dp, t1pad0[*sp++], 8);
+				memcpy(dp, get1tab1[*sp++], 8);
 				dp += 8;
 			}
 			x = x << 3;
 			if (x < w)
-				memcpy(dp, t1pad0[*sp], w - x);
-			src += sw;
-			dst += dw;
+				memcpy(dp, get1tab1[*sp], w - x);
 		}
-	}
 
-	else if (pad == 1)
-	{
-		int w3 = w >> 3;
-		while (h--)
+		else if (n == 1 && depth == 1 && scale == 255 && !pad)
 		{
-			sp = src;
-			dp = dst;
+			int w3 = w >> 3;
 			for (x = 0; x < w3; x++)
 			{
-				memcpy(dp, t1pad1[*sp++], 16);
+				memcpy(dp, get1tab255[*sp++], 8);
+				dp += 8;
+			}
+			x = x << 3;
+			if (x < w)
+				memcpy(dp, get1tab255[*sp], w - x);
+		}
+
+		else if (n == 1 && depth == 1 && scale == 1 && pad)
+		{
+			int w3 = w >> 3;
+			for (x = 0; x < w3; x++)
+			{
+				memcpy(dp, get1tab1p[*sp++], 16);
 				dp += 16;
 			}
 			x = x << 3;
 			if (x < w)
-				memcpy(dp, t1pad1[*sp], (w - x) << 1);
-			src += sw;
-			dst += dw;
+				memcpy(dp, get1tab1p[*sp], (w - x) << 1);
 		}
-	}
 
-	else
-	{
-		while (h--)
+		else if (n == 1 && depth == 1 && scale == 255 && pad)
 		{
-			dp = dst;
+			int w3 = w >> 3;
+			for (x = 0; x < w3; x++)
+			{
+				memcpy(dp, get1tab255p[*sp++], 16);
+				dp += 16;
+			}
+			x = x << 3;
+			if (x < w)
+				memcpy(dp, get1tab255p[*sp], (w - x) << 1);
+		}
+
+		else if (depth == 8 && !pad)
+		{
+			int len = w * n;
+			while (len--)
+				*dp++ = *sp++;
+		}
+
+		else if (depth == 8 && pad)
+		{
 			for (x = 0; x < w; x++)
 			{
-				if ((x % pad) == 0)
-					*dp++ = 255;
-				*dp++ = tbit(src, x);
+				for (k = 0; k < n; k++)
+					*dp++ = *sp++;
+				*dp++ = 255;
 			}
-			src += sw;
-			dst += dw;
+		}
+
+		else
+		{
+			int b = 0;
+			for (x = 0; x < w; x++)
+			{
+				for (k = 0; k < n; k++)
+				{
+					switch (depth)
+					{
+					case 1: *dp++ = get1(sp, b) * scale; break;
+					case 2: *dp++ = get2(sp, b) * scale; break;
+					case 4: *dp++ = get4(sp, b) * scale; break;
+					case 8: *dp++ = get8(sp, b); break;
+					case 16: *dp++ = get16(sp, b); break;
+					}
+					b++;
+				}
+				if (pad)
+					*dp++ = 255;
+			}
 		}
 	}
 }
 
-#define TILE(getf) \
-{ \
-	int x; \
-	if (!pad) \
-		while (h--) \
-		{ \
-			for (x = 0; x < w; x++) \
-				dst[x] = getf(src, x); \
-			src += sw; \
-			dst += dw; \
-		} \
-	else { \
-		int tpad; \
-		while (h--) \
-		{ \
-			byte *dp = dst; \
-			tpad = 0; \
-			for (x = 0; x < w; x++) \
-			{ \
-				if (!tpad--) { \
-					tpad = pad-1; \
-					*dp++ = 255; \
-				} \
-				*dp++ = getf(src, x); \
-			} \
-			src += sw; \
-			dst += dw; \
-		} \
-	} \
+/* Apply decode array */
+
+void
+fz_decodeindexedtile(fz_pixmap *pix, float *decode, int maxval)
+{
+	int add[FZ_MAXCOLORS];
+	int mul[FZ_MAXCOLORS];
+	unsigned char *p = pix->samples;
+	int len = pix->w * pix->h;
+	int n = pix->n - 1;
+	int needed;
+	int k;
+
+	needed = 0;
+	for (k = 0; k < n; k++)
+	{
+		int min = decode[k * 2] * 256;
+		int max = decode[k * 2 + 1] * 256;
+		add[k] = min;
+		mul[k] = (max - min) / maxval;
+		needed |= min != 0 || max != maxval * 256;
+	}
+
+	if (!needed)
+		return;
+
+	while (len--)
+	{
+		for (k = 0; k < n; k++)
+			p[k] = (add[k] + (((p[k] << 8) * mul[k]) >> 8)) >> 8;
+		p += n + 1;
+	}
 }
 
-static void loadtile2(byte * restrict src, int sw, byte * restrict dst, int dw, int w, int h, int pad)
-TILE(ttwo)
-static void loadtile4(byte * restrict src, int sw, byte * restrict dst, int dw, int w, int h, int pad)
-TILE(tnib)
-static void loadtile8(byte * restrict src, int sw, byte * restrict dst, int dw, int w, int h, int pad)
-TILE(toct)
-static void loadtile16(byte * restrict src, int sw, byte * restrict dst, int dw, int w, int h, int pad)
-TILE(thex)
+void
+fz_decodetile(fz_pixmap *pix, float *decode)
+{
+	int add[FZ_MAXCOLORS];
+	int mul[FZ_MAXCOLORS];
+	unsigned char *p = pix->samples;
+	int len = pix->w * pix->h;
+	int n = MAX(1, pix->n - 1);
+	int needed;
+	int k;
 
-void (*fz_decodetile)(fz_pixmap *pix, int skip, float *decode) = decodetile;
-void (*fz_loadtile1)(byte*, int sw, byte*, int dw, int w, int h, int pad) = loadtile1;
-void (*fz_loadtile2)(byte*, int sw, byte*, int dw, int w, int h, int pad) = loadtile2;
-void (*fz_loadtile4)(byte*, int sw, byte*, int dw, int w, int h, int pad) = loadtile4;
-void (*fz_loadtile8)(byte*, int sw, byte*, int dw, int w, int h, int pad) = loadtile8;
-void (*fz_loadtile16)(byte*, int sw, byte*, int dw, int w, int h, int pad) = loadtile16;
+	needed = 0;
+	for (k = 0; k < n; k++)
+	{
+		int min = decode[k * 2] * 255;
+		int max = decode[k * 2 + 1] * 255;
+		add[k] = min;
+		mul[k] = max - min;
+		needed |= min != 0 || max != 255;
+	}
 
+	if (!needed)
+		return;
+
+	while (len--)
+	{
+		for (k = 0; k < n; k++)
+			p[k] = add[k] + fz_mul255(p[k], mul[k]);
+		p += pix->n;
+	}
+}

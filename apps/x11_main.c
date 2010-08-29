@@ -180,6 +180,11 @@ static void winopen(void)
 	x11fd = ConnectionNumber(xdpy);
 }
 
+void winclose(pdfapp_t *app)
+{
+	closing = 1;
+}
+
 void wincursor(pdfapp_t *app, int curs)
 {
 	if (curs == ARROW)
@@ -200,9 +205,9 @@ void wintitle(pdfapp_t *app, char *s)
 #endif
 }
 
-void winconvert(pdfapp_t *app, fz_pixmap *image)
+void winhelp(pdfapp_t *app)
 {
-	/* never mind */
+	fprintf(stderr, "%s", pdfapp_usage(app));
 }
 
 void winresize(pdfapp_t *app, int w, int h)
@@ -247,34 +252,6 @@ static void fillrect(int x, int y, int w, int h)
 		XFillRectangle(xdpy, xwin, xgc, x, y, w, h);
 }
 
-static void invertcopyrect()
-{
-	unsigned *p;
-	int x, y;
-
-	int x0 = gapp.selr.x0 - gapp.panx;
-	int x1 = gapp.selr.x1 - gapp.panx;
-	int y0 = gapp.selr.y0 - gapp.pany;
-	int y1 = gapp.selr.y1 - gapp.pany;
-
-	x0 = CLAMP(x0, 0, gapp.image->w - 1);
-	x1 = CLAMP(x1, 0, gapp.image->w - 1);
-	y0 = CLAMP(y0, 0, gapp.image->h - 1);
-	y1 = CLAMP(y1, 0, gapp.image->h - 1);
-
-	for (y = y0; y < y1; y++)
-	{
-		p = (unsigned *)(gapp.image->samples + (y * gapp.image->w + x0) * 4);
-		for (x = x0; x < x1; x++)
-		{
-			*p = ~0 - *p;
-			p ++;
-		}
-	}
-
-	justcopied = 1;
-}
-
 static void winblit(pdfapp_t *app)
 {
 	int x0 = gapp.panx;
@@ -293,18 +270,62 @@ static void winblit(pdfapp_t *app)
 	fillrect(x1, y0+2, 2, gapp.image->h);
 
 	if (gapp.iscopying || justcopied)
-		invertcopyrect();
+	{
+		pdfapp_invert(&gapp, gapp.selr);
+		justcopied = 1;
+	}
 
-	ximage_blit(xwin, xgc,
-		x0, y0,
-		gapp.image->samples,
-		0, 0,
-		gapp.image->w,
-		gapp.image->h,
-		gapp.image->w * gapp.image->n);
+	pdfapp_inverthit(&gapp);
+
+	if (gapp.image->n == 4)
+		ximage_blit(xwin, xgc,
+			x0, y0,
+			gapp.image->samples,
+			0, 0,
+			gapp.image->w,
+			gapp.image->h,
+			gapp.image->w * gapp.image->n);
+	else if (gapp.image->n == 2)
+	{
+		int i = gapp.image->w*gapp.image->h;
+		unsigned char *color = malloc(i*4);
+		if (color != NULL)
+		{
+			unsigned char *s = gapp.image->samples;
+			unsigned char *d = color;
+			for (; i > 0 ; i--)
+			{
+				d[2] = d[1] = d[0] = *s++;
+				d[3] = *s++;
+				d += 4;
+			}
+			ximage_blit(xwin, xgc,
+				x0, y0,
+				color,
+				0, 0,
+				gapp.image->w,
+				gapp.image->h,
+				gapp.image->w * 4);
+			free(color);
+		}
+	}
+
+	pdfapp_inverthit(&gapp);
 
 	if (gapp.iscopying || justcopied)
-		invertcopyrect();
+	{
+		pdfapp_invert(&gapp, gapp.selr);
+		justcopied = 1;
+	}
+
+	if (gapp.isediting)
+	{
+		char buf[sizeof(gapp.search) + 50];
+		sprintf(buf, "Search: %s", gapp.search);
+		XSetForeground(xdpy, xgc, WhitePixel(xdpy, xscr));
+		fillrect(0, 0, gapp.winw, 30);
+		windrawstring(&gapp, 10, 20, buf);
+	}
 }
 
 void winrepaint(pdfapp_t *app)
@@ -312,7 +333,7 @@ void winrepaint(pdfapp_t *app)
 	dirty = 1;
 }
 
-static void windrawstring(pdfapp_t *app, char *s, int x, int y)
+void windrawstringxor(pdfapp_t *app, int x, int y, char *s)
 {
 	int prevfunction;
 	XGCValues xgcv;
@@ -330,18 +351,14 @@ static void windrawstring(pdfapp_t *app, char *s, int x, int y)
 	XGetGCValues(xdpy, xgc, GCFunction, &xgcv);
 	xgcv.function = prevfunction;
 	XChangeGC(xdpy, xgc, GCFunction, &xgcv);
+
+	printf("drawstring '%s'\n", s);
 }
 
-static void windrawpageno(pdfapp_t *app)
+void windrawstring(pdfapp_t *app, int x, int y, char *s)
 {
-	char s[100];
-
-	int ret = snprintf(s, 100, "Page %d/%d", gapp.pageno, gapp.pagecount);
-	if (ret >= 0)
-	{
-		isshowingpage = 1;
-		windrawstring(&gapp, s, 10, 20);
-	}
+	XSetForeground(xdpy, xgc, BlackPixel(xdpy, DefaultScreen(xdpy)));
+	XDrawString(xdpy, xwin, xgc, x, y, s, strlen(s));
 }
 
 void windocopy(pdfapp_t *app)
@@ -369,8 +386,6 @@ void windocopy(pdfapp_t *app)
 	*utf8 = 0;
 	*latin1 = 0;
 
-	printf("oncopy utf8=%zd latin1=%zd\n", strlen(copyutf8), strlen(copylatin1));
-
 	XSetSelectionOwner(xdpy, XA_PRIMARY, xwin, copytime);
 
 	justcopied = 1;
@@ -379,8 +394,6 @@ void windocopy(pdfapp_t *app)
 void onselreq(Window requestor, Atom selection, Atom target, Atom property, Time time)
 {
 	XEvent nevt;
-
-	printf("onselreq\n");
 
 	if (property == None)
 		property = target;
@@ -409,7 +422,6 @@ void onselreq(Window requestor, Atom selection, Atom target, Atom property, Time
 
 	else if (target == XA_STRING)
 	{
-		printf(" -> string %zd\n", strlen(copylatin1));
 		XChangeProperty(xdpy, requestor, property, target,
 			8, PropModeReplace,
 			(unsigned char *)copylatin1, strlen(copylatin1));
@@ -417,7 +429,6 @@ void onselreq(Window requestor, Atom selection, Atom target, Atom property, Time
 
 	else if (target == XA_UTF8_STRING)
 	{
-		printf(" -> utf8string\n");
 		XChangeProperty(xdpy, requestor, property, target,
 			8, PropModeReplace,
 			(unsigned char *)copyutf8, strlen(copyutf8));
@@ -425,7 +436,6 @@ void onselreq(Window requestor, Atom selection, Atom target, Atom property, Time
 
 	else
 	{
-		printf(" -> unknown\n");
 		nevt.xselection.property = None;
 	}
 
@@ -440,7 +450,7 @@ void winreloadfile(pdfapp_t *app)
 
 	fd = open(filename, O_BINARY | O_RDONLY, 0666);
 	if (fd < 0)
-	        winerror(app, fz_throw("cannot reload file '%s'", filename));
+		winerror(app, fz_throw("cannot reload file '%s'", filename));
 
 	pdfapp_open(app, filename, fd);
 }
@@ -462,12 +472,7 @@ static void onkey(int c)
 		winrepaint(&gapp);
 	}
 
-	if (c == 'P')
-		windrawpageno(&gapp);
-	else if (c == 'q')
-		closing = 1;
-	else
-		pdfapp_onkey(&gapp, c);
+	pdfapp_onkey(&gapp, c);
 }
 
 static void onmouse(int x, int y, int btn, int modifiers, int state)
@@ -483,7 +488,11 @@ static void onmouse(int x, int y, int btn, int modifiers, int state)
 
 static void usage(void)
 {
-	fprintf(stderr, "usage: mupdf [-p password] [-r resolution] file.pdf [page]\n");
+	fprintf(stderr, "usage: mupdf [options] file.pdf [page]\n");
+	fprintf(stderr, "\t-p -\tpassword\n");
+	fprintf(stderr, "\t-r -\tresolution\n");
+	fprintf(stderr, "\t-A\tdisable accelerated functions\n");
+	fprintf(stderr, "usage: mupdf [options] file.pdf [page]\n");
 	exit(1);
 }
 
@@ -541,14 +550,16 @@ int main(int argc, char **argv)
 	int pageno = 1;
 	int wasshowingpage;
 	struct timeval tmo, tmo_at;
+	int accelerate = 1;
 	int fd;
 
-	while ((c = fz_getopt(argc, argv, "p:r:")) != -1)
+	while ((c = fz_getopt(argc, argv, "p:r:A")) != -1)
 	{
 		switch (c)
 		{
 		case 'p': password = fz_optarg; break;
 		case 'r': resolution = atoi(fz_optarg); break;
+		case 'A': accelerate = 0; break;
 		default: usage();
 		}
 	}
@@ -566,8 +577,8 @@ int main(int argc, char **argv)
 	if (argc - fz_optind == 1)
 		pageno = atoi(argv[fz_optind++]);
 
-	fz_cpudetect();
-	fz_accelerate();
+	if (accelerate)
+		fz_accelerate();
 
 	winopen();
 
@@ -628,28 +639,28 @@ int main(int argc, char **argv)
 				switch (keysym)
 				{
 				case XK_Escape:
-					len = 1; buf[0] = 'q';
+					len = 1; buf[0] = '\033';
 					break;
 
 				case XK_Up:
-					len = 1; buf[0] = 'u';
+					len = 1; buf[0] = 'k';
 					break;
 				case XK_Down:
-					len = 1; buf[0] = 'd';
+					len = 1; buf[0] = 'j';
 					break;
 
 				case XK_Left:
-					len = 1; buf[0] = 'p';
+					len = 1; buf[0] = 'b';
 					break;
 				case XK_Right:
-					len = 1; buf[0] = 'n';
+					len = 1; buf[0] = ' ';
 					break;
 
 				case XK_Page_Up:
-					len = 1; buf[0] = 'b';
+					len = 1; buf[0] = ',';
 					break;
 				case XK_Page_Down:
-					len = 1; buf[0] = ' ';
+					len = 1; buf[0] = '.';
 					break;
 				}
 				if (len)
@@ -666,6 +677,15 @@ int main(int argc, char **argv)
 						isshowingpage = 0;
 						winresettmo(&tmo, &tmo_at);
 					}
+				}
+
+				if (gapp.isediting)
+				{
+					char str[sizeof(gapp.search) + 50];
+					sprintf(str, "Search: %s", gapp.search);
+					XSetForeground(xdpy, xgc, WhitePixel(xdpy, xscr));
+					fillrect(0, 0, gapp.winw, 30);
+					windrawstring(&gapp, 10, 20, str);
 				}
 
 				if (!wasshowingpage && isshowingpage)

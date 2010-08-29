@@ -47,9 +47,7 @@ pdf_loadtype3font(pdf_fontdesc **fontdescp, pdf_xref *xref, fz_obj *rdb, fz_obj 
 
 	fz_setfontbbox(fontdesc->font, bbox.x0, bbox.y0, bbox.x1, bbox.y1);
 
-	/*
-	 * Encoding
-	 */
+	/* Encoding */
 
 	for (i = 0; i < 256; i++)
 		estrings[i] = nil;
@@ -96,9 +94,7 @@ pdf_loadtype3font(pdf_fontdesc **fontdescp, pdf_xref *xref, fz_obj *rdb, fz_obj 
 	if (error)
 		goto cleanup;
 
-	/*
-	 * Widths
-	 */
+	/* Widths */
 
 	pdf_setdefaulthmtx(fontdesc, 0);
 
@@ -115,16 +111,14 @@ pdf_loadtype3font(pdf_fontdesc **fontdescp, pdf_xref *xref, fz_obj *rdb, fz_obj 
 	for (i = first; i <= last; i++)
 	{
 		float w = fz_toreal(fz_arrayget(widths, i - first));
-		w = fontdesc->font->t3matrix.a * w * 1000.0;
-		fontdesc->font->t3widths[i] = w * 0.001;
+		w = fontdesc->font->t3matrix.a * w * 1000;
+		fontdesc->font->t3widths[i] = w * 0.001f;
 		pdf_addhmtx(fontdesc, i, i, w);
 	}
 
 	pdf_endhmtx(fontdesc);
 
-	/*
-	 * Resources -- inherit page resources if the font doesn't have its own
-	 */
+	/* Resources -- inherit page resources if the font doesn't have its own */
 
 	fontdesc->font->t3resources = fz_dictgets(dict, "Resources");
 	if (!fontdesc->font->t3resources)
@@ -135,11 +129,9 @@ pdf_loadtype3font(pdf_fontdesc **fontdescp, pdf_xref *xref, fz_obj *rdb, fz_obj 
 		fz_warn("no resource dictionary for type 3 font!");
 
 	fontdesc->font->t3xref = xref;
-	fontdesc->font->t3runcontentstream = pdf_runcontentstream;
+	fontdesc->font->t3run = pdf_runcontents;
 
-	/*
-	 * CharProcs
-	 */
+	/* CharProcs */
 
 	charprocs = fz_dictgets(dict, "CharProcs");
 	if (!charprocs)
@@ -172,4 +164,3 @@ cleanup:
 	fz_free(fontdesc);
 	return fz_rethrow(error, "cannot load type3 font (%d %d R)", fz_tonum(dict), fz_togen(dict));
 }
-

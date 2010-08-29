@@ -1,7 +1,5 @@
 #include "fitz.h"
 
-void fz_freearray(fz_obj *obj);
-
 fz_obj *
 fz_newarray(int initialcap)
 {
@@ -13,7 +11,7 @@ fz_newarray(int initialcap)
 	obj->kind = FZ_ARRAY;
 
 	obj->u.a.len = 0;
-	obj->u.a.cap = initialcap > 0 ? initialcap : 6;
+	obj->u.a.cap = initialcap > 1 ? initialcap : 6;
 
 	obj->u.a.items = fz_malloc(sizeof (fz_obj*) * obj->u.a.cap);
 	for (i = 0; i < obj->u.a.cap; i++)
@@ -119,4 +117,3 @@ fz_freearray(fz_obj *obj)
 	fz_free(obj->u.a.items);
 	fz_free(obj);
 }
-

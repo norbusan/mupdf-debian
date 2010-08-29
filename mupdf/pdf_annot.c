@@ -13,10 +13,10 @@ pdf_newlink(pdf_linkkind kind, fz_rect bbox, fz_obj *dest)
 }
 
 void
-pdf_droplink(pdf_link *link)
+pdf_freelink(pdf_link *link)
 {
 	if (link->next)
-		pdf_droplink(link->next);
+		pdf_freelink(link->next);
 	if (link->dest)
 		fz_dropobj(link->dest);
 	fz_free(link);
@@ -114,15 +114,13 @@ pdf_loadlink(pdf_xref *xref, fz_obj *dict)
 }
 
 void
-pdf_loadannots(pdf_comment **cp, pdf_link **lp, pdf_xref *xref, fz_obj *annots)
+pdf_loadannots(pdf_link **lp, pdf_xref *xref, fz_obj *annots)
 {
-	pdf_comment *comment;
 	pdf_link *link;
 	fz_obj *subtype;
 	fz_obj *obj;
 	int i;
 
-	comment = nil;
 	link = nil;
 
 	pdf_logpage("load annotations {\n");
@@ -145,7 +143,5 @@ pdf_loadannots(pdf_comment **cp, pdf_link **lp, pdf_xref *xref, fz_obj *annots)
 
 	pdf_logpage("}\n");
 
-	*cp = comment;
 	*lp = link;
 }
-

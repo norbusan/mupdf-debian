@@ -17,9 +17,7 @@ pdf_newcrypt(pdf_crypt **cryptp, fz_obj *dict, fz_obj *id)
 	memset(crypt, 0x00, sizeof(pdf_crypt));
 	crypt->cf = nil;
 
-	/*
-	 * Common to all security handlers (PDF 1.7 table 3.18)
-	 */
+	/* Common to all security handlers (PDF 1.7 table 3.18) */
 
 	obj = fz_dictgets(dict, "Filter");
 	if (!fz_isname(obj))
@@ -57,12 +55,12 @@ pdf_newcrypt(pdf_crypt **cryptp, fz_obj *dict, fz_obj *id)
 		if (crypt->length % 8 != 0)
 		{
 			pdf_freecrypt(crypt);
-			return fz_throw("invalid encryption key length: %d", crypt->length);
+			return fz_throw("invalid encryption key length");
 		}
 		if (crypt->length > 256)
 		{
 			pdf_freecrypt(crypt);
-			return fz_throw("invalid encryption key length: %d", crypt->length);
+			return fz_throw("invalid encryption key length");
 		}
 	}
 
@@ -122,9 +120,7 @@ pdf_newcrypt(pdf_crypt **cryptp, fz_obj *dict, fz_obj *id)
 		}
 	}
 
-	/*
-	 * Standard security handler (PDF 1.7 table 3.19)
-	 */
+	/* Standard security handler (PDF 1.7 table 3.19) */
 
 	obj = fz_dictgets(dict, "R");
 	if (fz_isint(obj))
@@ -167,9 +163,7 @@ pdf_newcrypt(pdf_crypt **cryptp, fz_obj *dict, fz_obj *id)
 	if (fz_isbool(obj))
 		crypt->encryptmetadata = fz_tobool(obj);
 
-	/*
-	 * Extract file identifier string
-	 */
+	/* Extract file identifier string */
 
 	crypt->idlength = 0;
 
@@ -457,7 +451,6 @@ pdf_authenticateownerpassword(pdf_crypt *crypt, unsigned char *ownerpass, int pw
 	return pdf_authenticateuserpassword(crypt, userpass, 32);
 }
 
-
 int
 pdf_authenticatepassword(pdf_xref *xref, char *password)
 {
@@ -595,8 +588,8 @@ pdf_cryptobj(pdf_crypt *crypt, fz_obj *obj, int num, int gen)
  *
  * Create filter suitable for de/encrypting a stream.
  */
-fz_filter *
-pdf_cryptstream(pdf_crypt * crypt, pdf_cryptfilter * stmf, int num, int gen)
+fz_stream *
+pdf_opencrypt(fz_stream *chain, pdf_crypt *crypt, pdf_cryptfilter *stmf, int num, int gen)
 {
 	unsigned char key[16];
 	int len;
@@ -604,11 +597,10 @@ pdf_cryptstream(pdf_crypt * crypt, pdf_cryptfilter * stmf, int num, int gen)
 	len = pdf_computeobjectkey(crypt, stmf, num, gen, key);
 
 	if (stmf->method == PDF_CRYPT_RC4)
-		return fz_newarc4filter(key, len);
+		return fz_openarc4(chain, key, len);
 
 	if (stmf->method == PDF_CRYPT_AESV2)
-		return fz_newaesdfilter(key, len);
+		return fz_openaesd(chain, key, len);
 
-	return fz_newcopyfilter();
+	return fz_opencopy(chain);
 }
-

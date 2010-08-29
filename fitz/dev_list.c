@@ -1,5 +1,8 @@
 #include "fitz.h"
 
+#define ISOLATED 1
+#define KNOCKOUT 2
+
 static fz_displaynode *
 fz_newdisplaynode(fz_displaycommand cmd, fz_matrix ctm,
 	fz_colorspace *colorspace, float *color, float alpha)
@@ -10,6 +13,7 @@ fz_newdisplaynode(fz_displaycommand cmd, fz_matrix ctm,
 	node = fz_malloc(sizeof(fz_displaynode));
 	node->cmd = cmd;
 	node->next = nil;
+	node->rect = fz_emptyrect;
 	node->item.path = nil;
 	node->stroke = nil;
 	node->flag = 0;
@@ -17,8 +21,11 @@ fz_newdisplaynode(fz_displaycommand cmd, fz_matrix ctm,
 	if (colorspace)
 	{
 		node->colorspace = fz_keepcolorspace(colorspace);
-		for (i = 0; i < node->colorspace->n; i++)
-			node->color[i] = color[i];
+		if (color)
+		{
+			for (i = 0; i < node->colorspace->n; i++)
+				node->color[i] = color[i];
+		}
 	}
 	else
 	{
@@ -79,6 +86,10 @@ fz_freedisplaynode(fz_displaynode *node)
 		fz_droppixmap(node->item.image);
 		break;
 	case FZ_CMDPOPCLIP:
+	case FZ_CMDBEGINMASK:
+	case FZ_CMDENDMASK:
+	case FZ_CMDBEGINGROUP:
+	case FZ_CMDENDGROUP:
 		break;
 	}
 	if (node->stroke)
@@ -94,6 +105,7 @@ fz_listfillpath(void *user, fz_path *path, int evenodd, fz_matrix ctm,
 {
 	fz_displaynode *node;
 	node = fz_newdisplaynode(FZ_CMDFILLPATH, ctm, colorspace, color, alpha);
+	node->rect = fz_boundpath(path, nil, ctm);
 	node->item.path = fz_clonepath(path);
 	node->flag = evenodd;
 	fz_appenddisplaynode(user, node);
@@ -105,6 +117,7 @@ fz_liststrokepath(void *user, fz_path *path, fz_strokestate *stroke, fz_matrix c
 {
 	fz_displaynode *node;
 	node = fz_newdisplaynode(FZ_CMDSTROKEPATH, ctm, colorspace, color, alpha);
+	node->rect = fz_boundpath(path, stroke, ctm);
 	node->item.path = fz_clonepath(path);
 	node->stroke = fz_clonestrokestate(stroke);
 	fz_appenddisplaynode(user, node);
@@ -114,7 +127,8 @@ static void
 fz_listclippath(void *user, fz_path *path, int evenodd, fz_matrix ctm)
 {
 	fz_displaynode *node;
-	node = fz_newdisplaynode(FZ_CMDCLIPPATH, ctm, nil, nil, 0.0);
+	node = fz_newdisplaynode(FZ_CMDCLIPPATH, ctm, nil, nil, 0);
+	node->rect = fz_boundpath(path, nil, ctm);
 	node->item.path = fz_clonepath(path);
 	node->flag = evenodd;
 	fz_appenddisplaynode(user, node);
@@ -124,7 +138,8 @@ static void
 fz_listclipstrokepath(void *user, fz_path *path, fz_strokestate *stroke, fz_matrix ctm)
 {
 	fz_displaynode *node;
-	node = fz_newdisplaynode(FZ_CMDCLIPSTROKEPATH, ctm, nil, nil, 0.0);
+	node = fz_newdisplaynode(FZ_CMDCLIPSTROKEPATH, ctm, nil, nil, 0);
+	node->rect = fz_boundpath(path, stroke, ctm);
 	node->item.path = fz_clonepath(path);
 	node->stroke = fz_clonestrokestate(stroke);
 	fz_appenddisplaynode(user, node);
@@ -136,6 +151,7 @@ fz_listfilltext(void *user, fz_text *text, fz_matrix ctm,
 {
 	fz_displaynode *node;
 	node = fz_newdisplaynode(FZ_CMDFILLTEXT, ctm, colorspace, color, alpha);
+	node->rect = fz_boundtext(text, ctm);
 	node->item.text = fz_clonetext(text);
 	fz_appenddisplaynode(user, node);
 }
@@ -146,6 +162,7 @@ fz_liststroketext(void *user, fz_text *text, fz_strokestate *stroke, fz_matrix c
 {
 	fz_displaynode *node;
 	node = fz_newdisplaynode(FZ_CMDSTROKETEXT, ctm, colorspace, color, alpha);
+	node->rect = fz_boundtext(text, ctm);
 	node->item.text = fz_clonetext(text);
 	node->stroke = fz_clonestrokestate(stroke);
 	fz_appenddisplaynode(user, node);
@@ -155,7 +172,8 @@ static void
 fz_listcliptext(void *user, fz_text *text, fz_matrix ctm, int accumulate)
 {
 	fz_displaynode *node;
-	node = fz_newdisplaynode(FZ_CMDCLIPTEXT, ctm, nil, nil, 0.0);
+	node = fz_newdisplaynode(FZ_CMDCLIPTEXT, ctm, nil, nil, 0);
+	node->rect = fz_boundtext(text, ctm);
 	node->item.text = fz_clonetext(text);
 	node->flag = accumulate;
 	fz_appenddisplaynode(user, node);
@@ -165,7 +183,8 @@ static void
 fz_listclipstroketext(void *user, fz_text *text, fz_strokestate *stroke, fz_matrix ctm)
 {
 	fz_displaynode *node;
-	node = fz_newdisplaynode(FZ_CMDCLIPSTROKETEXT, ctm, nil, nil, 0.0);
+	node = fz_newdisplaynode(FZ_CMDCLIPSTROKETEXT, ctm, nil, nil, 0);
+	node->rect = fz_boundtext(text, ctm);
 	node->item.text = fz_clonetext(text);
 	node->stroke = fz_clonestrokestate(stroke);
 	fz_appenddisplaynode(user, node);
@@ -175,7 +194,8 @@ static void
 fz_listignoretext(void *user, fz_text *text, fz_matrix ctm)
 {
 	fz_displaynode *node;
-	node = fz_newdisplaynode(FZ_CMDIGNORETEXT, ctm, nil, nil, 0.0);
+	node = fz_newdisplaynode(FZ_CMDIGNORETEXT, ctm, nil, nil, 0);
+	node->rect = fz_boundtext(text, ctm);
 	node->item.text = fz_clonetext(text);
 	fz_appenddisplaynode(user, node);
 }
@@ -184,24 +204,27 @@ static void
 fz_listpopclip(void *user)
 {
 	fz_displaynode *node;
-	node = fz_newdisplaynode(FZ_CMDPOPCLIP, fz_identity(), nil, nil, 0.0);
+	node = fz_newdisplaynode(FZ_CMDPOPCLIP, fz_identity, nil, nil, 0);
+	/* TODO: scan back for matching pushclip and calculate bbox of contents */
 	fz_appenddisplaynode(user, node);
 }
 
 static void
-fz_listfillshade(void *user, fz_shade *shade, fz_matrix ctm)
+fz_listfillshade(void *user, fz_shade *shade, fz_matrix ctm, float alpha)
 {
 	fz_displaynode *node;
-	node = fz_newdisplaynode(FZ_CMDFILLSHADE, ctm, nil, nil, 0.0);
+	node = fz_newdisplaynode(FZ_CMDFILLSHADE, ctm, nil, nil, alpha);
+	node->rect = fz_boundshade(shade, ctm);
 	node->item.shade = fz_keepshade(shade);
 	fz_appenddisplaynode(user, node);
 }
 
 static void
-fz_listfillimage(void *user, fz_pixmap *image, fz_matrix ctm)
+fz_listfillimage(void *user, fz_pixmap *image, fz_matrix ctm, float alpha)
 {
 	fz_displaynode *node;
-	node = fz_newdisplaynode(FZ_CMDFILLIMAGE, ctm, nil, nil, 0.0);
+	node = fz_newdisplaynode(FZ_CMDFILLIMAGE, ctm, nil, nil, alpha);
+	node->rect = fz_transformrect(ctm, fz_unitrect);
 	node->item.image = fz_keeppixmap(image);
 	fz_appenddisplaynode(user, node);
 }
@@ -212,6 +235,7 @@ fz_listfillimagemask(void *user, fz_pixmap *image, fz_matrix ctm,
 {
 	fz_displaynode *node;
 	node = fz_newdisplaynode(FZ_CMDFILLIMAGEMASK, ctm, colorspace, color, alpha);
+	node->rect = fz_transformrect(ctm, fz_unitrect);
 	node->item.image = fz_keeppixmap(image);
 	fz_appenddisplaynode(user, node);
 }
@@ -220,8 +244,47 @@ static void
 fz_listclipimagemask(void *user, fz_pixmap *image, fz_matrix ctm)
 {
 	fz_displaynode *node;
-	node = fz_newdisplaynode(FZ_CMDCLIPIMAGEMASK, ctm, nil, nil, 0.0);
+	node = fz_newdisplaynode(FZ_CMDCLIPIMAGEMASK, ctm, nil, nil, 0);
+	node->rect = fz_transformrect(ctm, fz_unitrect);
 	node->item.image = fz_keeppixmap(image);
+	fz_appenddisplaynode(user, node);
+}
+
+static void
+fz_listbeginmask(void *user, fz_rect rect, int luminosity, fz_colorspace *colorspace, float *color)
+{
+	fz_displaynode *node;
+	node = fz_newdisplaynode(FZ_CMDBEGINMASK, fz_identity, colorspace, color, 0);
+	node->rect = rect;
+	node->flag = luminosity;
+	fz_appenddisplaynode(user, node);
+}
+
+static void
+fz_listendmask(void *user)
+{
+	fz_displaynode *node;
+	node = fz_newdisplaynode(FZ_CMDENDMASK, fz_identity, nil, nil, 0);
+	fz_appenddisplaynode(user, node);
+}
+
+static void
+fz_listbegingroup(void *user, fz_rect rect, int isolated, int knockout, fz_blendmode blendmode, float alpha)
+{
+	fz_displaynode *node;
+	node = fz_newdisplaynode(FZ_CMDBEGINGROUP, fz_identity, nil, nil, alpha);
+	node->rect = rect;
+	node->item.blendmode = blendmode;
+	node->flag |= isolated ? ISOLATED : 0;
+	node->flag |= knockout ? KNOCKOUT : 0;
+	fz_appenddisplaynode(user, node);
+}
+
+static void
+fz_listendgroup(void *user)
+{
+	fz_displaynode *node;
+	node = fz_newdisplaynode(FZ_CMDENDGROUP, fz_identity, nil, nil, 0);
 	fz_appenddisplaynode(user, node);
 }
 
@@ -248,6 +311,11 @@ fz_newlistdevice(fz_displaylist *list)
 
 	dev->popclip = fz_listpopclip;
 
+	dev->beginmask = fz_listbeginmask;
+	dev->endmask = fz_listendmask;
+	dev->begingroup = fz_listbegingroup;
+	dev->endgroup = fz_listendgroup;
+
 	return dev;
 }
 
@@ -270,12 +338,14 @@ fz_freedisplaylist(fz_displaylist *list)
 		fz_freedisplaynode(node);
 		node = next;
 	}
+	fz_free(list);
 }
 
 void
 fz_executedisplaylist(fz_displaylist *list, fz_device *dev, fz_matrix topctm)
 {
 	fz_displaynode *node;
+	fz_rect bbox;
 	for (node = list->first; node; node = node->next)
 	{
 		fz_matrix ctm = fz_concat(node->ctm, topctm);
@@ -313,10 +383,10 @@ fz_executedisplaylist(fz_displaylist *list, fz_device *dev, fz_matrix topctm)
 			dev->ignoretext(dev->user, node->item.text, ctm);
 			break;
 		case FZ_CMDFILLSHADE:
-			dev->fillshade(dev->user, node->item.shade, ctm);
+			dev->fillshade(dev->user, node->item.shade, ctm, node->alpha);
 			break;
 		case FZ_CMDFILLIMAGE:
-			dev->fillimage(dev->user, node->item.image, ctm);
+			dev->fillimage(dev->user, node->item.image, ctm, node->alpha);
 			break;
 		case FZ_CMDFILLIMAGEMASK:
 			dev->fillimagemask(dev->user, node->item.image, ctm,
@@ -328,7 +398,22 @@ fz_executedisplaylist(fz_displaylist *list, fz_device *dev, fz_matrix topctm)
 		case FZ_CMDPOPCLIP:
 			dev->popclip(dev->user);
 			break;
+		case FZ_CMDBEGINMASK:
+			bbox = fz_transformrect(topctm, node->rect);
+			dev->beginmask(dev->user, bbox, node->flag, node->colorspace, node->color);
+			break;
+		case FZ_CMDENDMASK:
+			dev->endmask(dev->user);
+			break;
+		case FZ_CMDBEGINGROUP:
+			bbox = fz_transformrect(topctm, node->rect);
+			dev->begingroup(dev->user, bbox,
+				node->flag & ISOLATED, node->flag & KNOCKOUT,
+				node->item.blendmode, node->alpha);
+			break;
+		case FZ_CMDENDGROUP:
+			dev->endgroup(dev->user);
+			break;
 		}
 	}
 }
-
