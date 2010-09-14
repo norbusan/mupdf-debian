@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Kan-Ru Chen <koster@debian.org>
 Build-Depends: debhelper (>= 7.0.50~), libfreetype6-dev, pkg-config,
  libjpeg-dev, libjbig2dec-dev, libopenjpeg-dev, libx11-dev, libxext-dev, zlib1g-dev
-Standards-Version: 3.9.0
+Standards-Version: 3.9.1
 Homepage: http://mupdf.com/
 Vcs-Git: git://git.debian.org/git/users/koster/mupdf.git
 Vcs-Browser: http://git.debian.org/?p=users/koster/mupdf.git;a=summary
