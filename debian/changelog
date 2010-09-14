@@ -1,4 +1,11 @@
-mupdf (0.5-1) unstable; urgency=low
+mupdf (0.7-1) unstable; urgency=low
+
+  * New upstream release
+  * Update manpages to reflect keybinding change
+
+ --
+
+mupdf (0.6-1) unstable; urgency=low
 
   * Initial release. (Closes: #559906)
 
