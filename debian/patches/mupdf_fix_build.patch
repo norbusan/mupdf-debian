@@ -1,0 +1,18 @@
+From: Kan-Ru Chen <koster@debian.org>
+Subject: Fix the build rules so it accepts additional arguments
+---
+ Makerules |    3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+--- a/Makerules
++++ b/Makerules
+@@ -4,7 +4,8 @@
+ OS := $(OS:MINGW%=MINGW)
+ 
+ CC ?= cc
+-CFLAGS := -Ifitz -Imupdf -Wall
++CFLAGS ?=
++CFLAGS += -Ifitz -Imupdf -Wall
+ LDFLAGS :=
+ 
+ ifeq "$(build)" "debug"

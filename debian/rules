@@ -8,7 +8,10 @@
 export DH_OPTIONS
 
 override_dh_auto_build:
-	jam '-sBUILD=release' '-sDEFINES=NOCJK'
+	$(MAKE) build=release OS=Linux
+
+override_dh_auto_install:
+	$(MAKE) build=release prefix=$(CURDIR)/debian/tmp/usr install
 
 override_dh_auto_clean:
 	-rm -rf build
