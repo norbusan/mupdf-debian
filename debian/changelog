@@ -1,7 +1,9 @@
 mupdf (0.7-1) unstable; urgency=low
 
   * New upstream release
+    (Closes: #590263, #590264, #590245)
   * Update manpages to reflect keybinding change
+  * Patch build system to accept additional CFLAGS.
   * Bump Standards-Version to 3.9.1, no changes needed
 
  --

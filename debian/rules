@@ -8,7 +8,7 @@
 export DH_OPTIONS
 
 override_dh_auto_build:
-	$(MAKE) build=release
+	$(MAKE) build=release OS=Linux
 
 override_dh_auto_install:
 	$(MAKE) build=release prefix=$(CURDIR)/debian/tmp/usr install
