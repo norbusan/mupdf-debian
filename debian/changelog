@@ -8,7 +8,7 @@ mupdf (0.7-1) unstable; urgency=low
   * Update watch file
   * Bump Standards-Version to 3.9.1, no changes needed
 
- --
+ -- Kan-Ru Chen <koster@debian.org>  Wed, 15 Sep 2010 02:27:06 +0800
 
 mupdf (0.6-1) unstable; urgency=low
 
