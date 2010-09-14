@@ -2,6 +2,7 @@ mupdf (0.7-1) unstable; urgency=low
 
   * New upstream release
   * Update manpages to reflect keybinding change
+  * Bump Standards-Version to 3.9.1, no changes needed
 
  --
 
