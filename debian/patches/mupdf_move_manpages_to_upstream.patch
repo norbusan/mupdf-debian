@@ -1,0 +1,283 @@
+From: Kan-Ru Chen <koster@debian.org>
+Subject: Move the manpages to upstream directory, as them aren't Debian specific.
+---
+ apps/man/mupdf.1    |  123 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ apps/man/pdfclean.1 |   35 ++++++++++++++
+ apps/man/pdfdraw.1  |   65 +++++++++++++++++++++++++++
+ apps/man/pdfshow.1  |   39 ++++++++++++++++
+ 4 files changed, 262 insertions(+)
+
+--- /dev/null
++++ b/apps/man/mupdf.1
+@@ -0,0 +1,123 @@
++.TH MUPDF 1 "March 15, 2010"
++.\" Please adjust this date whenever revising the manpage.
++.SH NAME
++mupdf \- MuPDF is a lightweight PDF viewer written in portable C
++.SH SYNOPSIS
++.B mupdf
++.RI [ options ] " PDFfile"
++.SH DESCRIPTION
++This manual page briefly describes the
++.B mupdf
++command.
++.PP
++.SH OPTIONS
++A description of each of the supported options is included below.
++.TP
++.B \-p password
++Uses the given password to open an encrypted PDF file.
++The password is tried both as user and owner password.
++.TP
++.B \-r resolution
++Changes the initial zoom level, specified as the resolution in dpi.
++The default value is 72.
++.SH MOUSE AND KEY BINDINGS
++In addition to the key bindings described below, the mouse can also be
++used. Clicking the left mouse button follows links within the PDF while
++dragging with the left mouse button pans the page. Dragging with the right
++mouse button selects an area and copies the enclosed text to the clipboard
++buffer. Using the scroll-wheel while pressing Control zooms in/out, if
++Shift is pressed on the other hand then the page is panned.
++.TP
++.B PAGE NAVIGATION
++These commands relate to the actual page number in the PDF file, not to
++numbers given by any kind of page label.
++.TP
++.B f, space
++Go to the next page without paning to top of page. If a number has been
++entered, go that number of pages forward instead of just one page.
++.TP
++.B b, backspace
++Go to the previous page without paning to top of page. If a number has been
++entered, go that number of pages backwards instead of just one page.
++.TP
++.B g, return
++Go to the page number specified. If no number has been entered, go to the
++first page.
++.TP
++.B G
++Go to the last page.
++.TP
++.B t
++Tag the viewed page and record it in the history. When clicking links
++within a PDF file to follow the link pages are automatically tagged.
++.TP
++.B m
++Return to the previously tagged page in the history.
++.TP
++.B p
++Go to the previous page and pan to bottom of page. If a number has been
++entered, go that number of pages backwards instead of just one page.
++.TP
++.B n
++Go to the next page and pan to top of page. If a number has been entered,
++go that number of pages forward instead of just one page.
++.TP
++.B B
++Go ten pages backwards and pan to top of page.
++.TP
++.B F
++Go ten pages forward and pan to top of page.
++.TP
++.B PAN PAGE
++.TP
++.B w
++Shrinkwrap window frame to page size.
++.TP
++.B d
++Pan the shown page down 1/10th of its height.
++.TP
++.B u
++Pan the shown page up 1/10th of its height.
++.TP
++.B ,
++Pan the shown page right 1/10th of its width.
++.TP
++.B .
++Pan the shown page left 1/10th of its width.
++.TP
++.B 0\-9
++Entered numbers are used by some commands.
++.TP
++.B ZOOM AND ROTATE PAGE
++.TP
++.B \+, \=
++Zoom in.
++.TP
++.B \-
++Zoom out.
++.TP
++.B <
++Rotate page counter-clockwise or left by 90\(de.
++.TP
++.B >
++Rotate page clockwise or right by 90\(de.
++.TP
++.B a
++Rotate page counter-clockwise or left by 15\(de.
++.TP
++.B s
++Rotate page clockwise or right by 15\(de.
++.TP
++.B FILE HANDLING
++.TP
++.B r
++Reload the file and display the same page, if still present.
++.SH SEE ALSO
++.BR pdfclean (1),
++.BR pdfdraw (1),
++.BR pdfshow (1).
++.SH AUTHOR
++MuPDF was written by Tor Andersson <tor@ghostscript.com>.
++MuPDF is Copyright 2006-2010 Artifex Software, Inc.
++.PP
++This manual page was written by Sebastian Rasmussen <sebras@hotmail.com>.
+--- /dev/null
++++ b/apps/man/pdfclean.1
+@@ -0,0 +1,35 @@
++.TH PDFCLEAN 1 "July 19, 2010"
++.\" Please adjust this date whenever revising the manpage.
++.SH NAME
++pdfclean \- pretty print, decompress and garbage collect PDF files
++.SH SYNOPSIS
++.B pdfclean
++.RI [ options ]
++.RI input.pdf
++.RI [ output.pdf ]
++.SH DESCRIPTION
++.B pdfclean
++pretty prints and rewrites the contents of a PDF file.
++If no output file is specified, the new file will be written to "out.pdf" in
++the current directory.
++.PP
++.SH OPTIONS
++.TP
++.B \-p password
++Use the specified password if the file is encrypted.
++.TP
++.B \-g
++Garbage collect objects that have no references from other objects.
++Give the option twice to renumber all objects and compact the cross reference table.
++Give it three times to merge and reuse duplicate objects.
++.TP
++.B \-d
++Decompress streams. This will make the output file larger, but provides
++easy access for reading and editing the contents with a text editor.
++.SH SEE ALSO
++.BR mupdf (1),
++.BR pdfdraw (1).
++.BR pdfshow (1).
++.SH AUTHOR
++MuPDF was written by Tor Andersson <tor@ghostscript.com>.
++MuPDF is Copyright 2006-2010 Artifex Software, Inc.
+--- /dev/null
++++ b/apps/man/pdfdraw.1
+@@ -0,0 +1,65 @@
++.TH PDFDRAW 1 "July 19, 2010"
++.\" Please adjust this date whenever revising the manpage.
++.SH NAME
++pdfdraw \- render PDF documents
++.SH SYNOPSIS
++.B pdfdraw
++.RI [ options ]
++.RI [ file.pdf\ [ pages ] ]
++.B ...
++.SH DESCRIPTION
++.B pdfdraw
++will render a PDF document to image files.
++The supported image formats are: png, ppm, pam and png.
++Select the pages to be rendered by specifying a comma
++separated list of ranges and individual page numbers (for example: 1,5,10-15).
++In no pages are specified all the pages will be rendered.
++.SH OPTIONS
++.TP
++.B \-o output
++The image format is deduced from the output file name.
++Embed %d in the name to indicate the page number (for example: "page%d.png").
++.TP
++.B \-p password
++Use the specified password if the file is encrypted.
++.TP
++.B \-r resolution
++Render the page at the specified resolution.
++The default resolution is 72 dpi.
++.TP
++.B \-a
++Save the alpha channel.
++The default behavior is to render each page with a white background.
++With this option, the page background is transparent.
++Only supported for pam and png output formats.
++.TP
++.B \-g
++Render in grayscale.
++The default is to render a full color RGB image.
++If the output format is pgm or ppm this option is ignored.
++.TP
++.B \-m
++Show timing information.
++Take the time it takes for each page to render and print
++a summary at the end.
++.TP
++.B \-5
++Print an MD5 checksum of the rendered image data for each page.
++.TP
++.B \-t
++Print the text contents of each page in UTF-8 encoding.
++Give the option twice to print detailed information
++about the location of each character in XML format.
++.TP
++.B \-x
++Print the display list used to render each page.
++.TP
++.B \-A
++Disable the use of accelerated functions.
++.SH SEE ALSO
++.BR mupdf (1),
++.BR pdfclean (1).
++.BR pdfshow (1).
++.SH AUTHOR
++MuPDF was written by Tor Andersson <tor@ghostscript.com>.
++MuPDF is Copyright 2006-2010 Artifex Software, Inc.
+--- /dev/null
++++ b/apps/man/pdfshow.1
+@@ -0,0 +1,39 @@
++.TH PDFSHOW 1 "July 19, 2010"
++.\" Please adjust this date whenever revising the manpage.
++.SH NAME
++pdfshow \- show objects and streams that make up a PDF document
++.SH SYNOPSIS
++.B pdfshow
++.RI [ options ]
++.RI file.pdf
++.RI [ xref ]
++.RI [ trailer ]
++.RI [ pages ]
++.RI [ object-number... ]
++.SH DESCRIPTION
++.B pdfshow
++pretty prints the objects and streams specified on the command line.
++Streams are decoded and non-printable characters are represented
++with a period.
++Specify objects with their number.
++The special names xref, trailer and pages will
++respectively print the cross reference, trailer,
++and the object numbers for all pages.
++.PP
++.SH OPTIONS
++.TP
++.B \-b
++Print streams as binary data and omit the object header.
++.TP
++.B \-e
++Print streams in their original encoded form.
++.TP
++.B \-p password
++Use the specified password if the file is encrypted.
++.SH SEE ALSO
++.BR mupdf (1),
++.BR pdfclean (1).
++.BR pdfdraw (1).
++.SH AUTHOR
++MuPDF was written by Tor Andersson <tor@ghostscript.com>.
++MuPDF is copyright 2006-2010 Artifex Software, Inc.
