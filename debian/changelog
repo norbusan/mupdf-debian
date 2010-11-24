@@ -6,6 +6,8 @@ mupdf (0.7+20101112-1) UNRELEASED; urgency=low
     Remove debug purpose keybinding from manpage. (Closes: #597337)
   * Add NoDisplay=true to mupdf.desktop as the application is not
     intended for standalone use but a viewer. (Closes: #602293)
+  * patches/mupdf_remove_extra_usage.patch: New patch, remove redundant
+    usage string from output.
 
  -- Kan-Ru Chen <koster@debian.org>  Wed, 24 Nov 2010 12:10:18 +0800
 
