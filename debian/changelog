@@ -1,8 +1,11 @@
 mupdf (0.7+20101112-1) UNRELEASED; urgency=low
 
-  * New snapshot.
+  * New snapshot. (Closes: #604746)
+  * patches/mupdf_move_manpages_to_upstream.patch,
+    patches/mupdf_update_manpages.patch: Sync with upstream.
+    Remove debug purpose keybinding from manpage. (Closes: #597337)
 
- -- Kan-Ru Chen <koster@debian.org>  Wed, 24 Nov 2010 11:45:01 +0800
+ -- Kan-Ru Chen <koster@debian.org>  Wed, 24 Nov 2010 12:05:43 +0800
 
 mupdf (0.7-2) unstable; urgency=low
 
