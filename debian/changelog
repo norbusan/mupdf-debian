@@ -1,4 +1,4 @@
-mupdf (0.7+20101112-1) UNRELEASED; urgency=low
+mupdf (0.7+20101112-1) experimental; urgency=low
 
   * New snapshot. (Closes: #604746)
   * debian/patches/mupdf_move_manpages_to_upstream.patch,
@@ -9,7 +9,7 @@ mupdf (0.7+20101112-1) UNRELEASED; urgency=low
   * debian/patches/mupdf_remove_extra_usage.patch: New patch, remove
     redundant usage string from output.
 
- -- Kan-Ru Chen <koster@debian.org>  Wed, 24 Nov 2010 12:10:18 +0800
+ -- Kan-Ru Chen <koster@debian.org>  Wed, 24 Nov 2010 12:34:28 +0800
 
 mupdf (0.7-2) unstable; urgency=low
 
