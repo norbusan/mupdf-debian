@@ -45,6 +45,8 @@ fz_rect pdf_torect(fz_obj *array);
 fz_matrix pdf_tomatrix(fz_obj *array);
 char * pdf_toutf8(fz_obj *src);
 unsigned short * pdf_toucs2(fz_obj *src);
+fz_obj * pdf_toutf8name(fz_obj *src);
+
 
 /*
  * Encryption
@@ -429,7 +431,7 @@ fz_error pdf_loadtype3font(pdf_fontdesc **fontp, pdf_xref *xref, fz_obj *rdb, fz
 
 /* font.c */
 int pdf_fontcidtogid(pdf_fontdesc *fontdesc, int cid);
-fz_error pdf_loadfontdescriptor(pdf_fontdesc *font, pdf_xref *xref, fz_obj *desc, char *collection);
+fz_error pdf_loadfontdescriptor(pdf_fontdesc *font, pdf_xref *xref, fz_obj *desc, char *collection, char *basefont);
 fz_error pdf_loadfont(pdf_fontdesc **fontp, pdf_xref *xref, fz_obj *rdb, fz_obj *obj);
 pdf_fontdesc * pdf_newfontdesc(void);
 pdf_fontdesc * pdf_keepfont(pdf_fontdesc *fontdesc);
@@ -441,6 +443,7 @@ void pdf_debugfont(pdf_fontdesc *fontdesc);
  */
 
 typedef struct pdf_link_s pdf_link;
+typedef struct pdf_annot_s pdf_annot;
 typedef struct pdf_outline_s pdf_outline;
 
 typedef enum pdf_linkkind_e
@@ -457,6 +460,14 @@ struct pdf_link_s
 	pdf_link *next;
 };
 
+struct pdf_annot_s
+{
+	fz_obj *obj;
+	fz_rect rect;
+	pdf_xobject *ap;
+	pdf_annot *next;
+};
+
 struct pdf_outline_s
 {
 	char *title;
@@ -466,17 +477,21 @@ struct pdf_outline_s
 	pdf_outline *next;
 };
 
-fz_obj *pdf_lookupdest(pdf_xref *xref, fz_obj *nameddest);
+fz_obj *pdf_lookupdest(pdf_xref *xref, fz_obj *needle);
+fz_obj *pdf_lookupname(pdf_xref *xref, char *which, fz_obj *needle);
+fz_obj *pdf_loadnametree(pdf_xref *xref, char *which);
 
-pdf_link *pdf_newlink(pdf_linkkind kind, fz_rect rect, fz_obj *dest);
-pdf_link *pdf_loadlink(pdf_xref *xref, fz_obj *dict);
-void pdf_freelink(pdf_link *link);
 
 pdf_outline *pdf_loadoutline(pdf_xref *xref);
 void pdf_debugoutline(pdf_outline *outline, int level);
 void pdf_freeoutline(pdf_outline *outline);
 
-void pdf_loadannots(pdf_link **, pdf_xref *, fz_obj *annots);
+pdf_link *pdf_loadlink(pdf_xref *xref, fz_obj *dict);
+void pdf_loadlinks(pdf_link **, pdf_xref *, fz_obj *annots);
+void pdf_freelink(pdf_link *link);
+
+void pdf_loadannots(pdf_annot **, pdf_xref *, fz_obj *annots);
+void pdf_freeannot(pdf_annot *link);
 
 /*
  * Page tree, pages and related objects
@@ -494,6 +509,7 @@ struct pdf_page_s
 	fz_displaylist *list;
 	fz_textspan *text;
 	pdf_link *links;
+	pdf_annot *annots;
 };
 
 /* pagetree.c */
@@ -592,7 +608,7 @@ struct pdf_csi_s
 
 	/* graphics state */
 	fz_matrix topctm;
-	pdf_gstate gstate[32];
+	pdf_gstate gstate[64];
 	int gtop;
 };
 
@@ -613,8 +629,8 @@ void pdf_gsave(pdf_csi *csi);
 void pdf_grestore(pdf_csi *csi);
 fz_error pdf_runcsibuffer(pdf_csi *csi, fz_obj *rdb, fz_buffer *contents);
 fz_error pdf_runxobject(pdf_csi *csi, fz_obj *resources, pdf_xobject *xobj);
-fz_error pdf_runcontents(pdf_xref *xref, fz_obj *resources, fz_buffer *contents, fz_device *dev, fz_matrix ctm);
 fz_error pdf_runpage(pdf_xref *xref, pdf_page *page, fz_device *dev, fz_matrix ctm);
+fz_error pdf_runglyph(pdf_xref *xref, fz_obj *resources, fz_buffer *contents, fz_device *dev, fz_matrix ctm);
 
 pdf_material * pdf_keepmaterial(pdf_material *mat);
 pdf_material * pdf_dropmaterial(pdf_material *mat);

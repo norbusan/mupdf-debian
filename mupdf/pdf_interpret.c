@@ -232,25 +232,21 @@ pdf_runinlineimage(pdf_csi *csi, fz_obj *rdb, fz_stream *file, fz_obj *dict)
 {
 	fz_error error;
 	fz_pixmap *img;
-	char buf[256];
-	pdf_token_e tok;
-	int len;
+	int ch;
 
 	error = pdf_loadinlineimage(&img, csi->xref, rdb, dict, file);
 	if (error)
 		return fz_rethrow(error, "cannot load inline image");
 
-	error = pdf_lex(&tok, file, buf, sizeof buf, &len);
-	if (error)
+	/* find EI */
+	ch = fz_readbyte(file);
+	while (ch != 'E' && ch != EOF)
+		ch = fz_readbyte(file);
+	ch = fz_readbyte(file);
+	if (ch != 'I')
 	{
 		fz_droppixmap(img);
 		return fz_rethrow(error, "syntax error after inline image");
-	}
-
-	if (tok != PDF_TKEYWORD || strcmp("EI", buf))
-	{
-		fz_droppixmap(img);
-		return fz_throw("syntax error after inline image");
 	}
 
 	pdf_showimage(csi, img);
@@ -1486,33 +1482,57 @@ pdf_runcsibuffer(pdf_csi *csi, fz_obj *rdb, fz_buffer *contents)
 }
 
 fz_error
-pdf_runcontents(pdf_xref *xref, fz_obj *resources, fz_buffer *contents,
-	fz_device *dev, fz_matrix ctm)
-{
-	pdf_csi *csi = pdf_newcsi(xref, dev, ctm);
-	fz_error error = pdf_runcsibuffer(csi, resources, contents);
-	pdf_freecsi(csi);
-	if (error)
-		return fz_rethrow(error, "cannot parse content stream");
-	return fz_okay;
-}
-
-fz_error
 pdf_runpage(pdf_xref *xref, pdf_page *page, fz_device *dev, fz_matrix ctm)
 {
+	pdf_csi *csi;
 	fz_error error;
+	pdf_annot *annot;
+	int flags;
 
 	if (page->transparency)
 		dev->begingroup(dev->user,
 			fz_transformrect(ctm, page->mediabox),
 			0, 0, FZ_BNORMAL, 1);
 
-	error = pdf_runcontents(xref, page->resources, page->contents, dev, ctm);
+	csi = pdf_newcsi(xref, dev, ctm);
+	error = pdf_runcsibuffer(csi, page->resources, page->contents);
+	pdf_freecsi(csi);
 	if (error)
 		return fz_rethrow(error, "cannot parse page content stream");
 
 	if (page->transparency)
 		dev->endgroup(dev->user);
 
+	for (annot = page->annots; annot; annot = annot->next)
+	{
+		flags = fz_toint(fz_dictgets(annot->obj, "F"));
+
+		/* TODO: NoZoom and NoRotate */
+		if (flags & (1 << 0)) /* Invisible */
+			continue;
+		if (flags & (1 << 1)) /* Hidden */
+			continue;
+		if (flags & (1 << 5)) /* NoView */
+			continue;
+
+		csi = pdf_newcsi(xref, dev, ctm);
+		error = pdf_runxobject(csi, page->resources, annot->ap);
+		pdf_freecsi(csi);
+		if (error)
+			return fz_rethrow(error, "cannot parse annotation appearance stream");
+	}
+
+	return fz_okay;
+}
+
+fz_error
+pdf_runglyph(pdf_xref *xref, fz_obj *resources, fz_buffer *contents,
+	fz_device *dev, fz_matrix ctm)
+{
+	pdf_csi *csi = pdf_newcsi(xref, dev, ctm);
+	fz_error error = pdf_runcsibuffer(csi, resources, contents);
+	pdf_freecsi(csi);
+	if (error)
+		return fz_rethrow(error, "cannot parse glyph content stream");
 	return fz_okay;
 }
