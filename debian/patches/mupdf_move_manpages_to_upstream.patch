@@ -136,7 +136,7 @@ Subject: Move the manpages to upstream directory, as them aren't Debian specific
 +MuPDF is Copyright 2006-2010 Artifex Software, Inc.
 --- /dev/null
 +++ b/apps/man/pdfdraw.1
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,68 @@
 +.TH PDFDRAW 1 "July 19, 2010"
 +.\" Please adjust this date whenever revising the manpage.
 +.SH NAME
@@ -149,7 +149,7 @@ Subject: Move the manpages to upstream directory, as them aren't Debian specific
 +.SH DESCRIPTION
 +.B pdfdraw
 +will render a PDF document to image files.
-+The supported image formats are: png, ppm, pam and png.
++The supported image formats are: pgm, ppm, pam and png.
 +Select the pages to be rendered by specifying a comma
 +separated list of ranges and individual page numbers (for example: 1,5,10-15).
 +In no pages are specified all the pages will be rendered.
@@ -165,6 +165,9 @@ Subject: Move the manpages to upstream directory, as them aren't Debian specific
 +.B \-r resolution
 +Render the page at the specified resolution.
 +The default resolution is 72 dpi.
++.TP
++.B \-R angle
++Rotate clockwise by given number of degrees.
 +.TP
 +.B \-a
 +Save the alpha channel.
@@ -204,7 +207,7 @@ Subject: Move the manpages to upstream directory, as them aren't Debian specific
 +MuPDF is Copyright 2006-2010 Artifex Software, Inc.
 --- /dev/null
 +++ b/apps/man/pdfshow.1
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,42 @@
 +.TH PDFSHOW 1 "July 19, 2010"
 +.\" Please adjust this date whenever revising the manpage.
 +.SH NAME
@@ -216,6 +219,7 @@ Subject: Move the manpages to upstream directory, as them aren't Debian specific
 +.RI [ xref ]
 +.RI [ trailer ]
 +.RI [ pages ]
++.RI [ grep ]
 +.RI [ object-number... ]
 +.SH DESCRIPTION
 +.B pdfshow
@@ -226,6 +230,8 @@ Subject: Move the manpages to upstream directory, as them aren't Debian specific
 +The special names xref, trailer and pages will
 +respectively print the cross reference, trailer,
 +and the object numbers for all pages.
++The special name grep will print all objects in the file
++in a compact one-line format suitable for piping to grep.
 +.PP
 +.SH OPTIONS
 +.TP
