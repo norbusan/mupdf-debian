@@ -7,6 +7,14 @@
 # This has to be exported to make some magic below work.
 export DH_OPTIONS
 
+ifneq (,$(filter x-fpic,$(DEB_BUILD_OPTIONS)))
+	CFLAGS += -fPIC
+endif
+ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+	NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+	MAKEFLAGS += -j$(NUMJOBS)
+endif
+
 override_dh_auto_build:
 	$(MAKE) build=release OS=Linux
 
