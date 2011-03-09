@@ -2,8 +2,7 @@
  * Input streams.
  */
 
-#include "fitz_base.h"
-#include "fitz_stream.h"
+#include "fitz.h"
 
 fz_error
 fz_readimp(fz_stream *stm)
@@ -276,3 +275,8 @@ fz_peekbytex(fz_stream *stm)
 	return buf->rp < buf->wp ? *buf->rp : EOF ;
 }
 
+void fz_unreadbytex(fz_stream *stm)
+{
+	fz_buffer *buf = stm->buffer;
+	buf->rp--;
+}
