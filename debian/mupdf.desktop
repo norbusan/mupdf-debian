@@ -10,6 +10,7 @@ Terminal=false
 Type=Application
 MimeType=application/pdf;pplication/x-pdf;
 Categories=Viewer;Graphics;
+NoDisplay=true
 
 [Desktop Action View]
 Exec=mupdf %f
