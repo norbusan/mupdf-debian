@@ -1,0 +1,10 @@
+--- a/apps/x11_main.c
++++ b/apps/x11_main.c
+@@ -492,7 +492,6 @@
+ 	fprintf(stderr, "\t-p -\tpassword\n");
+ 	fprintf(stderr, "\t-r -\tresolution\n");
+ 	fprintf(stderr, "\t-A\tdisable accelerated functions\n");
+-	fprintf(stderr, "usage: mupdf [options] file.pdf [page]\n");
+ 	exit(1);
+ }
+ 
