@@ -1,3 +1,18 @@
+mupdf (0.8-1) unstable; urgency=low
+
+  * New upstream release. (Closes: #604746)
+  * debian/patches/mupdf_move_manpages_to_upstream.patch,
+    debian/patches/mupdf_update_manpages.patch: Sync with upstream.
+    Remove debug purpose keybinding from manpage. (Closes: #597337)
+  * Add NoDisplay=true to mupdf.desktop as the application is not
+    intended for standalone use but a viewer. (Closes: #602293)
+  * debian/mupdf.menu: Removed as well.
+  * debian/patches/mupdf_remove_extra_usage.patch: New patch, remove
+    redundant usage string from output.
+  * Add non-standard DEB_BUILD_OPTIONS x-fpic support. (Closes: #617253)
+
+ -- Kan-Ru Chen <koster@debian.org>  Wed, 09 Mar 2011 11:23:12 +0800
+
 mupdf (0.7-2) unstable; urgency=low
 
   * Fix FTBFS on hurd-i386, kfreebsd-amd64, kfreebsd-i386
