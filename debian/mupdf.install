@@ -1,5 +1,4 @@
-build/*-release/mupdf usr/bin
-build/*-release/pdfclean usr/bin
-build/*-release/pdfshow usr/bin
-build/*-release/pdfdraw usr/bin
-
+debian/mupdf.xpm usr/share/pixmaps
+debian/mupdf.desktop usr/share/applications
+debian/mupdf.applications usr/share/application-registry
+debian/tmp/usr/bin/mupdf
