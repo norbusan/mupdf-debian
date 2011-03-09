@@ -8,7 +8,7 @@ pdf_loadxobject(pdf_xobject **formp, pdf_xref *xref, fz_obj *dict)
 	pdf_xobject *form;
 	fz_obj *obj;
 
-	if ((*formp = pdf_finditem(xref->store, PDF_KXOBJECT, dict)))
+	if ((*formp = pdf_finditem(xref->store, pdf_dropxobject, dict)))
 	{
 		pdf_keepxobject(*formp);
 		return fz_okay;
@@ -19,10 +19,10 @@ pdf_loadxobject(pdf_xobject **formp, pdf_xref *xref, fz_obj *dict)
 	form->resources = nil;
 	form->contents = nil;
 
-	/* Store item immediately, to avoid possible recursion if objects refer back to this one */
-	pdf_storeitem(xref->store, PDF_KXOBJECT, dict, form);
-
 	pdf_logrsrc("load xobject (%d %d R) ptr=%p {\n", fz_tonum(dict), fz_togen(dict), form);
+
+	/* Store item immediately, to avoid possible recursion if objects refer back to this one */
+	pdf_storeitem(xref->store, pdf_keepxobject, pdf_dropxobject, dict, form);
 
 	obj = fz_dictgets(dict, "BBox");
 	form->bbox = pdf_torect(obj);
@@ -35,7 +35,7 @@ pdf_loadxobject(pdf_xobject **formp, pdf_xref *xref, fz_obj *dict)
 	if (obj)
 		form->matrix = pdf_tomatrix(obj);
 	else
-		form->matrix = fz_identity();
+		form->matrix = fz_identity;
 
 	pdf_logrsrc("matrix [%g %g %g %g %g %g]\n",
 		form->matrix.a, form->matrix.b,
@@ -70,12 +70,12 @@ pdf_loadxobject(pdf_xobject **formp, pdf_xref *xref, fz_obj *dict)
 	error = pdf_loadstream(&form->contents, xref, fz_tonum(dict), fz_togen(dict));
 	if (error)
 	{
-		pdf_removeitem(xref->store, PDF_KXOBJECT, dict);
+		pdf_removeitem(xref->store, pdf_dropxobject, dict);
 		pdf_dropxobject(form);
 		return fz_rethrow(error, "cannot load xobject content stream (%d %d R)", fz_tonum(dict), fz_togen(dict));
 	}
 
-	pdf_logrsrc("stream %d bytes\n", form->contents->wp - form->contents->rp);
+	pdf_logrsrc("stream %d bytes\n", form->contents->len);
 	pdf_logrsrc("}\n");
 
 	*formp = form;

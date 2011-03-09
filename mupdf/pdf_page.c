@@ -2,15 +2,18 @@
 #include "mupdf.h"
 
 /* we need to combine all sub-streams into one for the content stream interpreter */
+
 static fz_error
 pdf_loadpagecontentsarray(fz_buffer **bigbufp, pdf_xref *xref, fz_obj *list)
 {
 	fz_error error;
 	fz_buffer *big;
 	fz_buffer *one;
-	int i, n;
+	int i;
 
 	pdf_logpage("multiple content streams: %d\n", fz_arraylen(list));
+
+	/* TODO: openstream, read, close into big buffer at once */
 
 	big = fz_newbuffer(32 * 1024);
 
@@ -24,12 +27,11 @@ pdf_loadpagecontentsarray(fz_buffer **bigbufp, pdf_xref *xref, fz_obj *list)
 			return fz_rethrow(error, "cannot load content stream part %d/%d (%d %d R)", i + 1, fz_arraylen(list), fz_tonum(stm), fz_togen(stm));
 		}
 
-		n = one->wp - one->rp;
-		while (big->wp + n + 1 > big->ep)
-			fz_growbuffer(big);
-		memcpy(big->wp, one->rp, n);
-		big->wp += n;
-		*big->wp++ = ' ';
+		if (big->len + one->len + 1 > big->cap)
+			fz_resizebuffer(big, big->len + one->len + 1);
+		memcpy(big->data + big->len, one->data, one->len);
+		big->data[big->len + one->len] = ' ';
+		big->len += one->len + 1;
 
 		fz_dropbuffer(one);
 	}
@@ -47,13 +49,13 @@ pdf_loadpagecontents(fz_buffer **bufp, pdf_xref *xref, fz_obj *obj)
 	{
 		error = pdf_loadpagecontentsarray(bufp, xref, obj);
 		if (error)
-			return fz_rethrow(error, "cannot load content stream array (%d %d R)", fz_tonum(obj), fz_togen(obj));
+			return fz_rethrow(error, "cannot load content stream array (%d 0 R)", fz_tonum(obj));
 	}
 	else if (pdf_isstream(xref, fz_tonum(obj), fz_togen(obj)))
 	{
 		error = pdf_loadstream(bufp, xref, fz_tonum(obj), fz_togen(obj));
 		if (error)
-			return fz_rethrow(error, "cannot load content stream (%d %d R)", fz_tonum(obj), fz_togen(obj));
+			return fz_rethrow(error, "cannot load content stream (%d 0 R)", fz_tonum(obj));
 	}
 	else
 	{
@@ -62,6 +64,89 @@ pdf_loadpagecontents(fz_buffer **bufp, pdf_xref *xref, fz_obj *obj)
 	}
 
 	return fz_okay;
+}
+
+/* We need to know whether to install a page-level transparency group */
+
+static int pdf_resourcesuseblending(fz_obj *rdb);
+
+static int
+pdf_extgstateusesblending(fz_obj *dict)
+{
+	fz_obj *obj;
+
+	obj = fz_dictgets(dict, "BM");
+	if (fz_isname(obj) && strcmp(fz_toname(obj), "Normal"))
+		return 1;
+
+	return 0;
+}
+
+static int
+pdf_patternusesblending(fz_obj *dict)
+{
+	fz_obj *obj;
+
+	obj = fz_dictgets(dict, "Resources");
+	if (fz_isdict(obj) && pdf_resourcesuseblending(obj))
+		return 1;
+
+	obj = fz_dictgets(dict, "ExtGState");
+	if (fz_isdict(obj) && pdf_extgstateusesblending(obj))
+		return 1;
+
+	return 0;
+}
+
+static int
+pdf_xobjectusesblending(fz_obj *dict)
+{
+	fz_obj *obj;
+
+	obj = fz_dictgets(dict, "Resources");
+	if (fz_isdict(obj) && pdf_resourcesuseblending(obj))
+		return 1;
+
+	return 0;
+}
+
+static int
+pdf_resourcesuseblending(fz_obj *rdb)
+{
+	fz_obj *dict;
+	fz_obj *tmp;
+	int i;
+
+	/* stop on cyclic resource dependencies */
+	if (fz_dictgets(rdb, ".useBM"))
+		return fz_tobool(fz_dictgets(rdb, ".useBM"));
+
+	tmp = fz_newbool(0);
+	fz_dictputs(rdb, ".useBM", tmp);
+	fz_dropobj(tmp);
+
+	dict = fz_dictgets(rdb, "ExtGState");
+	for (i = 0; i < fz_dictlen(dict); i++)
+		if (pdf_extgstateusesblending(fz_dictgetval(dict, i)))
+			goto found;
+
+	dict = fz_dictgets(rdb, "Pattern");
+	for (i = 0; i < fz_dictlen(dict); i++)
+		if (pdf_patternusesblending(fz_dictgetval(dict, i)))
+			goto found;
+
+	dict = fz_dictgets(rdb, "XObject");
+	for (i = 0; i < fz_dictlen(dict); i++)
+		if (pdf_xobjectusesblending(fz_dictgetval(dict, i)))
+			goto found;
+
+	return 0;
+
+found:
+	tmp = fz_newbool(1);
+	fz_dictputs(rdb, ".useBM", tmp);
+	fz_dropobj(tmp);
+	return 1;
 }
 
 fz_error
@@ -82,7 +167,9 @@ pdf_loadpage(pdf_page **pagep, pdf_xref *xref, fz_obj *dict)
 	page = fz_malloc(sizeof(pdf_page));
 	page->resources = nil;
 	page->contents = nil;
-	page->comments = nil;
+	page->transparency = 0;
+	page->list = nil;
+	page->text = nil;
 	page->links = nil;
 
 	obj = fz_dictgets(dict, "MediaBox");
@@ -112,7 +199,7 @@ pdf_loadpage(pdf_page **pagep, pdf_xref *xref, fz_obj *dict)
 
 	obj = fz_dictgets(dict, "Annots");
 	if (obj)
-		pdf_loadannots(&page->comments, &page->links, xref, obj);
+		pdf_loadannots(&page->links, xref, obj);
 
 	page->resources = fz_dictgets(dict, "Resources");
 	if (page->resources)
@@ -122,9 +209,12 @@ pdf_loadpage(pdf_page **pagep, pdf_xref *xref, fz_obj *dict)
 	error = pdf_loadpagecontents(&page->contents, xref, obj);
 	if (error)
 	{
-		pdf_droppage(page);
+		pdf_freepage(page);
 		return fz_rethrow(error, "cannot load page contents (%d %d R)", fz_tonum(obj), fz_togen(obj));
 	}
+
+	if (page->resources && pdf_resourcesuseblending(page->resources))
+		page->transparency = 1;
 
 	pdf_logpage("} %p\n", page);
 
@@ -133,16 +223,18 @@ pdf_loadpage(pdf_page **pagep, pdf_xref *xref, fz_obj *dict)
 }
 
 void
-pdf_droppage(pdf_page *page)
+pdf_freepage(pdf_page *page)
 {
 	pdf_logpage("drop page %p\n", page);
 	if (page->resources)
 		fz_dropobj(page->resources);
 	if (page->contents)
 		fz_dropbuffer(page->contents);
+	if (page->list)
+		fz_freedisplaylist(page->list);
+	if (page->text)
+		fz_freetextspan(page->text);
 	if (page->links)
-		pdf_droplink(page->links);
-//	if (page->comments)
-//		pdf_dropcomment(page->comments);
+		pdf_freelink(page->links);
 	fz_free(page);
 }

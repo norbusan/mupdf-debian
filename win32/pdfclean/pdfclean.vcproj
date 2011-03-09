@@ -47,7 +47,6 @@
 				RuntimeLibrary="3"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
-				Detect64BitPortabilityProblems="true"
 				DebugInformationFormat="4"
 			/>
 			<Tool
@@ -123,7 +122,6 @@
 				RuntimeLibrary="2"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
-				Detect64BitPortabilityProblems="true"
 				DebugInformationFormat="3"
 			/>
 			<Tool
@@ -176,14 +174,6 @@
 	<Files>
 		<File
 			RelativePath="..\..\apps\pdfclean.c"
-			>
-		</File>
-		<File
-			RelativePath="..\..\apps\pdftool.c"
-			>
-		</File>
-		<File
-			RelativePath="..\..\apps\pdftool.h"
 			>
 		</File>
 	</Files>

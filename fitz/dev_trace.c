@@ -15,7 +15,7 @@ fz_tracecolor(fz_colorspace *colorspace, float *color, float alpha)
 	for (i = 0; i < colorspace->n; i++)
 		printf("%s%g", i == 0 ? "" : " ", color[i]);
 	printf("\" ");
-	if (alpha != 1.0)
+	if (alpha < 1)
 		printf("alpha=\"%g\" ", alpha);
 }
 
@@ -187,17 +187,17 @@ fz_traceignoretext(void *user, fz_text *text, fz_matrix ctm)
 }
 
 static void
-fz_tracefillimage(void *user, fz_pixmap *image, fz_matrix ctm)
+fz_tracefillimage(void *user, fz_pixmap *image, fz_matrix ctm, float alpha)
 {
-	printf("<fillimage ");
+	printf("<fillimage alpha=\"%g\" ", alpha);
 	fz_tracematrix(ctm);
 	printf("/>\n");
 }
 
 static void
-fz_tracefillshade(void *user, fz_shade *shade, fz_matrix ctm)
+fz_tracefillshade(void *user, fz_shade *shade, fz_matrix ctm, float alpha)
 {
-	printf("<fillshade ");
+	printf("<fillshade alpha=\"%g\" ", alpha);
 	fz_tracematrix(ctm);
 	printf("/>\n");
 }
@@ -227,6 +227,37 @@ fz_tracepopclip(void *user)
 	printf("</gsave>\n");
 }
 
+static void
+fz_tracebeginmask(void *user, fz_rect bbox, int luminosity, fz_colorspace *colorspace, float *color)
+{
+	printf("<gsave>\n");
+	printf("<mask bbox=\"%g %g %g %g\" s=\"%s\" ",
+		bbox.x0, bbox.y0, bbox.x1, bbox.y1,
+		luminosity ? "luminosity" : "alpha");
+//	fz_tracecolor(colorspace, color, 1);
+	printf(">\n");
+}
+
+static void
+fz_traceendmask(void *user)
+{
+	printf("</mask>\n");
+}
+
+static void
+fz_tracebegingroup(void *user, fz_rect bbox, int isolated, int knockout, fz_blendmode blendmode, float alpha)
+{
+	printf("<group bbox=\"%g %g %g %g\" isolated=\"%d\" knockout=\"%d\" blendmode=\"%s\" alpha=\"%g\">\n",
+		bbox.x0, bbox.y0, bbox.x1, bbox.y1,
+		isolated, knockout, fz_blendnames[blendmode], alpha);
+}
+
+static void
+fz_traceendgroup(void *user)
+{
+	printf("</group>\n");
+}
+
 fz_device *fz_newtracedevice(void)
 {
 	fz_device *dev = fz_newdevice(nil);
@@ -249,6 +280,10 @@ fz_device *fz_newtracedevice(void)
 
 	dev->popclip = fz_tracepopclip;
 
+	dev->beginmask = fz_tracebeginmask;
+	dev->endmask = fz_traceendmask;
+	dev->begingroup = fz_tracebegingroup;
+	dev->endgroup = fz_traceendgroup;
+
 	return dev;
 }
-

@@ -2,18 +2,28 @@
  * pdfshow -- the ultimate pdf debugging tool
  */
 
-#include "pdftool.h"
+#include "fitz.h"
+#include "mupdf.h"
 
+static pdf_xref *xref = NULL;
 static int showbinary = 0;
-static int showdecode = 0;
+static int showdecode = 1;
 static int showcolumn;
 
-static void showusage(void)
+void die(fz_error error)
 {
-	fprintf(stderr, "usage: pdfshow [-bx] [-p password] <file> [xref] [trailer] [object numbers]\n");
-	fprintf(stderr, "  -b  \tprint streams as raw binary data\n");
-	fprintf(stderr, "  -x  \tdecompress streams\n");
-	fprintf(stderr, "  -p  \tdecrypt password\n");
+	fz_catch(error, "aborting");
+	if (xref)
+		pdf_freexref(xref);
+	exit(1);
+}
+
+static void usage(void)
+{
+	fprintf(stderr, "usage: pdfshow [options] file.pdf [xref] [trailer] [pagetree] [object numbers]\n");
+	fprintf(stderr, "\t-b\tprint streams as binary data\n");
+	fprintf(stderr, "\t-e\tprint encoded streams (don't decode)\n");
+	fprintf(stderr, "\t-p\tpassword\n");
 	exit(1);
 }
 
@@ -31,6 +41,32 @@ static void showxref(void)
 	if (!xref)
 		die(fz_throw("no file specified"));
 	pdf_debugxref(xref);
+	printf("\n");
+}
+
+static void showpagetree(void)
+{
+	fz_error error;
+	fz_obj *ref;
+	int count;
+	int i;
+
+	if (!xref)
+		die(fz_throw("no file specified"));
+
+	if (!xref->pagelen)
+	{
+		error = pdf_loadpagetree(xref);
+		if (error)
+			die(fz_rethrow(error, "cannot load page tree"));
+	}
+
+	count = pdf_getpagecount(xref);
+	for (i = 0; i < count; i++)
+	{
+		ref = pdf_getpageref(xref, i + 1);
+		printf("page %d = %d %d R\n", i + 1, fz_tonum(ref), fz_togen(ref));
+	}
 	printf("\n");
 }
 
@@ -75,9 +111,9 @@ static void showstream(int num, int gen)
 
 	while (1)
 	{
-		error = fz_read(&n, stm, buf, sizeof buf);
-		if (error)
-			die(error);
+		n = fz_read(stm, buf, sizeof buf);
+		if (n < 0)
+			die(n);
 		if (n == 0)
 			break;
 		if (showbinary)
@@ -86,7 +122,7 @@ static void showstream(int num, int gen)
 			showsafe(buf, n);
 	}
 
-	fz_dropstream(stm);
+	fz_close(stm);
 }
 
 static void showobject(int num, int gen)
@@ -103,12 +139,19 @@ static void showobject(int num, int gen)
 
 	if (pdf_isstream(xref, num, gen))
 	{
-		printf("%d %d obj\n", num, gen);
-		fz_debugobj(obj);
-		printf("stream\n");
-		showstream(num, gen);
-		printf("endstream\n");
-		printf("endobj\n\n");
+		if (showbinary)
+		{
+			showstream(num, gen);
+		}
+		else
+		{
+			printf("%d %d obj\n", num, gen);
+			fz_debugobj(obj);
+			printf("stream\n");
+			showstream(num, gen);
+			printf("endstream\n");
+			printf("endobj\n\n");
+		}
 	}
 	else
 	{
@@ -122,41 +165,46 @@ static void showobject(int num, int gen)
 
 int main(int argc, char **argv)
 {
-	char *password = "";
+	char *password = NULL; /* don't throw errors if encrypted */
+	fz_error error;
+	char *filename;
 	int c;
 
-	while ((c = fz_getopt(argc, argv, "p:bx")) != -1)
+	while ((c = fz_getopt(argc, argv, "p:be")) != -1)
 	{
 		switch (c)
 		{
 		case 'p': password = fz_optarg; break;
-		case 'b': showbinary ++; break;
-		case 'x': showdecode ++; break;
-		default:
-			showusage();
-			break;
+		case 'b': showbinary = 1; break;
+		case 'e': showdecode = 0; break;
+		default: usage(); break;
 		}
 	}
 
 	if (fz_optind == argc)
-		showusage();
+		usage();
 
-	openxref(argv[fz_optind++], password, 0);
+	filename = argv[fz_optind++];
+	error = pdf_openxref(&xref, filename, password);
+	if (error)
+		die(fz_rethrow(error, "cannot open document: %s", filename));
 
 	if (fz_optind == argc)
 		showtrailer();
 
 	while (fz_optind < argc)
 	{
-		if (!strcmp(argv[fz_optind], "trailer"))
-			showtrailer();
-		else if (!strcmp(argv[fz_optind], "xref"))
-			showxref();
-		else
-			showobject(atoi(argv[fz_optind]), 0);
+		switch (argv[fz_optind][0])
+		{
+		case 't': showtrailer(); break;
+		case 'x': showxref(); break;
+		case 'p': showpagetree(); break;
+		default: showobject(atoi(argv[fz_optind]), 0); break;
+		}
 		fz_optind++;
 	}
 
-	closexref();
-}
+	pdf_freexref(xref);
 
+	return 0;
+}

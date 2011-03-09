@@ -1,54 +1,57 @@
 # Configuration for the Makefile
 
-OS := $(shell uname)
+OS ?= $(shell uname)
 OS := $(OS:MINGW%=MINGW)
 
-LIBS := -ljbig2dec -lopenjpeg -ljpeg -lz -lm
-CFLAGS := -Wall --std=gnu99 -Ifitz -Imupdf $(THIRD_INCS)
-LDFLAGS =
-CC = cc
-LD = $(CC)
-AR = ar
+CC ?= cc
+CFLAGS := -Ifitz -Imupdf -Wall
+LDFLAGS :=
 
 ifeq "$(build)" "debug"
-CFLAGS += -g -O0
+CFLAGS += -pipe -g
 endif
 
 ifeq "$(build)" "release"
-CFLAGS += -O3
+CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer
+endif
+
+ifeq "$(build)" "native"
+CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer -march=native -mfpmath=sse
 endif
 
 ifeq "$(OS)" "Linux"
-ifeq "$(freetype_dir)" ""
-CFLAGS += `pkg-config --cflags freetype2`
-LDFLAGS += `pkg-config --libs freetype2`
-endif
-X11LIBS = -lX11 -lXext
+SYS_FREETYPE_INC := `pkg-config --cflags freetype2`
+X11LIBS := -lX11 -lXext
 PDFVIEW_EXE = $(X11VIEW_EXE)
-ifeq  "$(build)" "release"
-CFLAGS += -mmmx -ftree-vectorize -msse -msse2 -march=k8 -DARCH_X86
-ARCH_SRC = archx86.c
-endif
 endif
 
+ifeq "$(OS)" "FreeBSD"
+SYS_FREETYPE_INC := `pkg-config --cflags freetype2`
+LDFLAGS += -L/usr/local/lib
+X11LIBS := -lX11 -lXext
+PDFVIEW_EXE = $(X11VIEW_EXE)
+endif
+
+# Mac OS X build depends on some thirdparty libs
 ifeq "$(OS)" "Darwin"
-CFLAGS += -I$(HOME)/include -I/usr/X11R6/include
-LDFLAGS += -L$(HOME)/lib -L/usr/X11R6/lib
-ifeq "$(freetype_dir)" ""
-CFLAGS += -I/usr/X11R6/include/freetype2
-endif
-X11LIBS = -lX11 -lXext
+SYS_FREETYPE_INC := -I/usr/X11R6/include/freetype2
+CFLAGS += -I/usr/X11R6/include
+LDFLAGS += -L/usr/X11R6/lib
+X11LIBS := -lX11 -lXext
 PDFVIEW_EXE = $(X11VIEW_EXE)
-ifeq  "$(build)" "release"
-CFLAGS += -DARCH_X86_64
-ARCH_SRC = archx86.c
+ifeq "$(arch)" "amd64"
+CFLAGS += -m64
+LDFLAGS += -m64
+else
+CFLAGS += -m32
+LDFLAGS += -m32
 endif
 endif
 
-# MinGW build depends on thirdparty
+# MinGW build depends on thirdparty libs
 ifeq "$(OS)" "MINGW"
-CC = gcc
-W32LIBS = -lgdi32 -lcomdlg32 -luser32 -ladvapi32 -lshell32 -mwindows
+WINDRES ?= windres
+W32LIBS := -lgdi32 -lcomdlg32 -luser32 -ladvapi32 -lshell32 -mwindows
 PDFVIEW_EXE = $(WINVIEW_EXE)
 endif
 

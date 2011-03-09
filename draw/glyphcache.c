@@ -1,5 +1,6 @@
 #include "fitz.h"
 
+#define MAXFONTSIZE 1000
 #define MAXGLYPHSIZE 256
 #define MAXCACHESIZE (1024*1024)
 
@@ -32,7 +33,7 @@ fz_newglyphcache(void)
 	return cache;
 }
 
-void
+static void
 fz_evictglyphcache(fz_glyphcache *cache)
 {
 	fz_glyphkey *key;
@@ -58,8 +59,16 @@ void
 fz_freeglyphcache(fz_glyphcache *cache)
 {
 	fz_evictglyphcache(cache);
-	fz_drophash(cache->hash);
+	fz_freehash(cache->hash);
 	fz_free(cache);
+}
+
+fz_pixmap *
+fz_renderstrokedglyph(fz_glyphcache *cache, fz_font *font, int cid, fz_matrix trm, fz_matrix ctm, fz_strokestate *stroke)
+{
+	if (font->ftface)
+		return fz_renderftstrokedglyph(font, cid, trm, ctm, stroke);
+	return fz_renderglyph(cache, font, cid, trm);
 }
 
 fz_pixmap *
@@ -67,22 +76,31 @@ fz_renderglyph(fz_glyphcache *cache, fz_font *font, int cid, fz_matrix ctm)
 {
 	fz_glyphkey key;
 	fz_pixmap *val;
+	float size = fz_matrixexpansion(ctm);
 
+	if (size > MAXFONTSIZE)
+	{
+		/* TODO: this case should be handled by rendering glyph as a path fill */
+		fz_warn("font size too large (%g), not rendering glyph", size);
+		return nil;
+	}
+
+	memset(&key, 0, sizeof key);
 	key.font = font;
 	key.cid = cid;
 	key.a = ctm.a * 65536;
 	key.b = ctm.b * 65536;
 	key.c = ctm.c * 65536;
 	key.d = ctm.d * 65536;
-	key.e = (ctm.e - floor(ctm.e)) * 256;
-	key.f = (ctm.f - floor(ctm.f)) * 256;
+	key.e = (ctm.e - floorf(ctm.e)) * 256;
+	key.f = (ctm.f - floorf(ctm.f)) * 256;
 
 	val = fz_hashfind(cache->hash, &key);
 	if (val)
 		return fz_keeppixmap(val);
 
-	ctm.e = floor(ctm.e) + key.e / 256.0;
-	ctm.f = floor(ctm.f) + key.f / 256.0;
+	ctm.e = floorf(ctm.e) + key.e / 256.0f;
+	ctm.f = floorf(ctm.f) + key.f / 256.0f;
 
 	if (font->ftface)
 	{

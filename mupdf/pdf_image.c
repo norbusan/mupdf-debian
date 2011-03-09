@@ -1,466 +1,20 @@
-/*
- * TODO: this needs serious cleaning up, and error checking.
- */
-
 #include "fitz.h"
 #include "mupdf.h"
 
-pdf_image *
-pdf_keepimage(pdf_image *image)
-{
-	image->refs ++;
-	return image;
-}
-
-void
-pdf_dropimage(pdf_image *img)
-{
-	if (img && --img->refs == 0)
-	{
-		fz_dropbuffer(img->samples);
-		if (img->cs)
-			fz_dropcolorspace(img->cs);
-		if (img->indexed)
-			fz_dropcolorspace((fz_colorspace *) img->indexed);
-		if (img->mask)
-			pdf_dropimage(img->mask);
-		fz_free(img);
-	}
-}
-
-fz_error
-pdf_loadinlineimage(pdf_image **imgp, pdf_xref *xref,
-	fz_obj *rdb, fz_obj *dict, fz_stream *file)
-{
-	fz_error error;
-	pdf_image *img;
-	fz_filter *filter;
-	fz_obj *f;
-	fz_obj *cs;
-	fz_obj *d;
-	int ismask;
-	int i;
-
-	img = fz_malloc(sizeof(pdf_image));
-
-	pdf_logimage("load inline image %p {\n", img);
-
-	img->refs = 1;
-	img->cs = nil;
-	img->n = 0;
-	img->a = 0;
-	img->indexed = nil;
-	img->usecolorkey = 0;
-	img->mask = nil;
-
-	img->w = fz_toint(fz_dictgetsa(dict, "Width", "W"));
-	img->h = fz_toint(fz_dictgetsa(dict, "Height", "H"));
-	img->bpc = fz_toint(fz_dictgetsa(dict, "BitsPerComponent", "BPC"));
-	ismask = fz_tobool(fz_dictgetsa(dict, "ImageMask", "IM"));
-	d = fz_dictgetsa(dict, "Decode", "D");
-	cs = fz_dictgetsa(dict, "ColorSpace", "CS");
-	if (img->w == 0)
-		fz_warn("inline image width is zero or undefined");
-	if (img->h == 0)
-		fz_warn("inline image height is zero or undefined");
-
-	pdf_logimage("size %dx%d %d\n", img->w, img->h, img->bpc);
-
-	if (cs)
-	{
-		fz_obj *csd = nil;
-		fz_obj *cso = nil;
-
-		/* Attempt to lookup any name in the resource dictionary */
-		if (fz_isname(cs))
-		{
-			csd = fz_dictgets(rdb, "ColorSpace");
-			cso = fz_dictget(csd, cs);
-		}
-
-		/* If no colorspace found in resource dictionary,
-		* assume that reference is a standard name */
-		if (!cso)
-			cso = cs;
-
-		error = pdf_loadcolorspace(&img->cs, xref, cso);
-		if (error)
-		{
-			pdf_dropimage(img);
-			return fz_rethrow(error, "cannot load colorspace (%d %d R)", fz_tonum(cso), fz_togen(cso));
-		}
-
-		if (!img->cs)
-			return fz_throw("image is missing colorspace");
-
-		if (!strcmp(img->cs->name, "Indexed"))
-		{
-			pdf_logimage("indexed\n");
-			img->indexed = (pdf_indexed*)img->cs;
-			img->cs = img->indexed->base;
-			fz_keepcolorspace(img->cs);
-		}
-
-		pdf_logimage("colorspace %s\n", img->cs->name);
-
-		img->n = img->cs->n;
-		img->a = 0;
-	}
-
-	if (ismask)
-	{
-		pdf_logimage("is mask\n");
-		if (img->cs)
-		{
-			fz_warn("masks can not have colorspace, proceeding anyway.");
-			fz_dropcolorspace(img->cs);
-			img->cs = nil;
-		}
-		if (img->bpc != 1)
-			fz_warn("masks can only have one component, proceeding anyway.");
-
-		img->bpc = 1;
-		img->n = 0;
-		img->a = 1;
-	}
-	else if (!cs)
-		return fz_throw("image is missing colorspace");
-
-	if (fz_isarray(d))
-	{
-		pdf_logimage("decode array\n");
-		if (img->indexed)
-			for (i = 0; i < 2; i++)
-				img->decode[i] = fz_toreal(fz_arrayget(d, i));
-		else
-			for (i = 0; i < (img->n + img->a) * 2; i++)
-				img->decode[i] = fz_toreal(fz_arrayget(d, i));
-	}
-	else
-	{
-		if (img->indexed)
-			for (i = 0; i < 2; i++)
-				img->decode[i] = i & 1 ? (1 << img->bpc) - 1 : 0;
-		else
-			for (i = 0; i < (img->n + img->a) * 2; i++)
-				img->decode[i] = i & 1;
-	}
-
-	if (img->indexed)
-		img->stride = (img->w * img->bpc + 7) / 8;
-	else
-		img->stride = (img->w * (img->n + img->a) * img->bpc + 7) / 8;
-
-	/* load image data */
-
-	f = fz_dictgetsa(dict, "Filter", "F");
-	if (!f || (fz_isarray(f) && fz_arraylen(f) == 0))
-	{
-		img->samples = fz_newbuffer(img->h * img->stride);
-
-		error = fz_read(&i, file, img->samples->bp, img->h * img->stride);
-		if (error)
-			return error;
-
-		img->samples->wp += img->h * img->stride;
-	}
-	else
-	{
-		fz_stream *tempfile;
-
-		filter = pdf_buildinlinefilter(xref, dict);
-
-		tempfile = fz_openfilter(filter, file);
-
-		img->samples = fz_readall(tempfile, img->stride * img->h);
-		fz_dropstream(tempfile);
-
-		fz_dropfilter(filter);
-	}
-
-	/* 0 means opaque and 1 means transparent, so we invert to get alpha */
-	if (ismask)
-	{
-		unsigned char *p;
-		for (p = img->samples->bp; p < img->samples->ep; p++)
-			*p = ~*p;
-	}
-
-	pdf_logimage("}\n");
-
-	*imgp = img;
-	return fz_okay;
-}
+/* TODO: store JPEG compressed samples */
+/* TODO: store flate compressed samples */
 
 static void
-loadcolorkey(int *colorkey, int bpc, int indexed, fz_obj *obj)
-{
-	int scale = 1;
-	int i;
-
-	pdf_logimage("keyed mask\n");
-
-	if (!indexed)
-	{
-		switch (bpc)
-		{
-		case 1: scale = 255; break;
-		case 2: scale = 85; break;
-		case 4: scale = 17; break;
-		case 8: scale = 1; break;
-		}
-	}
-
-	for (i = 0; i < fz_arraylen(obj); i++)
-		colorkey[i] = fz_toint(fz_arrayget(obj, i)) * scale;
-}
-
-/* TODO error cleanup */
-fz_error
-pdf_loadimage(pdf_image **imgp, pdf_xref *xref, fz_obj *dict)
-{
-	fz_error error;
-	pdf_image *img;
-	pdf_image *mask;
-	int ismask;
-	fz_obj *obj;
-	int i;
-
-	int w, h, bpc;
-	int n = 0;
-	int a = 0;
-	int usecolorkey = 0;
-	fz_colorspace *cs = nil;
-	pdf_indexed *indexed = nil;
-	int stride;
-	int realsize, expectedsize;
-
-	if ((*imgp = pdf_finditem(xref->store, PDF_KIMAGE, dict)))
-	{
-		pdf_keepimage(*imgp);
-		return fz_okay;
-	}
-
-	img = fz_malloc(sizeof(pdf_image));
-
-	pdf_logimage("load image (%d %d R) ptr=%p {\n", fz_tonum(dict), fz_togen(dict), img);
-
-	/*
-	 * Dimensions, BPC and ColorSpace
-	 */
-
-	w = fz_toint(fz_dictgets(dict, "Width"));
-	if (w == 0)
-		fz_warn("image width is zero or undefined");
-
-	h = fz_toint(fz_dictgets(dict, "Height"));
-	if (h == 0)
-		fz_warn("image height is zero or undefined");
-
-	bpc = fz_toint(fz_dictgets(dict, "BitsPerComponent"));
-
-	pdf_logimage("size %dx%d %d\n", w, h, bpc);
-
-	cs = nil;
-	obj = fz_dictgets(dict, "ColorSpace");
-	if (obj)
-	{
-		error = pdf_loadcolorspace(&cs, xref, obj);
-		if (error)
-		{
-			pdf_dropimage(img);
-			return fz_rethrow(error, "cannot load colorspace (%d %d R)", fz_tonum(obj), fz_togen(obj));
-		}
-
-		if (!strcmp(cs->name, "Indexed"))
-		{
-			pdf_logimage("indexed\n");
-			indexed = (pdf_indexed*)cs;
-			cs = indexed->base;
-			fz_keepcolorspace(cs);
-		}
-		n = cs->n;
-		a = 0;
-
-		pdf_logimage("colorspace %s\n", cs->name);
-	}
-
-	/*
-	 * ImageMask, Mask and SoftMask
-	 */
-
-	mask = nil;
-
-	ismask = fz_tobool(fz_dictgets(dict, "ImageMask"));
-	if (ismask)
-	{
-		pdf_logimage("is mask\n");
-		if (cs)
-		{
-			fz_warn("masks can not have colorspace, proceeding anyway.");
-			fz_dropcolorspace(cs);
-			cs = nil;
-		}
-		if (bpc != 0 && bpc != 1)
-			fz_warn("masks can only have one component, proceeding anyway.");
-
-		bpc = 1;
-		n = 0;
-		a = 1;
-	}
-	else
-	{
-		if (!cs)
-			return fz_throw("colorspace missing for image");
-		if (bpc == 0)
-			return fz_throw("image has no bits per component");
-	}
-
-	obj = fz_dictgets(dict, "SMask");
-	if (fz_isindirect(obj))
-	{
-		pdf_logimage("has soft mask\n");
-
-		error = pdf_loadimage(&mask, xref, obj);
-		if (error)
-			return error;
-
-		if (mask->cs && mask->cs != pdf_devicegray)
-			return fz_throw("syntaxerror: SMask must be DeviceGray");
-
-		mask->cs = nil;
-		mask->n = 0;
-		mask->a = 1;
-	}
-
-	obj = fz_dictgets(dict, "Mask");
-	if (fz_isindirect(obj))
-	{
-		if (fz_isarray(obj))
-		{
-			usecolorkey = 1;
-			loadcolorkey(img->colorkey, bpc, indexed != nil, obj);
-		}
-		else
-		{
-			pdf_logimage("has mask\n");
-			if (mask)
-			{
-				fz_warn("image has both a mask and a soft mask. ignoring the soft mask.");
-				pdf_dropimage(mask);
-				mask = nil;
-			}
-			error = pdf_loadimage(&mask, xref, obj);
-			if (error)
-				return error;
-		}
-	}
-	else if (fz_isarray(obj))
-	{
-		usecolorkey = 1;
-		loadcolorkey(img->colorkey, bpc, indexed != nil, obj);
-	}
-
-	/*
-	 * Decode
-	 */
-
-	obj = fz_dictgets(dict, "Decode");
-	if (fz_isarray(obj))
-	{
-		pdf_logimage("decode array\n");
-		if (indexed)
-			for (i = 0; i < 2; i++)
-				img->decode[i] = fz_toreal(fz_arrayget(obj, i));
-		else
-			for (i = 0; i < (n + a) * 2; i++)
-				img->decode[i] = fz_toreal(fz_arrayget(obj, i));
-	}
-	else
-	{
-		if (indexed)
-			for (i = 0; i < 2; i++)
-				img->decode[i] = i & 1 ? (1 << bpc) - 1 : 0;
-		else
-			for (i = 0; i < (n + a) * 2; i++)
-				img->decode[i] = i & 1;
-	}
-
-	/*
-	 * Load samples
-	 */
-
-	if (indexed)
-		stride = (w * bpc + 7) / 8;
-	else
-		stride = (w * (n + a) * bpc + 7) / 8;
-
-	error = pdf_loadstream(&img->samples, xref, fz_tonum(dict), fz_togen(dict));
-	if (error)
-	{
-		/* TODO: colorspace? */
-		fz_free(img);
-		return error;
-	}
-
-	expectedsize = stride *h;
-	realsize = img->samples->wp - img->samples->bp;
-	if (realsize < expectedsize)
-	{
-		/* don't treat truncated image as fatal - get as much as possible and
-		fill the rest with 0 */
-		fz_buffer *buf;
-		buf = fz_newbuffer(expectedsize);
-		memset(buf->bp, 0, expectedsize);
-		memmove(buf->bp, img->samples->bp, realsize);
-		buf->wp = buf->bp + expectedsize;
-		fz_dropbuffer(img->samples);
-		img->samples = buf;
-		fz_warn("truncated image; proceeding anyway");
-	}
-
-	/* 0 means opaque and 1 means transparent, so we invert to get alpha */
-	if (ismask)
-	{
-		unsigned char *p;
-		for (p = img->samples->bp; p < img->samples->ep; p++)
-			*p = ~*p;
-	}
-
-	/*
-	 * Create image object
-	 */
-
-	img->refs = 1;
-	img->cs = cs;
-	img->w = w;
-	img->h = h;
-	img->n = n;
-	img->a = a;
-	img->indexed = indexed;
-	img->stride = stride;
-	img->bpc = bpc;
-	img->mask = mask;
-	img->usecolorkey = usecolorkey;
-
-	pdf_logimage("}\n");
-
-	pdf_storeitem(xref->store, PDF_KIMAGE, dict, img);
-
-	*imgp = img;
-	return fz_okay;
-}
-
-static void
-maskcolorkey(fz_pixmap *pix, int *colorkey)
+pdf_maskcolorkey(fz_pixmap *pix, int n, int *colorkey)
 {
 	unsigned char *p = pix->samples;
-	int i, k, t;
-	for (i = 0; i < pix->w * pix->h; i++)
+	int len = pix->w * pix->h;
+	int k, t;
+	while (len--)
 	{
 		t = 1;
-		for (k = 1; k < pix->n; k++)
-			if (p[k] < colorkey[k * 2 - 2] || p[k] > colorkey[k * 2 - 1])
+		for (k = 0; k < n; k++)
+			if (p[k] < colorkey[k * 2] || p[k] > colorkey[k * 2 + 1])
 				t = 0;
 		if (t)
 			for (k = 0; k < pix->n; k++)
@@ -469,103 +23,342 @@ maskcolorkey(fz_pixmap *pix, int *colorkey)
 	}
 }
 
-static void
-maskcolorkeyindexed(fz_pixmap *ind, fz_pixmap *pix, int *colorkey)
+static fz_error
+pdf_loadimageimp(fz_pixmap **imgp, pdf_xref *xref, fz_obj *rdb, fz_obj *dict, fz_stream *cstm, int forcemask)
 {
-	unsigned char *s = ind->samples;
-	unsigned char *d = pix->samples;
-	int i, k;
+	fz_stream *stm;
+	fz_pixmap *tile;
+	fz_obj *obj, *res;
+	fz_error error;
 
-	for (i = 0; i < pix->w * pix->h; i++)
+	int w, h, bpc, n;
+	int imagemask;
+	int interpolate;
+	int indexed;
+	fz_colorspace *colorspace;
+	fz_pixmap *mask; /* explicit mask/softmask image */
+	int usecolorkey;
+	int colorkey[FZ_MAXCOLORS * 2];
+	float decode[FZ_MAXCOLORS * 2];
+
+	int scale;
+	int stride;
+	unsigned char *samples;
+	int i, len;
+
+	w = fz_toint(fz_dictgetsa(dict, "Width", "W"));
+	h = fz_toint(fz_dictgetsa(dict, "Height", "H"));
+	bpc = fz_toint(fz_dictgetsa(dict, "BitsPerComponent", "BPC"));
+	imagemask = fz_tobool(fz_dictgetsa(dict, "ImageMask", "IM"));
+	interpolate = fz_tobool(fz_dictgetsa(dict, "Interpolate", "I"));
+
+	indexed = 0;
+	usecolorkey = 0;
+	colorspace = nil;
+	mask = nil;
+
+	if (imagemask)
+		bpc = 1;
+
+	if (w == 0)
+		return fz_throw("image width is zero");
+	if (h == 0)
+		return fz_throw("image height is zero");
+	if (bpc == 0)
+		return fz_throw("image depth is zero");
+
+	obj = fz_dictgetsa(dict, "ColorSpace", "CS");
+	if (obj && !imagemask && !forcemask)
 	{
-		if (s[0] >= colorkey[0] && s[0] <= colorkey[1])
-			for (k = 0; k < pix->n; k++)
-				d[k] = 0;
-		s += ind->n;
-		d += pix->n;
-	}
-}
-
-fz_error
-pdf_loadtile(pdf_image *src, fz_pixmap *tile)
-{
-	void (*tilefunc)(unsigned char*,int,unsigned char*, int, int, int, int);
-
-	assert(tile->x == 0); /* can't handle general tile yet, only y-banding */
-
-	assert(tile->n == src->n + 1);
-	assert(tile->x >= 0);
-	assert(tile->y >= 0);
-	assert(tile->x + tile->w <= src->w);
-	assert(tile->y + tile->h <= src->h);
-
-	switch (src->bpc)
-	{
-	case 1: tilefunc = fz_loadtile1; break;
-	case 2: tilefunc = fz_loadtile2; break;
-	case 4: tilefunc = fz_loadtile4; break;
-	case 8: tilefunc = fz_loadtile8; break;
-	case 16: tilefunc = fz_loadtile16; break;
-	default:
-		return fz_throw("rangecheck: unsupported bit depth: %d", src->bpc);
-	}
-
-	if (src->indexed)
-	{
-		fz_pixmap *tmp;
-		int x, y, k, i;
-		int bpcfact = 1;
-
-		tmp = fz_newpixmap(nil, tile->x, tile->y, tile->w, tile->h);
-
-		switch (src->bpc)
+		if (fz_isname(obj))
 		{
-		case 1: bpcfact = 255; break;
-		case 2: bpcfact = 85; break;
-		case 4: bpcfact = 17; break;
-		case 8: bpcfact = 1; break;
+			res = fz_dictget(fz_dictgets(rdb, "ColorSpace"), obj);
+			if (res)
+				obj = res;
 		}
 
-		tilefunc(src->samples->rp + (tile->y * src->stride), src->stride,
-			tmp->samples, tmp->w,
-			tmp->w, tmp->h, 0);
+		error = pdf_loadcolorspace(&colorspace, xref, obj);
+		if (error)
+			return fz_rethrow(error, "cannot load image colorspace");
 
-		for (y = 0; y < tile->h; y++)
-		{
-			int dn = tile->n;
-			unsigned char *dst = tile->samples + y * tile->w * dn;
-			unsigned char *st = tmp->samples + y * tmp->w;
-			unsigned char *index = src->indexed->lookup;
-			int high = src->indexed->high;
-			int sn = src->indexed->base->n;
-			for (x = 0; x < tile->w; x++)
-			{
-				dst[x * dn] = 255; /* alpha */
-				i = st[x] / bpcfact;
-				i = CLAMP(i, 0, high);
-				for (k = 0; k < sn; k++)
-				{
-					dst[x * dn + k + 1] = index[i * sn + k];
-				}
-			}
-		}
+		if (!strcmp(colorspace->name, "Indexed"))
+			indexed = 1;
 
-		if (src->usecolorkey)
-			maskcolorkeyindexed(tmp, tile, src->colorkey);
-
-		fz_droppixmap(tmp);
+		n = colorspace->n;
 	}
-
 	else
 	{
-		tilefunc(src->samples->rp + (tile->y * src->stride), src->stride,
-			tile->samples, tile->w * tile->n,
-			tile->w * (src->n + src->a), tile->h, src->a ? 0 : src->n);
-		if (src->usecolorkey)
-			maskcolorkey(tile, src->colorkey);
-		fz_decodetile(tile, !src->a, src->decode);
+		n = 1;
 	}
 
+	obj = fz_dictgetsa(dict, "Decode", "D");
+	if (obj)
+	{
+		for (i = 0; i < n * 2; i++)
+			decode[i] = fz_toreal(fz_arrayget(obj, i));
+	}
+	else
+	{
+		float maxval = indexed ? (1 << bpc) - 1 : 1;
+		for (i = 0; i < n * 2; i++)
+			decode[i] = i & 1 ? maxval : 0;
+	}
+
+	obj = fz_dictgetsa(dict, "SMask", "Mask");
+	if (fz_isdict(obj))
+	{
+		/* Not allowed for inline images */
+		if (!cstm)
+		{
+			error = pdf_loadimageimp(&mask, xref, rdb, obj, nil, 1);
+			if (error)
+			{
+				if (colorspace)
+					fz_dropcolorspace(colorspace);
+				return fz_rethrow(error, "cannot load image mask/softmask");
+			}
+		}
+	}
+	else if (fz_isarray(obj))
+	{
+		usecolorkey = 1;
+		for (i = 0; i < n * 2; i++)
+			colorkey[i] = fz_toint(fz_arrayget(obj, i));
+	}
+
+	stride = (w * n * bpc + 7) / 8;
+	samples = fz_malloc(h * stride);
+
+	if (cstm)
+	{
+		stm = pdf_openinlinestream(cstm, xref, dict, stride * h);
+	}
+	else
+	{
+		error = pdf_openstream(&stm, xref, fz_tonum(dict), fz_togen(dict));
+		if (error)
+		{
+			if (colorspace)
+				fz_dropcolorspace(colorspace);
+			if (mask)
+				fz_droppixmap(mask);
+			return fz_rethrow(error, "cannot open image data stream (%d 0 R)", fz_tonum(dict));
+		}
+	}
+
+	len = fz_read(stm, samples, h * stride);
+	if (len < 0)
+	{
+		fz_close(stm);
+		if (colorspace)
+			fz_dropcolorspace(colorspace);
+		if (mask)
+			fz_droppixmap(mask);
+		return fz_rethrow(n, "cannot read image data");
+	}
+
+	/* Make sure we read the EOF marker (for inline images only) */
+	if (cstm)
+	{
+		unsigned char tbuf[512];
+		int tlen = fz_read(stm, tbuf, sizeof tbuf);
+		if (tlen < 0)
+			fz_catch(tlen, "ignoring error at end of image");
+		if (tlen > 0)
+			fz_warn("ignoring garbage at end of image");
+	}
+
+	fz_close(stm);
+
+	/* Pad truncated images */
+	if (len < stride * h)
+	{
+		fz_warn("padding truncated image (%d 0 R)", fz_tonum(dict));
+		memset(samples + len, 0, stride * h - len);
+	}
+
+	/* Invert 1-bit image masks */
+	if (imagemask)
+	{
+		/* 0=opaque and 1=transparent so we need to invert */
+		unsigned char *p = samples;
+		len = h * stride;
+		for (i = 0; i < len; i++)
+			p[i] = ~p[i];
+	}
+
+	pdf_logimage("size %dx%d n=%d bpc=%d imagemask=%d indexed=%d\n", w, h, n, bpc, imagemask, indexed);
+
+	/* Unpack samples into pixmap */
+
+	tile = fz_newpixmap(colorspace, 0, 0, w, h);
+
+	tile->mask = mask;
+
+	scale = 1;
+	if (!indexed)
+	{
+		switch (bpc)
+		{
+		case 1: scale = 255; break;
+		case 2: scale = 85; break;
+		case 4: scale = 17; break;
+		}
+	}
+
+	fz_unpacktile(tile, samples, n, bpc, stride, scale);
+
+	if (usecolorkey)
+		pdf_maskcolorkey(tile, n, colorkey);
+
+	if (indexed)
+	{
+		fz_pixmap *conv;
+
+		fz_decodeindexedtile(tile, decode, (1 << bpc) - 1);
+
+		conv = pdf_expandindexedpixmap(tile);
+		fz_droppixmap(tile);
+		tile = conv;
+	}
+	else
+	{
+		fz_decodetile(tile, decode);
+	}
+
+	if (colorspace)
+		fz_dropcolorspace(colorspace);
+
+	fz_free(samples);
+
+	*imgp = tile;
 	return fz_okay;
 }
 
+fz_error
+pdf_loadinlineimage(fz_pixmap **pixp, pdf_xref *xref, fz_obj *rdb, fz_obj *dict, fz_stream *file)
+{
+	fz_error error;
+
+	pdf_logimage("load inline image {\n");
+
+	error = pdf_loadimageimp(pixp, xref, rdb, dict, file, 0);
+	if (error)
+		return fz_rethrow(error, "cannot load inline image");
+
+	pdf_logimage("}\n");
+	
+	return fz_okay;
+}
+
+static int
+pdf_isjpximage(fz_obj *filter)
+{
+	int i;
+	if (!strcmp(fz_toname(filter), "JPXDecode"))
+		return 1;
+	for (i = 0; i < fz_arraylen(filter); i++)
+		if (!strcmp(fz_toname(fz_arrayget(filter, i)), "JPXDecode"))
+			return 1;
+	return 0;
+}
+
+static fz_error
+pdf_loadjpximage(fz_pixmap **imgp, pdf_xref *xref, fz_obj *rdb, fz_obj *dict)
+{
+	fz_error error;
+	fz_buffer *buf;
+	fz_pixmap *img;
+	fz_obj *obj, *res;
+
+	pdf_logimage("jpeg2000\n");
+
+	error = pdf_loadstream(&buf, xref, fz_tonum(dict), fz_togen(dict));
+	if (error)
+		return fz_rethrow(error, "cannot load jpx image data");
+
+	error = fz_loadjpximage(&img, buf->data, buf->len);
+	if (error)
+	{
+		fz_dropbuffer(buf);
+		return fz_rethrow(error, "cannot load jpx image");
+	}
+
+	fz_dropbuffer(buf);
+
+	obj = fz_dictgetsa(dict, "SMask", "Mask");
+	if (fz_isdict(obj))
+	{
+		error = pdf_loadimageimp(&img->mask, xref, rdb, obj, nil, 1);
+		if (error)
+		{
+			fz_droppixmap(img);
+			return fz_rethrow(error, "cannot load image mask/softmask");
+		}
+	}
+
+	obj = fz_dictgets(dict, "ColorSpace");
+	if (obj)
+	{
+		if (fz_isname(obj))
+		{
+			res = fz_dictget(fz_dictgets(rdb, "ColorSpace"), obj);
+			if (res)
+				obj = res;
+		}
+
+		fz_dropcolorspace(img->colorspace);
+		img->colorspace = nil;
+
+		error = pdf_loadcolorspace(&img->colorspace, xref, obj);
+		if (error)
+			return fz_rethrow(error, "cannot load image colorspace");
+
+		if (!strcmp(img->colorspace->name, "Indexed"))
+		{
+			fz_pixmap *conv;
+			conv = pdf_expandindexedpixmap(img);
+			fz_droppixmap(img);
+			img = conv;
+		}
+	}
+
+	*imgp = img;
+	return fz_okay;
+}
+
+fz_error
+pdf_loadimage(fz_pixmap **pixp, pdf_xref *xref, fz_obj *rdb, fz_obj *dict)
+{
+	fz_error error;
+	fz_obj *obj;
+
+	if ((*pixp = pdf_finditem(xref->store, fz_droppixmap, dict)))
+	{
+		fz_keeppixmap(*pixp);
+		return fz_okay;
+	}
+
+	pdf_logimage("load image (%d 0 R) {\n", fz_tonum(dict));
+
+	/* special case for JPEG2000 images */
+	obj = fz_dictgets(dict, "Filter");
+	if (pdf_isjpximage(obj))
+	{
+		error = pdf_loadjpximage(pixp, xref, rdb, dict);
+		if (error)
+			return fz_rethrow(error, "cannot load jpx image (%d 0 R)", fz_tonum(dict));
+	}
+	else
+	{
+		error = pdf_loadimageimp(pixp, xref, rdb, dict, nil, 0);
+		if (error)
+			return fz_rethrow(error, "cannot load image (%d 0 R)", fz_tonum(dict));
+	}
+
+	pdf_storeitem(xref->store, fz_keeppixmap, fz_droppixmap, dict, *pixp);
+
+	pdf_logimage("}\n");
+
+	return fz_okay;
+}
