@@ -1,3 +1,4 @@
 version=3
 
-http://mupdf.com/download/ mupdf-([\d.]+)\.tar\.gz
+opts="uversionmangle=s/-source//" \
+http://mupdf.com/download/ mupdf-([\d.]+-source)\.tar\.gz
