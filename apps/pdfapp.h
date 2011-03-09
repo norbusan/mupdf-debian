@@ -16,12 +16,11 @@ extern void winerror(pdfapp_t*, fz_error error);
 extern void wintitle(pdfapp_t*, char *title);
 extern void winresize(pdfapp_t*, int w, int h);
 extern void winrepaint(pdfapp_t*);
-extern char* winpassword(pdfapp_t*, char *filename);
+extern char *winpassword(pdfapp_t*, char *filename);
 extern void winopenuri(pdfapp_t*, char *s);
 extern void wincursor(pdfapp_t*, int curs);
 extern void windocopy(pdfapp_t*);
 extern void winreloadfile(pdfapp_t*);
-extern void wininvert(pdfapp_t*, fz_bbox rect);
 extern void windrawstring(pdfapp_t*, int x, int y, char *s);
 extern void winclose(pdfapp_t*);
 extern void winhelp(pdfapp_t*);
@@ -80,6 +79,7 @@ void pdfapp_init(pdfapp_t *app);
 void pdfapp_open(pdfapp_t *app, char *filename, int fd);
 void pdfapp_close(pdfapp_t *app);
 
+char *pdfapp_version(pdfapp_t *app);
 char *pdfapp_usage(pdfapp_t *app);
 
 void pdfapp_onkey(pdfapp_t *app, int c);

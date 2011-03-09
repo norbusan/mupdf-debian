@@ -36,7 +36,7 @@ struct pdf_function_s
 			int size[MAXM];
 			float encode[MAXM][2];
 			float decode[MAXN][2];
-			int *samples;
+			float *samples;
 		} sa;
 
 		struct {
@@ -349,7 +349,7 @@ resizecode(pdf_function *func, int newsize)
 	if (newsize >= func->u.p.cap)
 	{
 		func->u.p.cap = func->u.p.cap + 64;
-		func->u.p.code = fz_realloc(func->u.p.code, func->u.p.cap * sizeof(psobj));
+		func->u.p.code = fz_realloc(func->u.p.code, func->u.p.cap, sizeof(psobj));
 	}
 }
 
@@ -359,7 +359,7 @@ parsecode(pdf_function *func, fz_stream *stream, int *codeptr)
 	fz_error error;
 	char buf[64];
 	int len;
-	pdf_token_e tok;
+	int tok;
 	int opptr, elseptr, ifptr;
 	int a, b, mid, cmp;
 
@@ -502,7 +502,7 @@ loadpostscriptfunc(pdf_function *func, pdf_xref *xref, fz_obj *dict, int num, in
 	fz_stream *stream;
 	int codeptr;
 	char buf[64];
-	pdf_token_e tok;
+	int tok;
 	int len;
 
 	pdf_logrsrc("load postscript function (%d %d R)\n", num, gen);
@@ -1046,52 +1046,55 @@ loadsamplefunc(pdf_function *func, pdf_xref *xref, fz_obj *dict, int num, int ge
 
 	pdf_logrsrc("samplecount %d\n", samplecount);
 
-	func->u.sa.samples = fz_malloc(samplecount * sizeof(int));
+	func->u.sa.samples = fz_calloc(samplecount, sizeof(float));
 
 	error = pdf_openstream(&stream, xref, num, gen);
 	if (error)
 		return fz_rethrow(error, "cannot open samples stream (%d %d R)", num, gen);
 
 	/* read samples */
+	for (i = 0; i < samplecount; ++i)
 	{
-		unsigned int bitmask = (1 << bps) - 1;
-		unsigned int buf = 0;
-		int bits = 0;
-		int s;
+		unsigned int x;
+		float s;
 
-		for (i = 0; i < samplecount; ++i)
+		if (fz_peekbyte(stream) == EOF)
 		{
-			if (fz_peekbyte(stream) == EOF && bits == 0)
-			{
-				fz_close(stream);
-				return fz_throw("truncated sample stream");
-			}
-
-			if (bps == 8) {
-				s = fz_readbyte(stream);
-			}
-			else if (bps == 16) {
-				s = fz_readbyte(stream);
-				s = (s << 8) + fz_readbyte(stream);
-			}
-			else if (bps == 32) {
-				s = fz_readbyte(stream);
-				s = (s << 8) + fz_readbyte(stream);
-				s = (s << 8) + fz_readbyte(stream);
-				s = (s << 8) + fz_readbyte(stream);
-			}
-			else {
-				while (bits < bps)
-				{
-					buf = (buf << 8) | (fz_readbyte(stream) & 0xff);
-					bits += 8;
-				}
-				s = (buf >> (bits - bps)) & bitmask;
-				bits -= bps;
-			}
-
-			func->u.sa.samples[i] = s;
+			fz_close(stream);
+			return fz_throw("truncated sample stream");
 		}
+
+		switch (bps)
+		{
+		case 1: s = fz_readbits(stream, 1); break;
+		case 2: s = fz_readbits(stream, 2) / 3.0f; break;
+		case 4: s = fz_readbits(stream, 4) / 15.0f; break;
+		case 8: s = fz_readbyte(stream) / 255.0f; break;
+		case 12: s = fz_readbits(stream, 12) / 4095.0f; break;
+		case 16:
+			x = fz_readbyte(stream) << 8;
+			x |= fz_readbyte(stream);
+			s = x / 65535.0f;
+			break;
+		case 24:
+			x = fz_readbyte(stream) << 16;
+			x |= fz_readbyte(stream) << 8;
+			x |= fz_readbyte(stream);
+			s = x / 16777215.0f;
+			break;
+		case 32:
+			x = fz_readbyte(stream) << 24;
+			x |= fz_readbyte(stream) << 16;
+			x |= fz_readbyte(stream) << 8;
+			x |= fz_readbyte(stream);
+			s = x / 4294967295.0f;
+			break;
+		default:
+			fz_close(stream);
+			return fz_throw("sample stream bit depth %d unsupported", bps);
+		}
+
+		func->u.sa.samples[i] = s;
 	}
 
 	fz_close(stream);
@@ -1101,18 +1104,36 @@ loadsamplefunc(pdf_function *func, pdf_xref *xref, fz_obj *dict, int num, int ge
 	return fz_okay;
 }
 
+static float
+interpolatesample(pdf_function *func, int *scale, int *e0, int *e1, float *efrac, int dim, int idx)
+{
+	float a, b;
+	int idx0, idx1;
+
+	idx0 = e0[dim] * scale[dim] + idx;
+	idx1 = e1[dim] * scale[dim] + idx;
+
+	if (dim == 0)
+	{
+		a = func->u.sa.samples[idx0];
+		b = func->u.sa.samples[idx1];
+	}
+	else
+	{
+		a = interpolatesample(func, scale, e0, e1, efrac, dim - 1, idx0);
+		b = interpolatesample(func, scale, e0, e1, efrac, dim - 1, idx1);
+	}
+
+	return a + (b - a) * efrac[dim];
+}
+
 static fz_error
 evalsamplefunc(pdf_function *func, float *in, float *out)
 {
-	float x;
-	int e[2][MAXM];
+	int e0[MAXM], e1[MAXM], scale[MAXM];
 	float efrac[MAXM];
-	float static0[1 << 4];
-	float static1[1 << 4];
-	float *s0 = static0;
-	float *s1 = static1;
-	int i, j, k;
-	int idx;
+	float x;
+	int i;
 
 	/* encode input coordinates */
 	for (i = 0; i < func->m; i++)
@@ -1121,46 +1142,53 @@ evalsamplefunc(pdf_function *func, float *in, float *out)
 		x = LERP(x, func->domain[i][0], func->domain[i][1],
 			func->u.sa.encode[i][0], func->u.sa.encode[i][1]);
 		x = CLAMP(x, 0, func->u.sa.size[i] - 1);
-		e[0][i] = floorf(x);
-		e[1][i] = ceilf(x);
+		e0[i] = floorf(x);
+		e1[i] = ceilf(x);
 		efrac[i] = x - floorf(x);
 	}
 
-	if (func->m > 4)
-	{
-		s0 = fz_malloc((1 << func->m) * 2 * sizeof(float));
-		s1 = s0 + (1 << func->m);
-	}
+	scale[0] = func->n;
+	for (i = 1; i < func->m; i++)
+		scale[i] = scale[i - 1] * func->u.sa.size[i];
 
-	/* FIXME i think this is wrong... test with 2 samples it gets wrong idxs */
 	for (i = 0; i < func->n; i++)
 	{
-		/* pull 2^m values out of the sample array */
-		for (j = 0; j < (1 << func->m); ++j)
+		if (func->m == 1)
 		{
-			idx = 0;
-			for (k = func->m - 1; k >= 0; --k)
-				idx = idx * func->u.sa.size[k] + e[(j >> k) & 1][k];
-			idx = idx * func->n + i;
-			s0[j] = func->u.sa.samples[idx];
+			float a = func->u.sa.samples[e0[0] * func->n + i];
+			float b = func->u.sa.samples[e1[0] * func->n + i];
+
+			float ab = a + (b - a) * efrac[0];
+
+			out[i] = LERP(ab, 0, 1, func->u.sa.decode[i][0], func->u.sa.decode[i][1]);
+			out[i] = CLAMP(out[i], func->range[i][0], func->range[i][1]);
 		}
 
-		/* do m sets of interpolations */
-		for (j = 0; j < func->m; ++j)
+		else if (func->m == 2)
 		{
-			for (k = 0; k < (1 << (func->m - j)); k += 2)
-				s1[k >> 1] = (1 - efrac[j]) * s0[k] + efrac[j] * s0[k+1];
-			memcpy(s0, s1, (1 << (func->m - j - 1)) * sizeof(float));
+			int s0 = func->n;
+			int s1 = s0 * func->u.sa.size[0];
+
+			float a = func->u.sa.samples[e0[0] * s0 +  e0[1] * s1 + i];
+			float b = func->u.sa.samples[e1[0] * s0 +  e0[1] * s1 + i];
+			float c = func->u.sa.samples[e0[0] * s0 +  e1[1] * s1 + i];
+			float d = func->u.sa.samples[e1[0] * s0 +  e1[1] * s1 + i];
+
+			float ab = a + (b - a) * efrac[0];
+			float cd = c + (d - c) * efrac[0];
+			float abcd = ab + (cd - ab) * efrac[1];
+
+			out[i] = LERP(abcd, 0, 1, func->u.sa.decode[i][0], func->u.sa.decode[i][1]);
+			out[i] = CLAMP(out[i], func->range[i][0], func->range[i][1]);
 		}
 
-		/* decode output values */
-		out[i] = LERP(s0[0], 0, (1 << func->u.sa.bps) - 1,
-			func->u.sa.decode[i][0], func->u.sa.decode[i][1]);
-		out[i] = CLAMP(out[i], func->range[i][0], func->range[i][1]);
+		else
+		{
+			float x = interpolatesample(func, scale, e0, e1, efrac, func->m - 1, i);
+			out[i] = LERP(x, 0, 1, func->u.sa.decode[i][0], func->u.sa.decode[i][1]);
+			out[i] = CLAMP(out[i], func->range[i][0], func->range[i][1]);
+		}
 	}
-
-	if (func->m > 4)
-		fz_free(s0);
 
 	return fz_okay;
 }
@@ -1276,23 +1304,23 @@ loadstitchingfunc(pdf_function *func, pdf_xref *xref, fz_obj *dict)
 		return fz_throw("stitching function has no input functions");
 	{
 		k = fz_arraylen(obj);
-		func->u.st.k = k;
 
-		pdf_logrsrc("k %d\n", func->u.st.k);
+		pdf_logrsrc("k %d\n", k);
 
-		func->u.st.funcs = fz_malloc(func->u.st.k * sizeof (pdf_function*));
-		func->u.st.bounds = fz_malloc((func->u.st.k - 1) * sizeof (float));
-		func->u.st.encode = fz_malloc(func->u.st.k * 2 * sizeof (float));
+		func->u.st.funcs = fz_calloc(k, sizeof(pdf_function*));
+		func->u.st.bounds = fz_calloc(k - 1, sizeof(float));
+		func->u.st.encode = fz_calloc(k * 2, sizeof(float));
 		funcs = func->u.st.funcs;
 
 		for (i = 0; i < k; ++i)
 		{
 			sub = fz_arrayget(obj, i);
-			error = pdf_loadfunction(&func->u.st.funcs[i], xref, sub);
+			error = pdf_loadfunction(&funcs[i], xref, sub);
 			if (error)
 				return fz_rethrow(error, "cannot load sub function %d (%d %d R)", i, fz_tonum(sub), fz_togen(sub));
 			if (funcs[i]->m != 1 || funcs[i]->n != funcs[0]->n)
 				return fz_throw("sub function %d /Domain or /Range mismatch", i);
+			func->u.st.k ++;
 		}
 
 		if (!func->n)
@@ -1601,7 +1629,7 @@ pdf_evalfunction(pdf_function *func, float *in, int inlen, float *out, int outle
 	return fz_okay;
 }
 
-void
+static void
 pdf_debugindent(char *prefix, int level, char *suffix)
 {
 	int i;
@@ -1614,7 +1642,7 @@ pdf_debugindent(char *prefix, int level, char *suffix)
 	printf("%s", suffix);
 }
 
-void
+static void
 pdf_debugpsfunccode(psobj *funccode, psobj *code, int level)
 {
 	int eof, wasop;
@@ -1700,7 +1728,7 @@ pdf_debugpsfunccode(psobj *funccode, psobj *code, int level)
 	pdf_debugindent("", --level, "} ");
 }
 
-void
+static void
 pdf_debugfunctionimp(pdf_function *func, int level)
 {
 	int i;

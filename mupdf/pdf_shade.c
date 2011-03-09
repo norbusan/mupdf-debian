@@ -24,7 +24,7 @@ pdf_growmesh(fz_shade *shade, int amount)
 	while (shade->meshlen + amount > shade->meshcap)
 		shade->meshcap = (shade->meshcap * 3) / 2;
 
-	shade->mesh = fz_realloc(shade->mesh, sizeof(float) * shade->meshcap);
+	shade->mesh = fz_realloc(shade->mesh, shade->meshcap, sizeof(float));
 }
 
 static void
@@ -461,10 +461,8 @@ pdf_loadaxialshading(fz_shade *shade, pdf_xref *xref, fz_obj *dict, int funcs, p
 	fz_obj *obj;
 	float d0, d1;
 	int e0, e1;
-	struct vertex p1, p2, p3, p4;
-	struct vertex ep1, ep2, ep3, ep4;
 	float x0, y0, x1, y1;
-	float theta;
+	struct vertex p1, p2;
 
 	pdf_logshade("load type2 (axial) shading\n");
 
@@ -497,97 +495,22 @@ pdf_loadaxialshading(fz_shade *shade, pdf_xref *xref, fz_obj *dict, int funcs, p
 	if (error)
 		return fz_rethrow(error, "unable to sample shading function");
 
-	theta = atan2f(y1 - y0, x1 - x0);
-	theta += (float)M_PI * 0.5f;
+	shade->type = FZ_LINEAR;
 
-	p1.x = x0 + HUGENUM * cosf(theta);
-	p1.y = y0 + HUGENUM * sinf(theta);
+	shade->extend[0] = e0;
+	shade->extend[1] = e1;
+
+	p1.x = x0;
+	p1.y = y0;
 	p1.c[0] = 0;
-	p2.x = x1 + HUGENUM * cosf(theta);
-	p2.y = y1 + HUGENUM * sinf(theta);
-	p2.c[0] = 1;
-	p3.x = x0 - HUGENUM * cosf(theta);
-	p3.y = y0 - HUGENUM * sinf(theta);
-	p3.c[0] = 0;
-	p4.x = x1 - HUGENUM * cosf(theta);
-	p4.y = y1 - HUGENUM * sinf(theta);
-	p4.c[0] = 1;
+	pdf_addvertex(shade, &p1);
 
-	pdf_addquad(shade, &p1, &p2, &p4, &p3);
-
-	if (e0)
-	{
-		ep1.x = p1.x - (x1 - x0) * HUGENUM;
-		ep1.y = p1.y - (y1 - y0) * HUGENUM;
-		ep1.c[0] = 0;
-		ep3.x = p3.x - (x1 - x0) * HUGENUM;
-		ep3.y = p3.y - (y1 - y0) * HUGENUM;
-		ep3.c[0] = 0;
-		pdf_addquad(shade, &ep1, &p1, &p3, &ep3);
-	}
-
-	if (e1)
-	{
-		ep2.x = p2.x + (x1 - x0) * HUGENUM;
-		ep2.y = p2.y + (y1 - y0) * HUGENUM;
-		ep2.c[0] = 1;
-		ep4.x = p4.x + (x1 - x0) * HUGENUM;
-		ep4.y = p4.y + (y1 - y0) * HUGENUM;
-		ep4.c[0] = 1;
-		pdf_addquad(shade, &p2, &ep2, &ep4, &p4);
-	}
+	p2.x = x1;
+	p2.y = y1;
+	p2.c[0] = 0;
+	pdf_addvertex(shade, &p2);
 
 	return fz_okay;
-}
-
-static void
-pdf_buildannulusmesh(fz_shade *shade,
-	float x0, float y0, float r0, float c0,
-	float x1, float y1, float r1, float c1)
-{
-	struct vertex a, b, c, d;
-	float start = atan2(y1 - y0, x1 - x0);
-	float step = (float)M_PI * 2 / RADSEGS;
-	float angle;
-	int i;
-
-	a.c[0] = c0;
-	b.c[0] = c0;
-	c.c[0] = c1;
-	d.c[0] = c1;
-
-	for (i = 0; i < RADSEGS / 2; i ++)
-	{
-		/* top side */
-		angle = start + i * step;
-		a.x = x0 + cosf(angle) * r0;
-		a.y = y0 + sinf(angle) * r0;
-		b.x = x0 + cosf(angle + step) * r0;
-		b.y = y0 + sinf(angle + step) * r0;
-		c.x = x1 + cosf(angle) * r1;
-		c.y = y1 + sinf(angle) * r1;
-		d.x = x1 + cosf(angle + step) * r1;
-		d.y = y1 + sinf(angle + step) * r1;
-		if (r1 > 0) /* a == b, c != d */
-			pdf_addtriangle(shade, &a, &c, &d);
-		if (r0 > 0) /* a != b, c == d */
-			pdf_addtriangle(shade, &a, &d, &b);
-
-		/* bottom side */
-		angle = start - i * step;
-		a.x = x0 + cosf(angle) * r0;
-		a.y = y0 + sinf(angle) * r0;
-		b.x = x0 + cosf(angle - step) * r0;
-		b.y = y0 + sinf(angle - step) * r0;
-		c.x = x1 + cosf(angle) * r1;
-		c.y = y1 + sinf(angle) * r1;
-		d.x = x1 + cosf(angle - step) * r1;
-		d.y = y1 + sinf(angle - step) * r1;
-		if (r1 > 0) /* a == b, c != d */
-			pdf_addtriangle(shade, &a, &c, &d);
-		if (r0 > 0) /* a != b, c == d */
-			pdf_addtriangle(shade, &a, &d, &b);
-	}
 }
 
 static fz_error
@@ -598,9 +521,7 @@ pdf_loadradialshading(fz_shade *shade, pdf_xref *xref, fz_obj *dict, int funcs, 
 	float d0, d1;
 	int e0, e1;
 	float x0, y0, r0, x1, y1, r1;
-	float ex0, ey0, er0;
-	float ex1, ey1, er1;
-	float rs;
+	struct vertex p1, p2;
 
 	pdf_logshade("load type3 (radial) shading\n");
 
@@ -635,58 +556,31 @@ pdf_loadradialshading(fz_shade *shade, pdf_xref *xref, fz_obj *dict, int funcs, 
 	if (error)
 		return fz_rethrow(error, "unable to sample shading function");
 
-	if (r0 < r1)
-		rs = r0 / (r0 - r1);
-	else
-		rs = -HUGENUM;
+	shade->type = FZ_RADIAL;
 
-	ex0 = x0 + (x1 - x0) * rs;
-	ey0 = y0 + (y1 - y0) * rs;
-	er0 = r0 + (r1 - r0) * rs;
+	shade->extend[0] = e0;
+	shade->extend[1] = e1;
 
-	if (r0 > r1)
-		rs = r1 / (r1 - r0);
-	else
-		rs = -HUGENUM;
+	p1.x = x0;
+	p1.y = y0;
+	p1.c[0] = r0;
+	pdf_addvertex(shade, &p1);
 
-	ex1 = x1 + (x0 - x1) * rs;
-	ey1 = y1 + (y0 - y1) * rs;
-	er1 = r1 + (r0 - r1) * rs;
-
-	if (e0)
-		pdf_buildannulusmesh(shade, ex0, ey0, er0, 0, x0, y0, r0, 0);
-	pdf_buildannulusmesh(shade, x0, y0, r0, 0, x1, y1, r1, 1);
-	if (e1)
-		pdf_buildannulusmesh(shade, x1, y1, r1, 1, ex1, ey1, er1, 1);
-
+	p2.x = x1;
+	p2.y = y1;
+	p2.c[0] = r1;
+	pdf_addvertex(shade, &p2);
 	return fz_okay;
 }
 
 /* Type 4-7 -- Triangle and patch mesh shadings */
-
-static inline unsigned int
-readbits(fz_stream *stream, int bits)
-{
-	unsigned int v = 0;
-	int c, n;
-
-	for (n = 0; n < bits; n += 8)
-	{
-		c = fz_readbyte(stream);
-		if (c == EOF)
-			break;
-		v = (v << 8) | c;
-	}
-
-	return v;
-}
 
 static inline float
 readsample(fz_stream *stream, int bits, float min, float max)
 {
 	/* we use pow(2,x) because (1<<x) would overflow the math on 32-bit samples */
 	float bitscale = 1 / (powf(2, bits) - 1);
-	return min + readbits(stream, bits) * (max - min) * bitscale;
+	return min + fz_readbits(stream, bits) * (max - min) * bitscale;
 }
 
 struct meshparams
@@ -741,12 +635,12 @@ pdf_loadmeshparams(pdf_xref *xref, fz_obj *dict, struct meshparams *p)
 	if (p->bpflag != 2 && p->bpflag != 4 && p->bpflag != 8)
 		p->bpflag = 8;
 
-	if (p->bpcoord != 1 && p->bpcoord != 2 && p->bpcoord != 4 && p->bpcoord != 4 &&
+	if (p->bpcoord != 1 && p->bpcoord != 2 && p->bpcoord != 4 &&
 		p->bpcoord != 8 && p->bpcoord != 12 && p->bpcoord != 16 &&
 		p->bpcoord != 24 && p->bpcoord != 32)
 		p->bpcoord = 8;
 
-	if (p->bpcomp != 1 && p->bpcomp != 2 && p->bpcomp != 4 && p->bpcomp != 4 &&
+	if (p->bpcomp != 1 && p->bpcomp != 2 && p->bpcomp != 4 &&
 		p->bpcomp != 8 && p->bpcomp != 12 && p->bpcomp != 16)
 		p->bpcomp = 8;
 }
@@ -778,7 +672,7 @@ pdf_loadtype4shade(fz_shade *shade, pdf_xref *xref, fz_obj *dict,
 
 	while (fz_peekbyte(stream) != EOF)
 	{
-		flag = readbits(stream, p.bpflag);
+		flag = fz_readbits(stream, p.bpflag);
 		vd.x = readsample(stream, p.bpcoord, p.x0, p.x1);
 		vd.y = readsample(stream, p.bpcoord, p.y0, p.y1);
 		for (i = 0; i < ncomp; i++)
@@ -789,13 +683,13 @@ pdf_loadtype4shade(fz_shade *shade, pdf_xref *xref, fz_obj *dict,
 		case 0: /* start new triangle */
 			va = vd;
 
-			readbits(stream, p.bpflag);
+			fz_readbits(stream, p.bpflag);
 			vb.x = readsample(stream, p.bpcoord, p.x0, p.x1);
 			vb.y = readsample(stream, p.bpcoord, p.y0, p.y1);
 			for (i = 0; i < ncomp; i++)
 				vb.c[i] = readsample(stream, p.bpcomp, p.c0[i], p.c1[i]);
 
-			readbits(stream, p.bpflag);
+			fz_readbits(stream, p.bpflag);
 			vc.x = readsample(stream, p.bpcoord, p.x0, p.x1);
 			vc.y = readsample(stream, p.bpcoord, p.y0, p.y1);
 			for (i = 0; i < ncomp; i++)
@@ -847,8 +741,8 @@ pdf_loadtype5shade(fz_shade *shade, pdf_xref *xref, fz_obj *dict,
 	else
 		ncomp = shade->cs->n;
 
-	ref = fz_malloc(p.vprow * sizeof(struct vertex));
-	buf = fz_malloc(p.vprow * sizeof(struct vertex));
+	ref = fz_calloc(p.vprow, sizeof(struct vertex));
+	buf = fz_calloc(p.vprow, sizeof(struct vertex));
 	first = 1;
 
 	while (fz_peekbyte(stream) != EOF)
@@ -914,7 +808,7 @@ pdf_loadtype6shade(fz_shade *shade, pdf_xref *xref, fz_obj *dict,
 		int startpt;
 		int flag;
 
-		flag = readbits(stream, p.bpflag);
+		flag = fz_readbits(stream, p.bpflag);
 
 		if (flag == 0)
 		{
@@ -1039,7 +933,7 @@ pdf_loadtype7shade(fz_shade *shade, pdf_xref *xref, fz_obj *dict,
 		int startpt;
 		int flag;
 
-		flag = readbits(stream, p.bpflag);
+		flag = fz_readbits(stream, p.bpflag);
 
 		if (flag == 0)
 		{
@@ -1146,10 +1040,13 @@ pdf_loadshadingdict(fz_shade **shadep, pdf_xref *xref, fz_obj *dict, fz_matrix t
 
 	shade = fz_malloc(sizeof(fz_shade));
 	shade->refs = 1;
+	shade->type = FZ_MESH;
 	shade->usebackground = 0;
 	shade->usefunction = 0;
 	shade->matrix = transform;
 	shade->bbox = fz_infiniterect;
+	shade->extend[0] = 0;
+	shade->extend[1] = 0;
 
 	shade->meshlen = 0;
 	shade->meshcap = 0;

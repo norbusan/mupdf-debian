@@ -6,7 +6,7 @@
 
 #define STACKSIZE 96
 
-#define noSMOOTHSCALE
+#define SMOOTHSCALE
 
 typedef struct fz_drawdevice_s fz_drawdevice;
 
@@ -135,8 +135,8 @@ fz_drawclippath(void *user, fz_path *path, int evenodd, fz_matrix ctm)
 	mask = fz_newpixmapwithrect(nil, bbox);
 	dest = fz_newpixmapwithrect(model, bbox);
 
-	fz_clearpixmap(mask, 0);
-	fz_clearpixmap(dest, 0);
+	fz_clearpixmap(mask);
+	fz_clearpixmap(dest);
 
 	fz_scanconvert(dev->gel, dev->ael, evenodd, bbox, mask, nil);
 
@@ -181,8 +181,8 @@ fz_drawclipstrokepath(void *user, fz_path *path, fz_strokestate *stroke, fz_matr
 	mask = fz_newpixmapwithrect(nil, bbox);
 	dest = fz_newpixmapwithrect(model, bbox);
 
-	fz_clearpixmap(mask, 0);
-	fz_clearpixmap(dest, 0);
+	fz_clearpixmap(mask);
+	fz_clearpixmap(dest);
 
 	if (!fz_isemptyrect(bbox))
 		fz_scanconvert(dev->gel, dev->ael, 0, bbox, mask, nil);
@@ -353,8 +353,8 @@ fz_drawcliptext(void *user, fz_text *text, fz_matrix ctm, int accumulate)
 		mask = fz_newpixmapwithrect(nil, bbox);
 		dest = fz_newpixmapwithrect(model, bbox);
 
-		fz_clearpixmap(mask, 0);
-		fz_clearpixmap(dest, 0);
+		fz_clearpixmap(mask);
+		fz_clearpixmap(dest);
 
 		dev->stack[dev->top].scissor = dev->scissor;
 		dev->stack[dev->top].mask = mask;
@@ -420,8 +420,8 @@ fz_drawclipstroketext(void *user, fz_text *text, fz_strokestate *stroke, fz_matr
 	mask = fz_newpixmapwithrect(nil, bbox);
 	dest = fz_newpixmapwithrect(model, bbox);
 
-	fz_clearpixmap(mask, 0);
-	fz_clearpixmap(dest, 0);
+	fz_clearpixmap(mask);
+	fz_clearpixmap(dest);
 
 	dev->stack[dev->top].scissor = dev->scissor;
 	dev->stack[dev->top].mask = mask;
@@ -470,19 +470,15 @@ fz_drawfillshade(void *user, fz_shade *shade, fz_matrix ctm, float alpha)
 	fz_colorspace *model = dev->dest->colorspace;
 	fz_pixmap *dest = dev->dest;
 	fz_rect bounds;
-	fz_bbox bbox;
+	fz_bbox bbox, scissor;
 	float colorfv[FZ_MAXCOLORS];
 	unsigned char colorbv[FZ_MAXCOLORS + 1];
 
 	bounds = fz_boundshade(shade, ctm);
 	bbox = fz_intersectbbox(fz_roundrect(bounds), dev->scissor);
+	scissor = dev->scissor;
 
 	// TODO: proper clip by shade->bbox
-	if (!fz_isemptyrect(shade->bbox))
-	{
-		bounds = fz_transformrect(fz_concat(shade->matrix, ctm), shade->bbox);
-		bbox = fz_intersectbbox(fz_roundrect(bounds), bbox);
-	}
 
 	if (fz_isemptyrect(bbox))
 		return;
@@ -496,7 +492,7 @@ fz_drawfillshade(void *user, fz_shade *shade, fz_matrix ctm, float alpha)
 	if (alpha < 1)
 	{
 		dest = fz_newpixmapwithrect(dev->dest->colorspace, bbox);
-		fz_clearpixmap(dest, 0);
+		fz_clearpixmap(dest);
 	}
 
 	if (shade->usebackground)
@@ -509,10 +505,10 @@ fz_drawfillshade(void *user, fz_shade *shade, fz_matrix ctm, float alpha)
 		colorbv[i] = 255;
 
 		n = dest->n;
-		for (y = bbox.y0; y < bbox.y1; y++)
+		for (y = scissor.y0; y < scissor.y1; y++)
 		{
-			s = dest->samples + ((bbox.x0 - dest->x) + (y - dest->y) * dest->w) * dest->n;
-			for (x = bbox.x0; x < bbox.x1; x++)
+			s = dest->samples + ((scissor.x0 - dest->x) + (y - dest->y) * dest->w) * dest->n;
+			for (x = scissor.x0; x < scissor.x1; x++)
 			{
 				for (i = 0; i < n; i++)
 					*s++ = colorbv[i];
@@ -520,7 +516,7 @@ fz_drawfillshade(void *user, fz_shade *shade, fz_matrix ctm, float alpha)
 		}
 	}
 
-	fz_rendershade(shade, ctm, dest, bbox);
+	fz_paintshade(shade, ctm, dest, bbox);
 
 	if (alpha < 1)
 	{
@@ -537,6 +533,44 @@ fz_calcimagescale(fz_pixmap *image, fz_matrix ctm, int *dx, int *dy)
 	*dx = sx > 1 ? sx : 1;
 	*dy = sy > 1 ? sy : 1;
 	return *dx > 1 || *dy > 1;
+}
+
+static fz_pixmap *
+fz_smoothtransformpixmap(fz_pixmap *image, fz_matrix *ctm, int x, int y, int dx, int dy)
+{
+	fz_pixmap *scaled;
+
+	if ((ctm->a != 0) && (ctm->b == 0) && (ctm->c == 0) && (ctm->d != 0))
+	{
+		/* Unrotated or X flip or Yflip or XYflip */
+		scaled = fz_smoothscalepixmap(image, ctm->e, ctm->f, ctm->a, ctm->d);
+		if (scaled == nil)
+			return nil;
+		ctm->a = scaled->w;
+		ctm->d = scaled->h;
+		ctm->e = scaled->x;
+		ctm->f = scaled->y;
+		return scaled;
+	}
+	if ((ctm->a == 0) && (ctm->b != 0) && (ctm->c != 0) && (ctm->d == 0))
+	{
+		/* Other orthogonal flip/rotation cases */
+		scaled = fz_smoothscalepixmap(image, ctm->f, ctm->e, ctm->b, ctm->c);
+		if (scaled == nil)
+			return nil;
+		ctm->b = scaled->w;
+		ctm->c = scaled->h;
+		ctm->f = scaled->x;
+		ctm->e = scaled->y;
+		return scaled;
+	}
+	/* Downscale, non rectilinear case */
+	if ((dx > 0) && (dy > 0))
+	{
+		scaled = fz_smoothscalepixmap(image, 0, 0, (float)dx, (float)dy);
+		return scaled;
+	}
+	return nil;
 }
 
 static void
@@ -567,10 +601,19 @@ fz_drawfillimage(void *user, fz_pixmap *image, fz_matrix ctm, float alpha)
 #ifdef SMOOTHSCALE
 	dx = sqrtf(ctm.a * ctm.a + ctm.b * ctm.b);
 	dy = sqrtf(ctm.c * ctm.c + ctm.d * ctm.d);
-	if (dx < image->w && dy < image->h)
+	if (dx < image->w || dy < image->h)
 	{
-		scaled = fz_smoothscalepixmap(image, image->x, image->y, dx, dy);
-		image = scaled;
+		scaled = fz_smoothtransformpixmap(image, &ctm, dev->dest->x, dev->dest->y, dx, dy);
+		if (scaled == nil)
+		{
+			if (dx < 1)
+				dx = 1;
+			if (dy < 1)
+				dy = 1;
+			scaled = fz_smoothscalepixmap(image, image->x, image->y, dx, dy);
+		}
+		if (scaled != nil)
+			image = scaled;
 	}
 #else
 	if (fz_calcimagescale(image, ctm, &dx, &dy))
@@ -606,10 +649,19 @@ fz_drawfillimagemask(void *user, fz_pixmap *image, fz_matrix ctm,
 #ifdef SMOOTHSCALE
 	dx = sqrtf(ctm.a * ctm.a + ctm.b * ctm.b);
 	dy = sqrtf(ctm.c * ctm.c + ctm.d * ctm.d);
-	if (dx < image->w && dy < image->h)
+	if (dx < image->w || dy < image->h)
 	{
-		scaled = fz_smoothscalepixmap(image, image->x, image->y, dx, dy);
-		image = scaled;
+		scaled = fz_smoothtransformpixmap(image, &ctm, dev->dest->x, dev->dest->y, dx, dy);
+		if (scaled == nil)
+		{
+			if (dx < 1)
+				dx = 1;
+			if (dy < 1)
+				dy = 1;
+			scaled = fz_smoothscalepixmap(image, image->x, image->y, dx, dy);
+		}
+		if (scaled != nil)
+			image = scaled;
 	}
 #else
 	if (fz_calcimagescale(image, ctm, &dx, &dy))
@@ -662,16 +714,25 @@ fz_drawclipimagemask(void *user, fz_pixmap *image, fz_matrix ctm)
 	mask = fz_newpixmapwithrect(nil, bbox);
 	dest = fz_newpixmapwithrect(model, bbox);
 
-	fz_clearpixmap(mask, 0);
-	fz_clearpixmap(dest, 0);
+	fz_clearpixmap(mask);
+	fz_clearpixmap(dest);
 
 #ifdef SMOOTHSCALE
 	dx = sqrtf(ctm.a * ctm.a + ctm.b * ctm.b);
 	dy = sqrtf(ctm.c * ctm.c + ctm.d * ctm.d);
-	if (dx < image->w && dy < image->h)
+	if (dx < image->w || dy < image->h)
 	{
-		scaled = fz_smoothscalepixmap(image, image->x, image->y, dx, dy);
-		image = scaled;
+		scaled = fz_smoothtransformpixmap(image, &ctm, dev->dest->x, dev->dest->y, dx, dy);
+		if (scaled == nil)
+		{
+			if (dx < 1)
+				dx = 1;
+			if (dy < 1)
+				dy = 1;
+			scaled = fz_smoothscalepixmap(image, image->x, image->y, dx, dy);
+		}
+		if (scaled != nil)
+			image = scaled;
 	}
 #else
 	if (fz_calcimagescale(image, ctm, &dx, &dy))
@@ -734,9 +795,15 @@ fz_drawbeginmask(void *user, fz_rect rect, int luminosity, fz_colorspace *colors
 	dest = fz_newpixmapwithrect(fz_devicegray, bbox);
 
 	if (luminosity)
-		fz_clearpixmap(dest, 255);
+	{
+		float bc;
+		if (!colorspace)
+			colorspace = fz_devicegray;
+		fz_convertcolor(colorspace, colorfv, fz_devicegray, &bc);
+		fz_clearpixmapwithcolor(dest, bc * 255);
+	}
 	else
-		fz_clearpixmap(dest, 0);
+		fz_clearpixmap(dest);
 
 	dev->stack[dev->top].scissor = dev->scissor;
 	dev->stack[dev->top].dest = dev->dest;
@@ -777,7 +844,7 @@ fz_drawendmask(void *user)
 		/* create new dest scratch buffer */
 		bbox = fz_boundpixmap(temp);
 		dest = fz_newpixmapwithrect(dev->dest->colorspace, bbox);
-		fz_clearpixmap(dest, 0);
+		fz_clearpixmap(dest);
 
 		/* push soft mask as clip mask */
 		dev->stack[dev->top].scissor = dev->scissor;
@@ -807,7 +874,7 @@ fz_drawbegingroup(void *user, fz_rect rect, int isolated, int knockout, fz_blend
 	bbox = fz_intersectbbox(bbox, dev->scissor);
 	dest = fz_newpixmapwithrect(model, bbox);
 
-	fz_clearpixmap(dest, 0);
+	fz_clearpixmap(dest);
 
 	dev->stack[dev->top].alpha = alpha;
 	dev->stack[dev->top].blendmode = blendmode;

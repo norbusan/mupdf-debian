@@ -5,7 +5,7 @@
 #include "fitz.h"
 #include "mupdf.h"
 
-static pdf_xref *xref = NULL;
+static pdf_xref *xref = nil;
 static int showbinary = 0;
 static int showdecode = 1;
 static int showcolumn;
@@ -20,7 +20,7 @@ void die(fz_error error)
 
 static void usage(void)
 {
-	fprintf(stderr, "usage: pdfshow [options] file.pdf [xref] [trailer] [pagetree] [object numbers]\n");
+	fprintf(stderr, "usage: pdfshow [options] file.pdf [grepable] [xref] [trailer] [pagetree] [object numbers]\n");
 	fprintf(stderr, "\t-b\tprint streams as binary data\n");
 	fprintf(stderr, "\t-e\tprint encoded streams (don't decode)\n");
 	fprintf(stderr, "\t-p\tpassword\n");
@@ -163,11 +163,38 @@ static void showobject(int num, int gen)
 	fz_dropobj(obj);
 }
 
+static void showgrep(char *filename)
+{
+	fz_error error;
+	fz_obj *obj;
+	int i;
+
+	for (i = 0; i < xref->len; i++)
+	{
+		if (xref->table[i].type == 'n' || xref->table[i].type == 'o')
+		{
+			error = pdf_loadobject(&obj, xref, i, 0);
+			if (error)
+				die(error);
+
+			fz_sortdict(obj);
+
+			printf("%s:%d: ", filename, i);
+			fz_fprintobj(stdout, obj, 1);
+
+			fz_dropobj(obj);
+		}
+	}
+
+	printf("%s:trailer: ", filename);
+	fz_fprintobj(stdout, xref->trailer, 1);
+}
+
 int main(int argc, char **argv)
 {
-	char *password = NULL; /* don't throw errors if encrypted */
-	fz_error error;
+	char *password = nil; /* don't throw errors if encrypted */
 	char *filename;
+	fz_error error;
 	int c;
 
 	while ((c = fz_getopt(argc, argv, "p:be")) != -1)
@@ -199,6 +226,7 @@ int main(int argc, char **argv)
 		case 't': showtrailer(); break;
 		case 'x': showxref(); break;
 		case 'p': showpagetree(); break;
+		case 'g': showgrep(filename); break;
 		default: showobject(atoi(argv[fz_optind]), 0); break;
 		}
 		fz_optind++;

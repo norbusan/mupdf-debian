@@ -2,8 +2,6 @@
 #include "mupdf.h"
 #include "pdfapp.h"
 
-#include "x11_icon.xbm"
-
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
@@ -13,6 +11,20 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#define mupdf_icon_bitmap_16_width 16
+#define mupdf_icon_bitmap_16_height 16
+static unsigned char mupdf_icon_bitmap_16_bits[] = {
+	0x00, 0x00, 0x00, 0x1e, 0x00, 0x2b, 0x80, 0x55, 0x8c, 0x62, 0x8c, 0x51,
+	0x9c, 0x61, 0x1c, 0x35, 0x3c, 0x1f, 0x3c, 0x0f, 0xfc, 0x0f, 0xec, 0x0d,
+	0xec, 0x0d, 0xcc, 0x0c, 0xcc, 0x0c, 0x00, 0x00 };
+
+#define mupdf_icon_bitmap_16_mask_width 16
+#define mupdf_icon_bitmap_16_mask_height 16
+static unsigned char mupdf_icon_bitmap_16_mask_bits[] = {
+	0x00, 0x1e, 0x00, 0x3f, 0x80, 0x7f, 0xce, 0xff, 0xde, 0xff, 0xde, 0xff,
+	0xfe, 0xff, 0xfe, 0x7f, 0xfe, 0x3f, 0xfe, 0x1f, 0xfe, 0x1f, 0xfe, 0x1f,
+	0xfe, 0x1f, 0xfe, 0x1f, 0xfe, 0x1f, 0xce, 0x1c };
 
 #ifndef timeradd
 #define timeradd(a, b, result) \
@@ -51,10 +63,11 @@ static Display *xdpy;
 static Atom XA_TARGETS;
 static Atom XA_TIMESTAMP;
 static Atom XA_UTF8_STRING;
+static Atom WM_DELETE_WINDOW;
 static int x11fd;
 static int xscr;
 static Window xwin;
-static Pixmap xicon;
+static Pixmap xicon, xmask;
 static GC xgc;
 static XEvent xevt;
 static int mapped = 0;
@@ -93,7 +106,7 @@ void winerror(pdfapp_t *app, fz_error error)
 char *winpassword(pdfapp_t *app, char *filename)
 {
 	char *r = password;
-	password = NULL;
+	password = nil;
 	return r;
 }
 
@@ -113,6 +126,7 @@ static void winopen(void)
 	XA_TARGETS = XInternAtom(xdpy, "TARGETS", False);
 	XA_TIMESTAMP = XInternAtom(xdpy, "TIMESTAMP", False);
 	XA_UTF8_STRING = XInternAtom(xdpy, "UTF8_STRING", False);
+	WM_DELETE_WINDOW = XInternAtom(xdpy, "WM_DELETE_WINDOW", False);
 
 	xscr = DefaultScreen(xdpy);
 
@@ -157,12 +171,19 @@ static void winopen(void)
 	wmhints = XAllocWMHints();
 	if (wmhints)
 	{
-		wmhints->flags = IconPixmapHint;
+		wmhints->flags = IconPixmapHint | IconMaskHint;
 		xicon = XCreateBitmapFromData(xdpy, xwin,
-			(char *) gs_l_xbm_bits, gs_l_xbm_width, gs_l_xbm_height);
-		if (xicon)
+			(char*)mupdf_icon_bitmap_16_bits,
+			mupdf_icon_bitmap_16_width,
+			mupdf_icon_bitmap_16_height);
+		xmask = XCreateBitmapFromData(xdpy, xwin,
+			(char*)mupdf_icon_bitmap_16_mask_bits,
+			mupdf_icon_bitmap_16_mask_width,
+			mupdf_icon_bitmap_16_mask_height);
+		if (xicon && xmask)
 		{
 			wmhints->icon_pixmap = xicon;
+			wmhints->icon_mask = xmask;
 			XSetWMHints(xdpy, xwin, wmhints);
 		}
 		XFree(wmhints);
@@ -176,6 +197,8 @@ static void winopen(void)
 		XSetClassHint(xdpy, xwin, classhint);
 		XFree(classhint);
 	}
+
+	XSetWMProtocols(xdpy, xwin, &WM_DELETE_WINDOW, 1);
 
 	x11fd = ConnectionNumber(xdpy);
 }
@@ -198,6 +221,7 @@ void wincursor(pdfapp_t *app, int curs)
 
 void wintitle(pdfapp_t *app, char *s)
 {
+	XStoreName(xdpy, xwin, s);
 #ifdef X_HAVE_UTF8_STRING
 	Xutf8SetWMProperties(xdpy, xwin, s, s, nil, 0, nil, nil, nil);
 #else
@@ -207,7 +231,7 @@ void wintitle(pdfapp_t *app, char *s)
 
 void winhelp(pdfapp_t *app)
 {
-	fprintf(stderr, "%s", pdfapp_usage(app));
+	fprintf(stderr, "%s\n%s", pdfapp_version(app), pdfapp_usage(app));
 }
 
 void winresize(pdfapp_t *app, int w, int h)
@@ -289,7 +313,7 @@ static void winblit(pdfapp_t *app)
 	{
 		int i = gapp.image->w*gapp.image->h;
 		unsigned char *color = malloc(i*4);
-		if (color != NULL)
+		if (color != nil)
 		{
 			unsigned char *s = gapp.image->samples;
 			unsigned char *d = color;
@@ -714,6 +738,11 @@ int main(int argc, char **argv)
 					xevt.xselectionrequest.target,
 					xevt.xselectionrequest.property,
 					xevt.xselectionrequest.time);
+				break;
+
+			case ClientMessage:
+				if (xevt.xclient.format == 32 && xevt.xclient.data.l[0] == WM_DELETE_WINDOW)
+					closing = 1;
 				break;
 			}
 		}

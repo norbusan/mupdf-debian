@@ -9,10 +9,10 @@ fz_newcolorspace(char *name, int n)
 	cs->refs = 1;
 	fz_strlcpy(cs->name, name, sizeof cs->name);
 	cs->n = n;
-	cs->toxyz = NULL;
-	cs->fromxyz = NULL;
-	cs->freedata = NULL;
-	cs->data = NULL;
+	cs->toxyz = nil;
+	cs->fromxyz = nil;
+	cs->freedata = nil;
+	cs->data = nil;
 	return cs;
 }
 
@@ -85,20 +85,57 @@ static void xyztobgr(fz_colorspace *cs, float *xyz, float *bgr)
 
 static void cmyktoxyz(fz_colorspace *cs, float *cmyk, float *xyz)
 {
-#ifdef SLOWCMYK /* from xpdf */
-	float c = CLAMP(cmyk[0] + cmyk[3], 0, 1);
-	float m = CLAMP(cmyk[1] + cmyk[3], 0, 1);
-	float y = CLAMP(cmyk[2] + cmyk[3], 0, 1);
-	float aw = (1-c) * (1-m) * (1-y);
-	float ac = c * (1-m) * (1-y);
-	float am = (1-c) * m * (1-y);
-	float ay = (1-c) * (1-m) * y;
-	float ar = (1-c) * m * y;
-	float ag = c * (1-m) * y;
-	float ab = c * m * (1-y);
-	float r = aw + 0.9137*am + 0.9961*ay + 0.9882*ar;
-	float g = aw + 0.6196*ac + ay + 0.5176*ag;
-	float b = aw + 0.7804*ac + 0.5412*am + 0.0667*ar + 0.2118*ag + 0.4863*ab;
+#ifdef SLOWCMYK /* from poppler */
+	float c = cmyk[0], m = cmyk[1], y = cmyk[2], k = cmyk[3];
+	float c1 = 1 - c, m1 = 1 - m, y1 = 1 - y, k1 = 1 - k;
+	float r, g, b, x;
+
+	/* this is a matrix multiplication, unrolled for performance */
+	x = c1 * m1 * y1 * k1;	/* 0 0 0 0 */
+	r = g = b = x;
+	x = c1 * m1 * y1 * k;	/* 0 0 0 1 */
+	r += 0.1373 * x;
+	g += 0.1216 * x;
+	b += 0.1255 * x;
+	x = c1 * m1 * y * k1;	/* 0 0 1 0 */
+	r += x;
+	g += 0.9490 * x;
+	x = c1 * m1 * y * k;	/* 0 0 1 1 */
+	r += 0.1098 * x;
+	g += 0.1020 * x;
+	x = c1 * m * y1 * k1;	/* 0 1 0 0 */
+	r += 0.9255 * x;
+	b += 0.5490 * x;
+	x = c1 * m * y1 * k;	/* 0 1 0 1 */
+	r += 0.1412 * x;
+	x = c1 * m * y * k1;	/* 0 1 1 0 */
+	r += 0.9294 * x;
+	g += 0.1098 * x;
+	b += 0.1412 * x;
+	x = c1 * m * y * k;	/* 0 1 1 1 */
+	r += 0.1333 * x;
+	x = c * m1 * y1 * k1;	/* 1 0 0 0 */
+	g += 0.6784 * x;
+	b += 0.9373 * x;
+	x = c * m1 * y1 * k;	/* 1 0 0 1 */
+	g += 0.0588 * x;
+	b += 0.1412 * x;
+	x = c * m1 * y * k1;	/* 1 0 1 0 */
+	g += 0.6510 * x;
+	b += 0.3137 * x;
+	x = c * m1 * y * k;	/* 1 0 1 1 */
+	g += 0.0745 * x;
+	x = c * m * y1 * k1;	/* 1 1 0 0 */
+	r += 0.1804 * x;
+	g += 0.1922 * x;
+	b += 0.5725 * x;
+	x = c * m * y1 * k;	/* 1 1 0 1 */
+	b += 0.0078 * x;
+	x = c * m * y * k1;	/* 1 1 1 0 */
+	r += 0.2118 * x;
+	g += 0.2119 * x;
+	b += 0.2235 * x;
+
 	xyz[0] = CLAMP(r, 0, 1);
 	xyz[1] = CLAMP(g, 0, 1);
 	xyz[2] = CLAMP(b, 0, 1);
@@ -331,7 +368,8 @@ fz_stdconvpixmap(fz_pixmap *src, fz_pixmap *dst)
 {
 	float srcv[FZ_MAXCOLORS];
 	float dstv[FZ_MAXCOLORS];
-	int y, x, k;
+	int srcn, dstn;
+	int y, x, k, i;
 
 	fz_colorspace *ss = src->colorspace;
 	fz_colorspace *ds = dst->colorspace;
@@ -343,20 +381,111 @@ fz_stdconvpixmap(fz_pixmap *src, fz_pixmap *dst)
 	assert(src->n == ss->n + 1);
 	assert(dst->n == ds->n + 1);
 
-	for (y = 0; y < src->h; y++)
+	srcn = ss->n;
+	dstn = ds->n;
+
+	/* Special case for Lab colorspace (scaling of components to float) */
+	if (!strcmp(ss->name, "Lab") && srcn == 3)
 	{
-		for (x = 0; x < src->w; x++)
+		for (y = 0; y < src->h; y++)
 		{
-			for (k = 0; k < src->n - 1; k++)
-				srcv[k] = *s++ / 255.0f;
+			for (x = 0; x < src->w; x++)
+			{
+				srcv[0] = *s++ / 255.0f * 100;
+				srcv[1] = *s++ - 128;
+				srcv[2] = *s++ - 128;
 
-			fz_convertcolor(ss, srcv, ds, dstv);
+				fz_convertcolor(ss, srcv, ds, dstv);
 
-			for (k = 0; k < dst->n - 1; k++)
-				*d++ = dstv[k] * 255;
+				for (k = 0; k < dstn; k++)
+					*d++ = dstv[k] * 255;
 
-			*d++ = *s++;
+				*d++ = *s++;
+			}
 		}
+	}
+
+	/* Brute-force for small images */
+	else if (src->w * src->h < 256)
+	{
+		for (y = 0; y < src->h; y++)
+		{
+			for (x = 0; x < src->w; x++)
+			{
+				for (k = 0; k < srcn; k++)
+					srcv[k] = *s++ / 255.0f;
+
+				fz_convertcolor(ss, srcv, ds, dstv);
+
+				for (k = 0; k < dstn; k++)
+					*d++ = dstv[k] * 255;
+
+				*d++ = *s++;
+			}
+		}
+	}
+
+	/* 1-d lookup table for separation and similar colorspaces */
+	else if (srcn == 1)
+	{
+		unsigned char lookup[FZ_MAXCOLORS * 256];
+
+		for (i = 0; i < 256; i++)
+		{
+			srcv[0] = i / 255.0f;
+			fz_convertcolor(ss, srcv, ds, dstv);
+			for (k = 0; k < dstn; k++)
+				lookup[i * dstn + k] = dstv[k] * 255;
+		}
+
+		for (y = 0; y < src->h; y++)
+		{
+			for (x = 0; x < src->w; x++)
+			{
+				i = *s++;
+				for (k = 0; k < dstn; k++)
+					*d++ = lookup[i * dstn + k];
+				*d++ = *s++;
+			}
+		}
+	}
+
+	/* Memoize colors using a hash table for the general case */
+	else
+	{
+		fz_hashtable *lookup;
+		unsigned char *color;
+
+		lookup = fz_newhash(509, srcn);
+
+		for (y = 0; y < src->h; y++)
+		{
+			for (x = 0; x < src->w; x++)
+			{
+				color = fz_hashfind(lookup, s);
+				if (color)
+				{
+					memcpy(d, color, dstn);
+					s += srcn;
+					d += dstn;
+					*d++ = *s++;
+				}
+				else
+				{
+					for (k = 0; k < srcn; k++)
+						srcv[k] = *s++ / 255.0f;
+					fz_convertcolor(ss, srcv, ds, dstv);
+					for (k = 0; k < dstn; k++)
+						*d++ = dstv[k] * 255;
+
+					fz_hashinsert(lookup, s - srcn, d - dstn);
+
+					*d++ = *s++;
+				}
+			}
+		}
+
+		fz_freehash(lookup);
 	}
 }
 
@@ -367,6 +496,10 @@ fz_convertpixmap(fz_pixmap *sp, fz_pixmap *dp)
 	fz_colorspace *ds = dp->colorspace;
 
 	assert(ss && ds);
+
+	if (sp->mask)
+		dp->mask = fz_keeppixmap(sp->mask);
+	dp->interpolate = sp->interpolate;
 
 	if (ss == fz_devicegray)
 	{

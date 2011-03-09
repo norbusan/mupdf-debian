@@ -5,28 +5,7 @@
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
-
-#if ((FREETYPE_MAJOR == 2) && (FREETYPE_MINOR == 1)) || \
-	((FREETYPE_MAJOR == 2) && (FREETYPE_MINOR == 2)) || \
-	((FREETYPE_MAJOR == 2) && (FREETYPE_MINOR == 3) && (FREETYPE_PATCH < 8))
-
-int
-FT_Get_Advance(FT_Face face, int gid, int masks, FT_Fixed *out)
-{
-	int err;
-	err = FT_Load_Glyph(face, gid, masks);
-	if (err)
-		return err;
-	if (masks & FT_LOAD_VERTICAL_LAYOUT)
-		*out = face->glyph->metrics.vertAdvance << 10;
-	else
-		*out = face->glyph->metrics.horiAdvance << 10;
-	return 0;
-}
-
-#else
 #include FT_ADVANCES_H
-#endif
 
 typedef struct fz_textdevice_s fz_textdevice;
 
@@ -70,7 +49,7 @@ fz_addtextcharimp(fz_textspan *span, int c, fz_bbox bbox)
 	if (span->len + 1 >= span->cap)
 	{
 		span->cap = span->cap > 1 ? (span->cap * 3) / 2 : 80;
-		span->text = fz_realloc(span->text, sizeof(fz_textchar) * span->cap);
+		span->text = fz_realloc(span->text, span->cap, sizeof(fz_textchar));
 	}
 	span->text[span->len].c = c;
 	span->text[span->len].bbox = bbox;
@@ -98,7 +77,7 @@ fz_addtextchar(fz_textspan **last, fz_font *font, float size, int wmode, int c, 
 		span->size = size;
 	}
 
-	if (span->font != font || span->size != size || span->wmode != wmode)
+	if ((span->font != font || span->size != size || span->wmode != wmode) && c != 32)
 	{
 		span = fz_newtextspan();
 		span->font = fz_keepfont(font);
@@ -190,7 +169,7 @@ fz_debugtextspanxml(fz_textspan *span)
 			for (k = 0; k < n; k++)
 				putchar(buf[k]);
 		}
-		printf("\" bbox=\"[%d %d %d %d]\">\n",
+		printf("\" bbox=\"%d %d %d %d\" />\n",
 			span->text[i].bbox.x0,
 			span->text[i].bbox.y0,
 			span->text[i].bbox.x1,
@@ -338,25 +317,17 @@ fz_textextractspan(fz_textspan **last, fz_text *text, fz_matrix ctm, fz_point *p
 		{
 			FT_Fixed ftadv = 0;
 			int mask = FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING | FT_LOAD_IGNORE_TRANSFORM;
-			if (text->wmode)
-				mask |= FT_LOAD_VERTICAL_LAYOUT;
+
+			/* TODO: freetype returns broken vertical metrics */
+			/* if (text->wmode) mask |= FT_LOAD_VERTICAL_LAYOUT; */
+
 			FT_Get_Advance(font->ftface, text->els[i].gid, mask, &ftadv);
 			adv = ftadv / 65536.0f;
-			if (text->wmode)
-			{
-				adv = -1; /* TODO: freetype returns broken vertical metrics */
-				rect.x0 = 0;
-				rect.y0 = 0;
-				rect.x1 = 1;
-				rect.y1 = adv;
-			}
-			else
-			{
-				rect.x0 = 0;
-				rect.y0 = descender;
-				rect.x1 = adv;
-				rect.y1 = ascender;
-			}
+
+			rect.x0 = 0;
+			rect.y0 = descender;
+			rect.x1 = adv;
+			rect.y1 = ascender;
 		}
 		else
 		{

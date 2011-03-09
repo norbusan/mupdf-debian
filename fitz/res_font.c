@@ -19,6 +19,10 @@ fz_newfont(void)
 	font->ftsubstitute = 0;
 	font->fthint = 0;
 
+	font->ftfile = nil;
+	font->ftdata = nil;
+	font->ftsize = 0;
+
 	font->t3matrix = fz_identity;
 	font->t3resources = nil;
 	font->t3procs = nil;
@@ -70,6 +74,11 @@ fz_dropfont(fz_font *font)
 				fz_warn("freetype finalizing face: %s", ft_errorstring(fterr));
 			fz_finalizefreetype();
 		}
+
+		if (font->ftfile)
+			fz_free(font->ftfile);
+		if (font->ftdata)
+			fz_free(font->ftdata);
 
 		if (font->widthtable)
 			fz_free(font->widthtable);
@@ -212,25 +221,19 @@ fz_newfontfrombuffer(fz_font **fontp, unsigned char *data, int len, int index)
 	return fz_okay;
 }
 
-fz_pixmap *
-fz_renderftglyph(fz_font *font, int gid, fz_matrix trm)
+static fz_matrix
+fz_adjustftglyphwidth(fz_font *font, int gid, fz_matrix trm)
 {
-	FT_Face face = font->ftface;
-	FT_Matrix m;
-	FT_Vector v;
-	FT_Error fterr;
-	fz_pixmap *glyph;
-	int y;
-
 	/* Fudge the font matrix to stretch the glyph if we've substituted the font. */
 	if (font->ftsubstitute && gid < font->widthcount)
 	{
+		FT_Error fterr;
 		int subw;
 		int realw;
 		float scale;
 
 		/* TODO: use FT_Get_Advance */
-		fterr = FT_Set_Char_Size(face, 1000, 1000, 72, 72);
+		fterr = FT_Set_Char_Size(font->ftface, 1000, 1000, 72, 72);
 		if (fterr)
 			fz_warn("freetype setting character size: %s", ft_errorstring(fterr));
 
@@ -246,8 +249,23 @@ fz_renderftglyph(fz_font *font, int gid, fz_matrix trm)
 		else
 			scale = 1;
 
-		trm = fz_concat(fz_scale(scale, 1), trm);
+		return fz_concat(fz_scale(scale, 1), trm);
 	}
+
+	return trm;
+}
+
+fz_pixmap *
+fz_renderftglyph(fz_font *font, int gid, fz_matrix trm)
+{
+	FT_Face face = font->ftface;
+	FT_Matrix m;
+	FT_Vector v;
+	FT_Error fterr;
+	fz_pixmap *glyph;
+	int y;
+
+	trm = fz_adjustftglyphwidth(font, gid, trm);
 
 	/*
 	Freetype mutilates complex glyphs if they are loaded
@@ -314,7 +332,7 @@ fz_renderftglyph(fz_font *font, int gid, fz_matrix trm)
 		return nil;
 	}
 
-	glyph = fz_newpixmap(NULL,
+	glyph = fz_newpixmap(nil,
 		face->glyph->bitmap_left,
 		face->glyph->bitmap_top - face->glyph->bitmap.rows,
 		face->glyph->bitmap.width,
@@ -344,6 +362,8 @@ fz_renderftstrokedglyph(fz_font *font, int gid, fz_matrix trm, fz_matrix ctm, fz
 	FT_BitmapGlyph bitmap;
 	fz_pixmap *pix;
 	int y;
+
+	trm = fz_adjustftglyphwidth(font, gid, trm);
 
 	m.xx = trm.a * 64; /* should be 65536 */
 	m.yx = trm.b * 64;
@@ -404,7 +424,7 @@ fz_renderftstrokedglyph(fz_font *font, int gid, fz_matrix trm, fz_matrix ctm, fz
 	}
 
 	bitmap = (FT_BitmapGlyph)glyph;
-	pix = fz_newpixmap(NULL,
+	pix = fz_newpixmap(nil,
 		bitmap->left,
 		bitmap->top - bitmap->bitmap.rows,
 		bitmap->bitmap.width,
@@ -434,8 +454,8 @@ fz_newtype3font(char *name, fz_matrix matrix)
 	int i;
 
 	font = fz_newfont();
-	font->t3procs = fz_malloc(sizeof(fz_buffer*) * 256);
-	font->t3widths = fz_malloc(sizeof(float) * 256);
+	font->t3procs = fz_calloc(256, sizeof(fz_buffer*));
+	font->t3widths = fz_calloc(256, sizeof(float));
 
 	fz_strlcpy(font->name, name, sizeof(font->name));
 	font->t3matrix = matrix;
@@ -461,11 +481,11 @@ fz_rendert3glyph(fz_font *font, int gid, fz_matrix trm)
 	fz_pixmap *result;
 
 	if (gid < 0 || gid > 255)
-		return NULL;
+		return nil;
 
 	contents = font->t3procs[gid];
 	if (!contents)
-		return NULL;
+		return nil;
 
 	ctm = fz_concat(font->t3matrix, trm);
 	dev = fz_newbboxdevice(&bbox);
@@ -475,7 +495,7 @@ fz_rendert3glyph(fz_font *font, int gid, fz_matrix trm)
 	fz_freedevice(dev);
 
 	glyph = fz_newpixmap(fz_devicegray, bbox.x0-1, bbox.y0-1, bbox.x1 - bbox.x0 + 1, bbox.y1 - bbox.y0 + 1);
-	fz_clearpixmap(glyph, 0);
+	fz_clearpixmap(glyph);
 
 	cache = fz_newglyphcache();
 	dev = fz_newdrawdevice(cache, glyph);

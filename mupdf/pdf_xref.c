@@ -75,7 +75,7 @@ pdf_readoldtrailer(pdf_xref *xref, char *buf, int cap)
 	char *s;
 	int n;
 	int t;
-	pdf_token_e tok;
+	int tok;
 	int c;
 
 	pdf_logxref("load old xref format trailer\n");
@@ -175,6 +175,23 @@ pdf_readtrailer(pdf_xref *xref, char *buf, int cap)
  * xref tables
  */
 
+void
+pdf_resizexref(pdf_xref *xref, int newlen)
+{
+	int i;
+
+	xref->table = fz_realloc(xref->table, newlen, sizeof(pdf_xrefentry));
+	for (i = xref->len; i < newlen; i++)
+	{
+		xref->table[i].type = 0;
+		xref->table[i].ofs = 0;
+		xref->table[i].gen = 0;
+		xref->table[i].stmofs = 0;
+		xref->table[i].obj = nil;
+	}
+	xref->len = newlen;
+}
+
 static fz_error
 pdf_readoldxref(fz_obj **trailerp, pdf_xref *xref, char *buf, int cap)
 {
@@ -182,7 +199,7 @@ pdf_readoldxref(fz_obj **trailerp, pdf_xref *xref, char *buf, int cap)
 	int ofs, len;
 	char *s;
 	int n;
-	pdf_token_e tok;
+	int tok;
 	int i;
 	int c;
 
@@ -211,24 +228,10 @@ pdf_readoldxref(fz_obj **trailerp, pdf_xref *xref, char *buf, int cap)
 		}
 
 		/* broken pdfs where size in trailer undershoots entries in xref sections */
-		if (ofs + len > xref->cap)
+		if (ofs + len > xref->len)
 		{
 			fz_warn("broken xref section, proceeding anyway.");
-			xref->cap = ofs + len;
-			xref->table = fz_realloc(xref->table, xref->cap * sizeof(pdf_xrefentry));
-		}
-
-		if ((ofs + len) > xref->len)
-		{
-			for (i = xref->len; i < (ofs + len); i++)
-			{
-				xref->table[i].ofs = 0;
-				xref->table[i].gen = 0;
-				xref->table[i].stmofs = 0;
-				xref->table[i].obj = nil;
-				xref->table[i].type = 0;
-			}
-			xref->len = ofs + len;
+			pdf_resizexref(xref, ofs + len);
 		}
 
 		for (i = ofs; i < ofs + len; i++)
@@ -247,6 +250,8 @@ pdf_readoldxref(fz_obj **trailerp, pdf_xref *xref, char *buf, int cap)
 				xref->table[i].ofs = atoi(s);
 				xref->table[i].gen = atoi(s + 11);
 				xref->table[i].type = s[17];
+				if (s[17] != 'f' && s[17] != 'n' && s[17] != 'o')
+					return fz_throw("unexpected xref type: %#x (%d %d R)", s[17], i, xref->table[i].gen);
 			}
 		}
 	}
@@ -316,7 +321,6 @@ pdf_readnewxref(fz_obj **trailerp, pdf_xref *xref, char *buf, int cap)
 	int num, gen, stmofs;
 	int size, w0, w1, w2;
 	int t;
-	int i;
 
 	pdf_logxref("load new xref format\n");
 
@@ -332,38 +336,15 @@ pdf_readnewxref(fz_obj **trailerp, pdf_xref *xref, char *buf, int cap)
 	}
 	size = fz_toint(obj);
 
-	if (size >= xref->cap)
-	{
-		xref->cap = size + 1; /* for hack to allow broken pdf generators with off-by-one errors */
-		xref->table = fz_realloc(xref->table, xref->cap * sizeof(pdf_xrefentry));
-	}
-
 	if (size > xref->len)
 	{
-		for (i = xref->len; i < xref->cap; i++)
-		{
-			xref->table[i].ofs = 0;
-			xref->table[i].gen = 0;
-			xref->table[i].stmofs = 0;
-			xref->table[i].obj = nil;
-			xref->table[i].type = 0;
-		}
-		xref->len = size;
+		pdf_resizexref(xref, size);
 	}
 
 	if (num < 0 || num >= xref->len)
 	{
-		if (num == xref->len && num < xref->cap)
-		{
-			/* allow broken pdf files that have off-by-one errors in the xref */
-			fz_warn("object id (%d %d R) out of range (0..%d)", num, gen, xref->len - 1);
-			xref->len ++;
-		}
-		else
-		{
-			fz_dropobj(trailer);
-			return fz_throw("object id (%d %d R) out of range (0..%d)", num, gen, xref->len - 1);
-		}
+		fz_dropobj(trailer);
+		return fz_throw("object id (%d %d R) out of range (0..%d)", num, gen, xref->len - 1);
 	}
 
 	pdf_logxref("\tnum=%d gen=%d size=%d\n", num, gen, size);
@@ -479,7 +460,7 @@ pdf_readxrefsections(pdf_xref *xref, int ofs, char *buf, int cap)
 	prev = fz_dictgets(trailer, "Prev");
 	if (prev)
 	{
-		pdf_logxref("load prev at 0x%x\n", fz_toint(prev));
+		pdf_logxref("load prev at %#x\n", fz_toint(prev));
 		error = pdf_readxrefsections(xref, fz_toint(prev), buf, cap);
 		if (error)
 		{
@@ -519,19 +500,9 @@ pdf_loadxref(pdf_xref *xref, char *buf, int bufsize)
 	if (!size)
 		return fz_throw("trailer missing Size entry");
 
-	pdf_logxref("\tsize %d at 0x%x\n", fz_toint(size), xref->startxref);
+	pdf_logxref("\tsize %d at %#x\n", fz_toint(size), xref->startxref);
 
-	xref->len = fz_toint(size);
-	xref->cap = xref->len + 1; /* for hack to allow broken pdf generators with off-by-one errors */
-	xref->table = fz_malloc(xref->cap * sizeof(pdf_xrefentry));
-	for (i = 0; i < xref->cap; i++)
-	{
-		xref->table[i].ofs = 0;
-		xref->table[i].gen = 0;
-		xref->table[i].stmofs = 0;
-		xref->table[i].obj = nil;
-		xref->table[i].type = 0;
-	}
+	pdf_resizexref(xref, fz_toint(size));
 
 	error = pdf_readxrefsections(xref, xref->startxref, buf, bufsize);
 	if (error)
@@ -545,7 +516,7 @@ pdf_loadxref(pdf_xref *xref, char *buf, int bufsize)
 	for (i = 0; i < xref->len; i++)
 		if (xref->table[i].type == 'n')
 			if (xref->table[i].ofs <= 0 || xref->table[i].ofs >= xref->filesize)
-				return fz_throw("object offset out of range: %d", xref->table[i].ofs);
+				return fz_throw("object offset out of range: %d (%d 0 R)", xref->table[i].ofs, i);
 
 	return fz_okay;
 }
@@ -560,8 +531,9 @@ pdf_openxrefwithstream(pdf_xref **xrefp, fz_stream *file, char *password)
 {
 	pdf_xref *xref;
 	fz_error error;
-	fz_obj *encrypt;
-	fz_obj *id;
+	fz_obj *encrypt, *id;
+	fz_obj *dict, *obj;
+	int i, repaired = 0;
 
 	xref = fz_malloc(sizeof(pdf_xref));
 
@@ -578,9 +550,13 @@ pdf_openxrefwithstream(pdf_xref **xrefp, fz_stream *file, char *password)
 		if (xref->table)
 		{
 			fz_free(xref->table);
-			xref->table = NULL;
+			xref->table = nil;
 			xref->len = 0;
-			xref->cap = 0;
+		}
+		if (xref->trailer)
+		{
+			fz_dropobj(xref->trailer);
+			xref->trailer = nil;
 		}
 		error = pdf_repairxref(xref, xref->scratch, sizeof xref->scratch);
 		if (error)
@@ -588,6 +564,7 @@ pdf_openxrefwithstream(pdf_xref **xrefp, fz_stream *file, char *password)
 			pdf_freexref(xref);
 			return fz_rethrow(error, "cannot repair document");
 		}
+		repaired = 1;
 	}
 
 	encrypt = fz_dictgets(xref->trailer, "Encrypt");
@@ -613,6 +590,59 @@ pdf_openxrefwithstream(pdf_xref **xrefp, fz_stream *file, char *password)
 				pdf_freexref(xref);
 				return fz_throw("invalid password");
 			}
+		}
+	}
+
+	if (repaired)
+	{
+		int hasroot, hasinfo;
+
+		error = pdf_repairobjstms(xref);
+		if (error)
+		{
+			pdf_freexref(xref);
+			return fz_rethrow(error, "cannot repair document");
+		}
+
+		hasroot = fz_dictgets(xref->trailer, "Root") != nil;
+		hasinfo = fz_dictgets(xref->trailer, "Info") != nil;
+
+		for (i = 1; i < xref->len; i++)
+		{
+			if (xref->table[i].type == 0 || xref->table[i].type == 'f')
+				continue;
+
+			error = pdf_loadobject(&dict, xref, i, 0);
+			if (error)
+			{
+				fz_catch(error, "ignoring broken object (%d 0 R)", i);
+				continue;
+			}
+
+			if (!hasroot)
+			{
+				obj = fz_dictgets(dict, "Type");
+				if (fz_isname(obj) && !strcmp(fz_toname(obj), "Catalog"))
+				{
+					pdf_logxref("found catalog: (%d %d R)\n", i, 0);
+					obj = fz_newindirect(i, 0, xref);
+					fz_dictputs(xref->trailer, "Root", obj);
+					fz_dropobj(obj);
+				}
+			}
+
+			if (!hasinfo)
+			{
+				if (fz_dictgets(dict, "Creator") || fz_dictgets(dict, "Producer"))
+				{
+					pdf_logxref("found info: (%d %d R)\n", i, 0);
+					obj = fz_newindirect(i, 0, xref);
+					fz_dictputs(xref->trailer, "Info", obj);
+					fz_dropobj(obj);
+				}
+			}
+
+			fz_dropobj(dict);
 		}
 	}
 
@@ -700,7 +730,7 @@ pdf_loadobjstm(pdf_xref *xref, int num, int gen, char *buf, int cap)
 	int first;
 	int count;
 	int i, n;
-	pdf_token_e tok;
+	int tok;
 
 	pdf_logxref("loadobjstm (%d %d R)\n", num, gen);
 
@@ -713,8 +743,8 @@ pdf_loadobjstm(pdf_xref *xref, int num, int gen, char *buf, int cap)
 
 	pdf_logxref("\tcount %d\n", count);
 
-	numbuf = fz_malloc(count * sizeof(int));
-	ofsbuf = fz_malloc(count * sizeof(int));
+	numbuf = fz_calloc(count, sizeof(int));
+	ofsbuf = fz_calloc(count, sizeof(int));
 
 	error = pdf_openstream(&stm, xref, num, gen);
 	if (error)
@@ -887,7 +917,7 @@ pdf_updateobject(pdf_xref *xref, int num, int gen, fz_obj *newobj)
 
 /*
  * Convenience function to open a file then call pdf_openxrefwithstream.
-  */
+ */
 
 fz_error
 pdf_openxref(pdf_xref **xrefp, char *filename, char *password)

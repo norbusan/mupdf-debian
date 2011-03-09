@@ -14,6 +14,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>	/* INT_MAX & co */
 #include <float.h>	/* FLT_EPSILON */
 #include <fcntl.h>	/* O_RDONLY & co */
 
@@ -133,8 +134,9 @@ void fz_catchimpx(fz_error cause, char *fmt, ...) __printflike(2, 3);
 #define CLAMP(x,a,b) ( (x) > (b) ? (b) : ( (x) < (a) ? (a) : (x) ) )
 
 /* memory allocation */
-void *fz_malloc(int n);
-void *fz_realloc(void *p, int n);
+void *fz_malloc(int size);
+void *fz_calloc(int count, int size);
+void *fz_realloc(void *p, int count, int size);
 void fz_free(void *p);
 char *fz_strdup(char *s);
 
@@ -152,7 +154,7 @@ int runetochar(char *str, int *rune);
 int runelen(int c);
 
 /* getopt */
-extern int fz_getopt(int nargc, char * const * nargv, const char *ostr);
+extern int fz_getopt(int nargc, char * const *nargv, const char *ostr);
 extern int fz_optind;
 extern char *fz_optarg;
 
@@ -162,7 +164,7 @@ extern char *fz_optarg;
 
 typedef struct fz_hashtable_s fz_hashtable;
 
-fz_hashtable * fz_newhash(int initialsize, int keylen);
+fz_hashtable *fz_newhash(int initialsize, int keylen);
 void fz_debughash(fz_hashtable *table);
 void fz_emptyhash(fz_hashtable *table);
 void fz_freehash(fz_hashtable *table);
@@ -195,6 +197,10 @@ static inline int fz_mul255(int a, int b)
  * to give a single value in the same range as A was. */
 #define FZ_COMBINE(A,B) (((A)*(B))>>8)
 
+/* Combine values A and C (in the same (any) range) and B and D (in the
+ * 0..256 range), to give a single value in the same range as A and C were.  */
+#define FZ_COMBINE2(A,B,C,D) (FZ_COMBINE((A), (B)) + FZ_COMBINE((C), (D)))
+
 /* Blend SRC and DST (in the same range) together according to
  * AMOUNT (in the 0...256 range). */
 #define FZ_BLEND(SRC, DST, AMOUNT) ((((SRC)-(DST))*(AMOUNT) + ((DST)<<8))>>8)
@@ -214,6 +220,8 @@ extern const fz_bbox fz_infinitebbox;
 
 #define fz_isemptyrect(r) ((r).x0 == (r).x1)
 #define fz_isinfiniterect(r) ((r).x0 > (r).x1)
+#define fz_isemptybbox(b) ((b).x0 == (b).x1)
+#define fz_isinfinitebbox(b) ((b).x0 > (b).x1)
 
 struct fz_matrix_s
 {
@@ -254,6 +262,7 @@ fz_bbox fz_unionbbox(fz_bbox a, fz_bbox b);
 fz_point fz_transformpoint(fz_matrix m, fz_point p);
 fz_point fz_transformvector(fz_matrix m, fz_point p);
 fz_rect fz_transformrect(fz_matrix m, fz_rect r);
+fz_bbox fz_transformbbox(fz_matrix m, fz_bbox b);
 
 /*
  * Basic crypto functions.
@@ -276,6 +285,24 @@ void fz_md5init(fz_md5 *state);
 void fz_md5update(fz_md5 *state, const unsigned char *input, const unsigned inlen);
 void fz_md5final(fz_md5 *state, unsigned char digest[16]);
 
+/* sha-256 digests */
+
+typedef struct fz_sha256_s fz_sha256;
+
+struct fz_sha256_s
+{
+	unsigned int state[8];
+	unsigned int count[2];
+	union {
+		unsigned char u8[64];
+		unsigned int u32[16];
+	} buffer;
+};
+
+void fz_sha256init(fz_sha256 *state);
+void fz_sha256update(fz_sha256 *state, const unsigned char *input, unsigned int inlen);
+void fz_sha256final(fz_sha256 *state, unsigned char digest[32]);
+
 /* arc4 crypto */
 
 typedef struct fz_arc4_s fz_arc4;
@@ -288,7 +315,6 @@ struct fz_arc4_s
 };
 
 void fz_arc4init(fz_arc4 *state, const unsigned char *key, const unsigned len);
-unsigned char fz_arc4next(fz_arc4 *state);
 void fz_arc4encrypt(fz_arc4 *state, unsigned char *dest, const unsigned char *src, const unsigned len);
 
 /* AES block cipher implementation from XYSSL */
@@ -375,18 +401,18 @@ struct fz_obj_s
 	} u;
 };
 
-fz_obj * fz_newnull(void);
-fz_obj * fz_newbool(int b);
-fz_obj * fz_newint(int i);
-fz_obj * fz_newreal(float f);
-fz_obj * fz_newname(char *str);
-fz_obj * fz_newstring(char *str, int len);
-fz_obj * fz_newindirect(int num, int gen, struct pdf_xref_s *xref);
+fz_obj *fz_newnull(void);
+fz_obj *fz_newbool(int b);
+fz_obj *fz_newint(int i);
+fz_obj *fz_newreal(float f);
+fz_obj *fz_newname(char *str);
+fz_obj *fz_newstring(char *str, int len);
+fz_obj *fz_newindirect(int num, int gen, struct pdf_xref_s *xref);
 
-fz_obj * fz_newarray(int initialcap);
-fz_obj * fz_newdict(int initialcap);
-fz_obj * fz_copyarray(fz_obj *array);
-fz_obj * fz_copydict(fz_obj *dict);
+fz_obj *fz_newarray(int initialcap);
+fz_obj *fz_newdict(int initialcap);
+fz_obj *fz_copyarray(fz_obj *array);
+fz_obj *fz_copydict(fz_obj *dict);
 
 fz_obj *fz_keepobj(fz_obj *obj);
 void fz_dropobj(fz_obj *obj);
@@ -420,6 +446,8 @@ int fz_arraylen(fz_obj *array);
 fz_obj *fz_arrayget(fz_obj *array, int i);
 void fz_arrayput(fz_obj *array, int i, fz_obj *obj);
 void fz_arraypush(fz_obj *array, fz_obj *obj);
+void fz_arraydrop(fz_obj *array);
+void fz_arrayinsert(fz_obj *array, fz_obj *obj);
 
 int fz_dictlen(fz_obj *dict);
 fz_obj *fz_dictgetkey(fz_obj *dict, int idx);
@@ -433,22 +461,17 @@ void fz_dictdel(fz_obj *dict, fz_obj *key);
 void fz_dictdels(fz_obj *dict, char *key);
 void fz_sortdict(fz_obj *dict);
 
-int fz_sprintobj(char *s, int n, fz_obj *obj, int tight);
 int fz_fprintobj(FILE *fp, fz_obj *obj, int tight);
 void fz_debugobj(fz_obj *obj);
+void fz_debugref(fz_obj *obj);
 
 char *fz_objkindstr(fz_obj *obj);
 
 /*
  * Data buffers.
- *
- * A buffer owns the memory it has allocated, unless ownsdata is false,
- * in which case the creator of the buffer owns it.
  */
 
 typedef struct fz_buffer_s fz_buffer;
-
-#define FZ_BUFSIZE (8 * 1024)
 
 struct fz_buffer_s
 {
@@ -457,14 +480,12 @@ struct fz_buffer_s
 	int cap, len;
 };
 
-fz_buffer * fz_newbuffer(int size);
-fz_buffer * fz_newbufferwithmemory(unsigned char *data, int size);
+fz_buffer *fz_newbuffer(int size);
+fz_buffer *fz_keepbuffer(fz_buffer *buf);
+void fz_dropbuffer(fz_buffer *buf);
 
 void fz_resizebuffer(fz_buffer *buf, int size);
 void fz_growbuffer(fz_buffer *buf);
-
-fz_buffer *fz_keepbuffer(fz_buffer *buf);
-void fz_dropbuffer(fz_buffer *buf);
 
 /*
  * Buffered reader.
@@ -473,13 +494,13 @@ void fz_dropbuffer(fz_buffer *buf);
 
 typedef struct fz_stream_s fz_stream;
 
-enum { FZ_SFILE, FZ_SBUFFER, FZ_SFILTER };
-
 struct fz_stream_s
 {
 	int refs;
 	int dead;
 	int pos;
+	int avail;
+	int bits;
 	unsigned char *bp, *rp, *wp, *ep;
 	void *state;
 	int (*read)(fz_stream *stm, unsigned char *buf, int len);
@@ -529,23 +550,55 @@ static inline void fz_unreadbyte(fz_stream *stm)
 		stm->rp--;
 }
 
+static inline unsigned int fz_readbits(fz_stream *stm, int n)
+{
+	unsigned int x;
+
+	if (n <= stm->avail)
+	{
+		stm->avail -= n;
+		x = (stm->bits >> stm->avail) & ((1 << n) - 1);
+	}
+	else
+	{
+		x = stm->bits & ((1 << stm->avail) - 1);
+		n -= stm->avail;
+		stm->avail = 0;
+
+		while (n > 8)
+		{
+			x = (x << 8) | fz_readbyte(stm);
+			n -= 8;
+		}
+
+		if (n > 0)
+		{
+			stm->bits = fz_readbyte(stm);
+			stm->avail = 8 - n;
+			x = (x << n) | (stm->bits >> stm->avail);
+		}
+	}
+
+	return x;
+}
+
 /*
  * Data filters.
  */
 
-fz_stream * fz_opencopy(fz_stream *chain);
-fz_stream * fz_opennull(fz_stream *chain, int len);
-fz_stream * fz_openarc4(fz_stream *chain, unsigned char *key, unsigned keylen);
-fz_stream * fz_openaesd(fz_stream *chain, unsigned char *key, unsigned keylen);
-fz_stream * fz_opena85d(fz_stream *chain);
-fz_stream * fz_openahxd(fz_stream *chain);
-fz_stream * fz_openrld(fz_stream *chain);
-fz_stream * fz_opendctd(fz_stream *chain, fz_obj *param);
-fz_stream * fz_openfaxd(fz_stream *chain, fz_obj *param);
-fz_stream * fz_openflated(fz_stream *chain);
-fz_stream * fz_openlzwd(fz_stream *chain, fz_obj *param);
-fz_stream * fz_openpredict(fz_stream *chain, fz_obj *param);
-fz_stream * fz_openjbig2d(fz_stream *chain, fz_buffer *global);
+fz_stream *fz_opencopy(fz_stream *chain);
+fz_stream *fz_opennull(fz_stream *chain, int len);
+fz_stream *fz_openarc4(fz_stream *chain, unsigned char *key, unsigned keylen);
+fz_stream *fz_openaesd(fz_stream *chain, unsigned char *key, unsigned keylen);
+fz_stream *fz_opena85d(fz_stream *chain);
+fz_stream *fz_openahxd(fz_stream *chain);
+fz_stream *fz_openrld(fz_stream *chain);
+fz_stream *fz_opendctd(fz_stream *chain, fz_obj *param);
+fz_stream *fz_openfaxd(fz_stream *chain, fz_obj *param);
+fz_stream *fz_openflated(fz_stream *chain);
+fz_stream *fz_openlzwd(fz_stream *chain, fz_obj *param);
+fz_stream *fz_openpredict(fz_stream *chain, fz_obj *param);
+fz_stream *fz_openjbig2d(fz_stream *chain, fz_buffer *global);
 
 /*
  * Resources and other graphics related objects.
@@ -592,21 +645,24 @@ struct fz_pixmap_s
 	int refs;
 	int x, y, w, h, n;
 	fz_pixmap *mask; /* explicit soft/image mask */
+	int interpolate;
 	fz_colorspace *colorspace;
 	unsigned char *samples;
+	int freesamples;
 };
 
-fz_pixmap * fz_newpixmapwithrect(fz_colorspace *, fz_bbox bbox);
-fz_pixmap * fz_newpixmap(fz_colorspace *, int x, int y, int w, int h);
+fz_pixmap *fz_newpixmapwithdata(fz_colorspace *colorspace, int x, int y, int w, int h, unsigned char *samples);
+fz_pixmap *fz_newpixmapwithrect(fz_colorspace *, fz_bbox bbox);
+fz_pixmap *fz_newpixmap(fz_colorspace *, int x, int y, int w, int h);
 fz_pixmap *fz_keeppixmap(fz_pixmap *pix);
 void fz_droppixmap(fz_pixmap *pix);
-void fz_clearpixmap(fz_pixmap *pix, int value);
-void fz_gammapixmap(fz_pixmap *pix, float gamma);
+void fz_clearpixmap(fz_pixmap *pix);
+void fz_clearpixmapwithcolor(fz_pixmap *pix, int value);
 fz_pixmap *fz_alphafromgray(fz_pixmap *gray, int luminosity);
 fz_bbox fz_boundpixmap(fz_pixmap *pix);
 
-fz_pixmap * fz_scalepixmap(fz_pixmap *src, int xdenom, int ydenom);
-fz_pixmap * fz_smoothscalepixmap(fz_pixmap *src, float x, float y, float w, float h);
+fz_pixmap *fz_scalepixmap(fz_pixmap *src, int xdenom, int ydenom);
+fz_pixmap *fz_smoothscalepixmap(fz_pixmap *src, float x, float y, float w, float h);
 
 fz_error fz_writepnm(fz_pixmap *pixmap, char *filename);
 fz_error fz_writepam(fz_pixmap *pixmap, char *filename, int savealpha);
@@ -648,7 +704,6 @@ void fz_convertpixmap(fz_pixmap *src, fz_pixmap *dst);
  */
 
 struct fz_device_s;
-struct pdf_xref_s;
 
 typedef struct fz_font_s fz_font;
 char *ft_errorstring(int err);
@@ -661,6 +716,11 @@ struct fz_font_s
 	void *ftface; /* has an FT_Face if used */
 	int ftsubstitute; /* ... substitute metrics */
 	int fthint; /* ... force hinting for DynaLab fonts */
+
+	/* origin of font data */
+	char *ftfile;
+	unsigned char *ftdata;
+	int ftsize;
 
 	fz_matrix t3matrix;
 	fz_obj *t3resources;
@@ -677,15 +737,12 @@ struct fz_font_s
 	int *widthtable;
 };
 
-fz_error fz_newfreetypefont(fz_font **fontp, char *name, int substitute);
-fz_error fz_loadfreetypefontfile(fz_font *font, char *path, int index);
-fz_error fz_loadfreetypefontbuffer(fz_font *font, unsigned char *data, int len, int index);
-fz_font * fz_newtype3font(char *name, fz_matrix matrix);
+fz_font *fz_newtype3font(char *name, fz_matrix matrix);
 
 fz_error fz_newfontfrombuffer(fz_font **fontp, unsigned char *data, int len, int index);
 fz_error fz_newfontfromfile(fz_font **fontp, char *path, int index);
 
-fz_font * fz_keepfont(fz_font *font);
+fz_font *fz_keepfont(fz_font *font);
 void fz_dropfont(fz_font *font);
 
 void fz_debugfont(fz_font *font);
@@ -719,6 +776,12 @@ union fz_pathel_s
 	float v;
 };
 
+struct fz_path_s
+{
+	int len, cap;
+	fz_pathel *els;
+};
+
 struct fz_strokestate_s
 {
 	int linecap;
@@ -728,12 +791,6 @@ struct fz_strokestate_s
 	float dashphase;
 	int dashlen;
 	float dashlist[32];
-};
-
-struct fz_path_s
-{
-	int len, cap;
-	fz_pathel *els;
 };
 
 fz_path *fz_newpath(void);
@@ -781,9 +838,8 @@ struct fz_text_s
 	fz_textel *els;
 };
 
-fz_text * fz_newtext(fz_font *face, fz_matrix trm, int wmode);
+fz_text *fz_newtext(fz_font *face, fz_matrix trm, int wmode);
 void fz_addtext(fz_text *text, int gid, int ucs, float x, float y);
-void fz_endtext(fz_text *text);
 void fz_freetext(fz_text *text);
 void fz_debugtext(fz_text*, int indent);
 fz_rect fz_boundtext(fz_text *text, fz_matrix ctm);
@@ -792,6 +848,13 @@ fz_text *fz_clonetext(fz_text *old);
 /*
  * The shading code uses gouraud shaded triangle meshes.
  */
+
+enum
+{
+	FZ_LINEAR,
+	FZ_RADIAL,
+	FZ_MESH,
+};
 
 typedef struct fz_shade_s fz_shade;
 
@@ -809,9 +872,12 @@ struct fz_shade_s
 	int usefunction;
 	float function[256][FZ_MAXCOLORS];
 
+	int type; /* linear, radial, mesh */
+	int extend[2];
+
 	int meshlen;
 	int meshcap;
-	float *mesh; /* [x y t] or [x y c1 ... cn] */
+	float *mesh; /* [x y 0], [x y r], [x y t] or [x y c1 ... cn] */
 };
 
 fz_shade *fz_keepshade(fz_shade *shade);
@@ -819,7 +885,7 @@ void fz_dropshade(fz_shade *shade);
 void fz_debugshade(fz_shade *shade);
 
 fz_rect fz_boundshade(fz_shade *shade, fz_matrix ctm);
-void fz_rendershade(fz_shade *shade, fz_matrix ctm, fz_pixmap *dst, fz_bbox bbox);
+void fz_paintshade(fz_shade *shade, fz_matrix ctm, fz_pixmap *dest, fz_bbox bbox);
 
 /*
  * Glyph cache
@@ -827,12 +893,12 @@ void fz_rendershade(fz_shade *shade, fz_matrix ctm, fz_pixmap *dst, fz_bbox bbox
 
 typedef struct fz_glyphcache_s fz_glyphcache;
 
-fz_glyphcache * fz_newglyphcache(void);
-fz_pixmap * fz_renderftglyph(fz_font *font, int cid, fz_matrix trm);
-fz_pixmap * fz_rendert3glyph(fz_font *font, int cid, fz_matrix trm);
-fz_pixmap * fz_renderftstrokedglyph(fz_font *font, int gid, fz_matrix trm, fz_matrix ctm, fz_strokestate *state);
-fz_pixmap * fz_renderglyph(fz_glyphcache*, fz_font*, int, fz_matrix);
-fz_pixmap * fz_renderstrokedglyph(fz_glyphcache*, fz_font*, int, fz_matrix, fz_matrix, fz_strokestate *stroke);
+fz_glyphcache *fz_newglyphcache(void);
+fz_pixmap *fz_renderftglyph(fz_font *font, int cid, fz_matrix trm);
+fz_pixmap *fz_rendert3glyph(fz_font *font, int cid, fz_matrix trm);
+fz_pixmap *fz_renderftstrokedglyph(fz_font *font, int gid, fz_matrix trm, fz_matrix ctm, fz_strokestate *state);
+fz_pixmap *fz_renderglyph(fz_glyphcache*, fz_font*, int, fz_matrix);
+fz_pixmap *fz_renderstrokedglyph(fz_glyphcache*, fz_font*, int, fz_matrix, fz_matrix, fz_strokestate *stroke);
 void fz_freeglyphcache(fz_glyphcache *);
 
 /*
@@ -867,7 +933,7 @@ struct fz_ael_s
 	fz_edge **edges;
 };
 
-fz_gel * fz_newgel(void);
+fz_gel *fz_newgel(void);
 void fz_insertgel(fz_gel *gel, float x0, float y0, float x1, float y1);
 fz_bbox fz_boundgel(fz_gel *gel);
 void fz_resetgel(fz_gel *gel, fz_bbox clip);
@@ -875,7 +941,7 @@ void fz_sortgel(fz_gel *gel);
 void fz_freegel(fz_gel *gel);
 int fz_isrectgel(fz_gel *gel);
 
-fz_ael * fz_newael(void);
+fz_ael *fz_newael(void);
 void fz_freeael(fz_ael *ael);
 
 fz_error fz_scanconvert(fz_gel *gel, fz_ael *ael, int eofill,
@@ -961,7 +1027,7 @@ struct fz_textspan_s
 	int eol;
 };
 
-fz_textspan * fz_newtextspan(void);
+fz_textspan *fz_newtextspan(void);
 void fz_freetextspan(fz_textspan *line);
 void fz_debugtextspan(fz_textspan *line);
 void fz_debugtextspanxml(fz_textspan *span);
@@ -997,12 +1063,6 @@ typedef enum fz_displaycommand_e
 	FZ_CMDENDGROUP,
 } fz_displaycommand;
 
-struct fz_displaylist_s
-{
-	fz_displaynode *first;
-	fz_displaynode *last;
-};
-
 struct fz_displaynode_s
 {
 	fz_displaycommand cmd;
@@ -1023,6 +1083,12 @@ struct fz_displaynode_s
 	float color[FZ_MAXCOLORS];
 };
 
+struct fz_displaylist_s
+{
+	fz_displaynode *first;
+	fz_displaynode *last;
+};
+
 fz_displaylist *fz_newdisplaylist(void);
 void fz_freedisplaylist(fz_displaylist *list);
 fz_device *fz_newlistdevice(fz_displaylist *list);
@@ -1036,17 +1102,17 @@ void fz_executedisplaylist(fz_displaylist *list, fz_device *dev, fz_matrix ctm);
 /*
 These are the blending primitives:
 
-span over span					(text and path drawing to clip mask)
+span over span			(text and path drawing to clip mask)
 span in alpha over span
 span in span over span
-color in span over span			(text and path drawing)
+color in span over span		(text and path drawing)
 
 	fz_paintspan(dp, sp);
 		fz_paintspanalpha(dp, sp, alpha)
 	fz_paintspanmask(dp, sp, mask);
 	fz_paintspancolor(dp, color, mask);
 
-pixmap over pixmap			(shading with function lookup)
+pixmap over pixmap		(shading with function lookup)
 pixmap in alpha over pixmap	(xobject/shading with ca)
 pixmap in pixmap over pixmap	(xobject with softmask / clip)
 
@@ -1062,9 +1128,9 @@ color in affine over span
 		fz_paintaffinealpha()
 	fz_paintaffinecolor()
 
-image over pixmap				(image fill)
-image in alpha over pixmap		(image fill with ca)
-color in image over pixmap		(image mask fill)
+image over pixmap		(image fill)
+image in alpha over pixmap	(image fill with ca)
+color in image over pixmap	(image mask fill)
 
 	fz_paintimage()
 		fz_paintimagealpha()
@@ -1086,9 +1152,7 @@ void fz_unpacktile(fz_pixmap *dst, unsigned char * restrict src, int n, int dept
 
 void fz_paintspan(unsigned char * restrict dp, unsigned char * restrict sp, int n, int w, int alpha);
 void fz_paintspancolor(unsigned char * restrict dp, unsigned char * restrict mp, int n, int w, unsigned char *color);
-void fz_paintspanmask(unsigned char * restrict dp, unsigned char * restrict sp, unsigned char * restrict mp, int n, int w);
 
-void fz_paintaffine(unsigned char *dp, unsigned char *sp, int sw, int sh, int u, int v, int fa, int fb, int w, int n, int alpha);
 void fz_paintaffinecolor(unsigned char *dp, unsigned char *sp, int sw, int sh, int u, int v, int fa, int fb, int w, int n, unsigned char *color);
 
 void fz_paintimage(fz_pixmap *dst, fz_bbox scissor, fz_pixmap *img, fz_matrix ctm, int alpha);

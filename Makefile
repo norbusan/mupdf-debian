@@ -85,6 +85,7 @@ FITZ_SRC := \
 	fitz/crypt_aes.c \
 	fitz/crypt_arc4.c \
 	fitz/crypt_md5.c \
+	fitz/crypt_sha2.c \
 	fitz/dev_bbox.c \
 	fitz/dev_draw.c \
 	fitz/dev_list.c \
@@ -377,8 +378,12 @@ clean:
 nuke:
 	rm -rf build
 
+BINDIR ?= $(prefix)/bin
+LIBDIR ?= $(prefix)/lib
+INCDIR ?= $(prefix)/include
+
 install: $(OBJDIR) $(GENDIR) $(MUPDF_LIB) $(APPS)
-	install -d $(prefix)/bin $(prefix)/lib $(prefix)/include
-	install $(APPS) $(prefix)/bin
-	install $(MUPDF_LIB) $(prefix)/lib
-	install $(MUPDF_HDR) $(prefix)/include
+	install -d $(BINDIR) $(LIBDIR) $(INCDIR)
+	install $(APPS) $(BINDIR)
+	install $(MUPDF_LIB) $(LIBDIR)
+	install $(MUPDF_HDR) $(INCDIR)

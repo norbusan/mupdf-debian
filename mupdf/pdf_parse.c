@@ -82,19 +82,28 @@ pdf_toucs2(fz_obj *src)
 
 	if (srclen > 2 && srcptr[0] == 254 && srcptr[1] == 255)
 	{
-		dstptr = dst = fz_malloc(((srclen - 2) / 2 + 1) * sizeof(short));
+		dstptr = dst = fz_calloc((srclen - 2) / 2 + 1, sizeof(short));
 		for (i = 2; i < srclen; i += 2)
 			*dstptr++ = (srcptr[i] << 8) | srcptr[i+1];
 	}
 
 	else
 	{
-		dstptr = dst = fz_malloc((srclen + 1) * sizeof(short));
+		dstptr = dst = fz_calloc(srclen + 1, sizeof(short));
 		for (i = 0; i < srclen; i++)
 			*dstptr++ = pdf_docencoding[srcptr[i]];
 	}
 
 	*dstptr = '\0';
+	return dst;
+}
+
+fz_obj *
+pdf_toutf8name(fz_obj *src)
+{
+	char *buf = pdf_toutf8(src);
+	fz_obj *dst = fz_newname(buf);
+	fz_free(buf);
 	return dst;
 }
 
@@ -105,7 +114,7 @@ pdf_parsearray(fz_obj **op, pdf_xref *xref, fz_stream *file, char *buf, int cap)
 	fz_obj *ary = nil;
 	fz_obj *obj = nil;
 	int a = 0, b = 0, n = 0;
-	pdf_token_e tok;
+	int tok;
 	int len;
 
 	ary = fz_newarray(4);
@@ -238,7 +247,7 @@ pdf_parsedict(fz_obj **op, pdf_xref *xref, fz_stream *file, char *buf, int cap)
 	fz_obj *dict = nil;
 	fz_obj *key = nil;
 	fz_obj *val = nil;
-	pdf_token_e tok;
+	int tok;
 	int len;
 	int a, b;
 
@@ -270,7 +279,7 @@ skip:
 		if (tok != PDF_TNAME)
 		{
 			fz_dropobj(dict);
-			return fz_throw("invalid key in dict");;
+			return fz_throw("invalid key in dict");
 		}
 
 		key = fz_newname(buf);
@@ -278,6 +287,7 @@ skip:
 		error = pdf_lex(&tok, file, buf, cap, &len);
 		if (error)
 		{
+			fz_dropobj(key);
 			fz_dropobj(dict);
 			return fz_rethrow(error, "cannot parse dict");
 		}
@@ -351,6 +361,8 @@ skip:
 			return fz_throw("invalid indirect reference in dict");
 
 		default:
+			fz_dropobj(key);
+			fz_dropobj(dict);
 			return fz_throw("unknown token in dict");
 		}
 
@@ -364,7 +376,7 @@ fz_error
 pdf_parsestmobj(fz_obj **op, pdf_xref *xref, fz_stream *file, char *buf, int cap)
 {
 	fz_error error;
-	pdf_token_e tok;
+	int tok;
 	int len;
 
 	error = pdf_lex(&tok, file, buf, cap, &len);
@@ -404,7 +416,7 @@ pdf_parseindobj(fz_obj **op, pdf_xref *xref,
 	fz_error error = fz_okay;
 	fz_obj *obj = nil;
 	int num = 0, gen = 0, stmofs;
-	pdf_token_e tok;
+	int tok;
 	int len;
 	int a, b;
 
@@ -412,21 +424,21 @@ pdf_parseindobj(fz_obj **op, pdf_xref *xref,
 	if (error)
 		return fz_rethrow(error, "cannot parse indirect object (%d %d R)", num, gen);
 	if (tok != PDF_TINT)
-		return fz_throw("cannot parse indirect object (%d %d R)", num, gen);
+		return fz_throw("expected object number (%d %d R)", num, gen);
 	num = atoi(buf);
 
 	error = pdf_lex(&tok, file, buf, cap, &len);
 	if (error)
 		return fz_rethrow(error, "cannot parse indirect object (%d %d R)", num, gen);
 	if (tok != PDF_TINT)
-		return fz_throw("cannot parse indirect object (%d %d R)", num, gen);
+		return fz_throw("expected generation number (%d %d R)", num, gen);
 	gen = atoi(buf);
 
 	error = pdf_lex(&tok, file, buf, cap, &len);
 	if (error)
 		return fz_rethrow(error, "cannot parse indirect object (%d %d R)", num, gen);
 	if (tok != PDF_TOBJ)
-		return fz_throw("cannot parse indirect object (%d %d R)", num, gen);
+		return fz_throw("expected 'obj' keyword (%d %d R)", num, gen);
 
 	error = pdf_lex(&tok, file, buf, cap, &len);
 	if (error)
@@ -475,14 +487,14 @@ pdf_parseindobj(fz_obj **op, pdf_xref *xref,
 				break;
 			}
 		}
-		return fz_throw("cannot parse indirect object (%d %d R)", num, gen);
+		return fz_throw("expected 'R' keyword (%d %d R)", num, gen);
 
 	case PDF_TENDOBJ:
 		obj = fz_newnull();
 		goto skip;
 
 	default:
-		return fz_throw("cannot parse indirect object (%d %d R)", num, gen);
+		return fz_throw("syntax error in object (%d %d R)", num, gen);
 	}
 
 	error = pdf_lex(&tok, file, buf, cap, &len);
@@ -514,7 +526,7 @@ skip:
 	}
 	else
 	{
-		fz_warn("expected endobj or stream keyword (%d %d R)", num, gen);
+		fz_warn("expected 'endobj' or 'stream' keyword (%d %d R)", num, gen);
 		stmofs = 0;
 	}
 

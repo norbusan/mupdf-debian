@@ -5,7 +5,7 @@
 #include "fitz.h"
 #include "mupdf.h"
 
-static pdf_xref *xref = NULL;
+static pdf_xref *xref = nil;
 static int dorgb = 0;
 
 void die(fz_error error)
@@ -47,7 +47,7 @@ static void saveimage(int num)
 
 	/* TODO: detect DCTD and save as jpeg */
 
-	error = pdf_loadimage(&img, xref, nil, ref);
+	error = pdf_loadimage(&img, xref, ref);
 	if (error)
 		die(error);
 
@@ -142,10 +142,10 @@ static void savefont(fz_obj *dict, int num)
 	printf("extracting font %s\n", name);
 
 	f = fopen(name, "wb");
-	if (f == NULL)
+	if (f == nil)
 		die(fz_throw("Error creating font file"));
 
-	n = fwrite(buf, 1, buf->len, f);
+	n = fwrite(buf->data, 1, buf->len, f);
 	if (n < buf->len)
 		die(fz_throw("Error writing font file"));
 

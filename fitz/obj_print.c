@@ -112,7 +112,7 @@ static void fmtstr(struct fmt *fmt, fz_obj *obj)
 
 static void fmthex(struct fmt *fmt, fz_obj *obj)
 {
-	int i,  b, c;
+	int i, b, c;
 
 	fmtputc(fmt, '<');
 	for (i = 0; i < obj->u.s.len; i++) {
@@ -273,7 +273,7 @@ static void fmtobj(struct fmt *fmt, fz_obj *obj)
 		fmtputs(fmt, "<unknown object>");
 }
 
-int
+static int
 fz_sprintobj(char *s, int n, fz_obj *obj, int tight)
 {
 	struct fmt fmt;
@@ -325,3 +325,12 @@ fz_debugobj(fz_obj *obj)
 {
 	fz_fprintobj(stdout, obj, 0);
 }
+
+void
+fz_debugref(fz_obj *ref)
+{
+	fz_obj *obj;
+	obj = fz_resolveindirect(ref);
+	fz_debugobj(obj);
+}
+

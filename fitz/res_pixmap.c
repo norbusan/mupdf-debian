@@ -1,7 +1,7 @@
 #include "fitz.h"
 
 fz_pixmap *
-fz_newpixmap(fz_colorspace *colorspace, int x, int y, int w, int h)
+fz_newpixmapwithdata(fz_colorspace *colorspace, int x, int y, int w, int h, unsigned char *samples)
 {
 	fz_pixmap *pix;
 
@@ -12,6 +12,7 @@ fz_newpixmap(fz_colorspace *colorspace, int x, int y, int w, int h)
 	pix->w = w;
 	pix->h = h;
 	pix->mask = nil;
+	pix->interpolate = 1;
 	pix->colorspace = nil;
 	pix->n = 1;
 
@@ -21,9 +22,24 @@ fz_newpixmap(fz_colorspace *colorspace, int x, int y, int w, int h)
 		pix->n = 1 + colorspace->n;
 	}
 
-	pix->samples = fz_malloc(pix->w * pix->h * pix->n);
+	if (samples)
+	{
+		pix->samples = samples;
+		pix->freesamples = 0;
+	}
+	else
+	{
+		pix->samples = fz_calloc(pix->h, pix->w * pix->n);
+		pix->freesamples = 1;
+	}
 
 	return pix;
+}
+
+fz_pixmap *
+fz_newpixmap(fz_colorspace *colorspace, int x, int y, int w, int h)
+{
+	return fz_newpixmapwithdata(colorspace, x, y, w, h, nil);
 }
 
 fz_pixmap *
@@ -48,15 +64,37 @@ fz_droppixmap(fz_pixmap *pix)
 			fz_droppixmap(pix->mask);
 		if (pix->colorspace)
 			fz_dropcolorspace(pix->colorspace);
-		fz_free(pix->samples);
+		if (pix->freesamples)
+			fz_free(pix->samples);
 		fz_free(pix);
 	}
 }
 
 void
-fz_clearpixmap(fz_pixmap *pix, int value)
+fz_clearpixmap(fz_pixmap *pix)
 {
-	memset(pix->samples, value, pix->w * pix->h * pix->n);
+	memset(pix->samples, 0, pix->w * pix->h * pix->n);
+}
+
+void
+fz_clearpixmapwithcolor(fz_pixmap *pix, int value)
+{
+	if (value == 255)
+		memset(pix->samples, 255, pix->w * pix->h * pix->n);
+	else
+	{
+		int k, x, y;
+		unsigned char *s = pix->samples;
+		for (y = 0; y < pix->h; y++)
+		{
+			for (x = 0; x < pix->w; x++)
+			{
+				for (k = 0; k < pix->n - 1; k++)
+					*s++ = value;
+				*s++ = 255;
+			}
+		}
+	}
 }
 
 fz_bbox
@@ -68,22 +106,6 @@ fz_boundpixmap(fz_pixmap *pix)
 	bbox.x1 = pix->x + pix->w;
 	bbox.y1 = pix->y + pix->h;
 	return bbox;
-}
-
-void
-fz_gammapixmap(fz_pixmap *pix, float gamma)
-{
-	unsigned char table[256];
-	int n = pix->w * pix->h * pix->n;
-	unsigned char *p = pix->samples;
-	int i;
-	for (i = 0; i < 256; i++)
-		table[i] = CLAMP(powf(i / 255.0f, gamma) * 255, 0, 255);
-	while (n--)
-	{
-		*p = table[*p];
-		p++;
-	}
 }
 
 fz_pixmap *
@@ -246,7 +268,7 @@ static void putchunk(char *tag, unsigned char *data, int size, FILE *fp)
 	put32(size, fp);
 	fwrite(tag, 1, 4, fp);
 	fwrite(data, 1, size, fp);
-	sum = crc32(0, NULL, 0);
+	sum = crc32(0, nil, 0);
 	sum = crc32(sum, (unsigned char*)tag, 4);
 	sum = crc32(sum, data, size);
 	put32(sum, fp);
