@@ -1,5 +1,1 @@
-mupdf_remove_extra_usage.patch
-mupdf_fix_build.patch
-mupdf_move_manpages_to_upstream.patch
 mupdf_update_manpages.patch
-mupdf_install_manpages_default.patch
