@@ -1,4 +1,5 @@
 version=3
-
-opts="uversionmangle=s/-source//" \
-http://mupdf.com/download/ mupdf-([\d.]+-source)\.tar\.gz
+opts=\
+downloadurlmangle=s|.*[?]name=(.*?)&.*|http://mupdf.googlecode.com/files/$1|,\
+filenamemangle=s|[^/]+[?]name=mupdf-(.*?)-source\.tar\.gz&.*|mupdf-$1\.tar\.gz| \
+http://code.google.com/p/mupdf/downloads/detail[?]name=mupdf-([0-9.]+)-source\.tar\.gz&.*
