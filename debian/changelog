@@ -1,3 +1,11 @@
+mupdf (0.9-1) unstable; urgency=low
+
+  * New upstream release. (Closes: #641169)
+  * debian/patches/mupdf_update_manpages.patch: Merged upstream.
+  * debian/libmupdf-dev.install: Install more library and headers.
+
+ -- Kan-Ru Chen <koster@debian.org>  Sun, 11 Sep 2011 12:08:18 +0800
+
 mupdf (0.8.15-1) unstable; urgency=low
 
   * New upstream release.
