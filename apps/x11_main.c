@@ -1,5 +1,6 @@
 #include "fitz.h"
 #include "mupdf.h"
+#include "muxps.h"
 #include "pdfapp.h"
 
 #include <X11/Xlib.h>
@@ -11,6 +12,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <signal.h>
 
 #define mupdf_icon_bitmap_16_width 16
 #define mupdf_icon_bitmap_16_height 16
@@ -73,8 +75,8 @@ static XEvent xevt;
 static int mapped = 0;
 static Cursor xcarrow, xchand, xcwait;
 static int justcopied = 0;
-static int isshowingpage = 0;
 static int dirty = 0;
+static int dirtysearch = 0;
 static char *password = "";
 static XColor xbgcolor;
 static XColor xshcolor;
@@ -87,6 +89,7 @@ static char *filename;
 
 static pdfapp_t gapp;
 static int closing = 0;
+static int reloading = 0;
 
 /*
  * Dialog boxes
@@ -106,7 +109,7 @@ void winerror(pdfapp_t *app, fz_error error)
 char *winpassword(pdfapp_t *app, char *filename)
 {
 	char *r = password;
-	password = nil;
+	password = NULL;
 	return r;
 }
 
@@ -119,7 +122,7 @@ static void winopen(void)
 	XWMHints *wmhints;
 	XClassHint *classhint;
 
-	xdpy = XOpenDisplay(nil);
+	xdpy = XOpenDisplay(NULL);
 	if (!xdpy)
 		winerror(&gapp, fz_throw("cannot open display"));
 
@@ -153,7 +156,7 @@ static void winopen(void)
 		InputOutput,
 		ximage_get_visual(),
 		0,
-		nil);
+		NULL);
 	if (xwin == None)
 		winerror(&gapp, fz_throw("cannot create window"));
 
@@ -164,7 +167,7 @@ static void winopen(void)
 
 	mapped = 0;
 
-	xgc = XCreateGC(xdpy, xwin, 0, nil);
+	xgc = XCreateGC(xdpy, xwin, 0, NULL);
 
 	XDefineCursor(xdpy, xwin, xcarrow);
 
@@ -223,9 +226,9 @@ void wintitle(pdfapp_t *app, char *s)
 {
 	XStoreName(xdpy, xwin, s);
 #ifdef X_HAVE_UTF8_STRING
-	Xutf8SetWMProperties(xdpy, xwin, s, s, nil, 0, nil, nil, nil);
+	Xutf8SetWMProperties(xdpy, xwin, s, s, NULL, 0, NULL, NULL, NULL);
 #else
-	XmbSetWMProperties(xdpy, xwin, s, s, nil, 0, nil, nil, nil);
+	XmbSetWMProperties(xdpy, xwin, s, s, NULL, 0, NULL, NULL, NULL);
 #endif
 }
 
@@ -276,6 +279,18 @@ static void fillrect(int x, int y, int w, int h)
 		XFillRectangle(xdpy, xwin, xgc, x, y, w, h);
 }
 
+static void winblitsearch(pdfapp_t *app)
+{
+	if (gapp.isediting)
+	{
+		char buf[sizeof(gapp.search) + 50];
+		sprintf(buf, "Search: %s", gapp.search);
+		XSetForeground(xdpy, xgc, WhitePixel(xdpy, xscr));
+		fillrect(0, 0, gapp.winw, 30);
+		windrawstring(&gapp, 10, 20, buf);
+	}
+}
+
 static void winblit(pdfapp_t *app)
 {
 	int x0 = gapp.panx;
@@ -313,7 +328,7 @@ static void winblit(pdfapp_t *app)
 	{
 		int i = gapp.image->w*gapp.image->h;
 		unsigned char *color = malloc(i*4);
-		if (color != nil)
+		if (color != NULL)
 		{
 			unsigned char *s = gapp.image->samples;
 			unsigned char *d = color;
@@ -342,19 +357,17 @@ static void winblit(pdfapp_t *app)
 		justcopied = 1;
 	}
 
-	if (gapp.isediting)
-	{
-		char buf[sizeof(gapp.search) + 50];
-		sprintf(buf, "Search: %s", gapp.search);
-		XSetForeground(xdpy, xgc, WhitePixel(xdpy, xscr));
-		fillrect(0, 0, gapp.winw, 30);
-		windrawstring(&gapp, 10, 20, buf);
-	}
+	winblitsearch(app);
 }
 
 void winrepaint(pdfapp_t *app)
 {
 	dirty = 1;
+}
+
+void winrepaintsearch(pdfapp_t *app)
+{
+	dirtysearch = 1;
 }
 
 void windrawstringxor(pdfapp_t *app, int x, int y, char *s)
@@ -476,7 +489,7 @@ void winreloadfile(pdfapp_t *app)
 	if (fd < 0)
 		winerror(app, fz_throw("cannot reload file '%s'", filename));
 
-	pdfapp_open(app, filename, fd);
+	pdfapp_open(app, filename, fd, 1);
 }
 
 void winopenuri(pdfapp_t *app, char *buf)
@@ -510,55 +523,20 @@ static void onmouse(int x, int y, int btn, int modifiers, int state)
 	pdfapp_onmouse(&gapp, x, y, btn, modifiers, state);
 }
 
+static void signal_handler(int signal)
+{
+	if (signal == SIGHUP)
+		reloading = 1;
+}
+
 static void usage(void)
 {
 	fprintf(stderr, "usage: mupdf [options] file.pdf [page]\n");
+	fprintf(stderr, "\t-b -\tset anti-aliasing quality in bits (0=off, 8=best)\n");
 	fprintf(stderr, "\t-p -\tpassword\n");
 	fprintf(stderr, "\t-r -\tresolution\n");
 	fprintf(stderr, "\t-A\tdisable accelerated functions\n");
 	exit(1);
-}
-
-static void winawaitevent(struct timeval *tmo, struct timeval *tmo_at)
-{
-	if (tmo_at->tv_sec == 0 && tmo_at->tv_usec == 0 &&
-		tmo->tv_sec == 0 && tmo->tv_usec == 0)
-		XNextEvent(xdpy, &xevt);
-	else
-	{
-		fd_set fds;
-		struct timeval now;
-
-		FD_ZERO(&fds);
-		FD_SET(x11fd, &fds);
-
-		if (select(x11fd + 1, &fds, nil, nil, tmo))
-		{
-			gettimeofday(&now, nil);
-			timersub(tmo_at, &now, tmo);
-			XNextEvent(xdpy, &xevt);
-		}
-	}
-}
-
-static void winsettmo(struct timeval *tmo, struct timeval *tmo_at)
-{
-	struct timeval now;
-
-	tmo->tv_sec = 2;
-	tmo->tv_usec = 0;
-
-	gettimeofday(&now, nil);
-	timeradd(&now, tmo, tmo_at);
-}
-
-static void winresettmo(struct timeval *tmo, struct timeval *tmo_at)
-{
-	tmo->tv_sec = 0;
-	tmo->tv_usec = 0;
-
-	tmo_at->tv_sec = 0;
-	tmo_at->tv_usec = 0;
 }
 
 int main(int argc, char **argv)
@@ -571,18 +549,20 @@ int main(int argc, char **argv)
 	int oldy = 0;
 	int resolution = 72;
 	int pageno = 1;
-	int wasshowingpage;
-	struct timeval tmo, tmo_at;
 	int accelerate = 1;
 	int fd;
+	fd_set fds;
+	int width = -1;
+	int height = -1;
 
-	while ((c = fz_getopt(argc, argv, "p:r:A")) != -1)
+	while ((c = fz_getopt(argc, argv, "p:r:b:A")) != -1)
 	{
 		switch (c)
 		{
 		case 'p': password = fz_optarg; break;
 		case 'r': resolution = atoi(fz_optarg); break;
 		case 'A': accelerate = 0; break;
+		case 'b': fz_set_aa_level(atoi(fz_optarg)); break;
 		default: usage();
 		}
 	}
@@ -615,26 +595,18 @@ int main(int argc, char **argv)
 	if (fd < 0)
 		winerror(&gapp, fz_throw("cannot open file '%s'", filename));
 
-	pdfapp_open(&gapp, filename, fd);
+	pdfapp_open(&gapp, filename, fd, 0);
 
-	winresettmo(&tmo, &tmo_at);
+	FD_ZERO(&fds);
+	FD_SET(x11fd, &fds);
 
-	closing = 0;
+	signal(SIGHUP, signal_handler);
+
 	while (!closing)
 	{
 		do
 		{
-			winawaitevent(&tmo, &tmo_at);
-
-			if (tmo_at.tv_sec != 0 && tmo_at.tv_usec != 0 &&
-				tmo.tv_sec == 0 && tmo.tv_usec == 0)
-			{
-				/* redraw page */
-				winblit(&gapp);
-				isshowingpage = 0;
-				winresettmo(&tmo, &tmo_at);
-				continue;
-			}
+			XNextEvent(xdpy, &xevt);
 
 			switch (xevt.type)
 			{
@@ -649,70 +621,46 @@ int main(int argc, char **argv)
 						xevt.xconfigure.height != reqh)
 						gapp.shrinkwrap = 0;
 				}
-				pdfapp_onresize(&gapp,
-					xevt.xconfigure.width,
-					xevt.xconfigure.height);
+				width = xevt.xconfigure.width;
+				height = xevt.xconfigure.height;
+
 				break;
 
 			case KeyPress:
-				wasshowingpage = isshowingpage;
+				len = XLookupString(&xevt.xkey, buf, sizeof buf, &keysym, NULL);
 
-				len = XLookupString(&xevt.xkey, buf, sizeof buf, &keysym, nil);
+				if (!gapp.isediting)
+					switch (keysym)
+					{
+					case XK_Escape:
+						len = 1; buf[0] = '\033';
+						break;
 
-				switch (keysym)
-				{
-				case XK_Escape:
-					len = 1; buf[0] = '\033';
-					break;
+					case XK_Up:
+						len = 1; buf[0] = 'k';
+						break;
+					case XK_Down:
+						len = 1; buf[0] = 'j';
+						break;
 
-				case XK_Up:
-					len = 1; buf[0] = 'k';
-					break;
-				case XK_Down:
-					len = 1; buf[0] = 'j';
-					break;
+					case XK_Left:
+						len = 1; buf[0] = 'b';
+						break;
+					case XK_Right:
+						len = 1; buf[0] = ' ';
+						break;
 
-				case XK_Left:
-					len = 1; buf[0] = 'b';
-					break;
-				case XK_Right:
-					len = 1; buf[0] = ' ';
-					break;
-
-				case XK_Page_Up:
-					len = 1; buf[0] = ',';
-					break;
-				case XK_Page_Down:
-					len = 1; buf[0] = '.';
-					break;
-				}
+					case XK_Page_Up:
+						len = 1; buf[0] = ',';
+						break;
+					case XK_Page_Down:
+						len = 1; buf[0] = '.';
+						break;
+					}
 				if (len)
 					onkey(buf[0]);
 
 				onmouse(oldx, oldy, 0, 0, 0);
-
-				if (dirty)
-				{
-					winblit(&gapp);
-					dirty = 0;
-					if (isshowingpage)
-					{
-						isshowingpage = 0;
-						winresettmo(&tmo, &tmo_at);
-					}
-				}
-
-				if (gapp.isediting)
-				{
-					char str[sizeof(gapp.search) + 50];
-					sprintf(str, "Search: %s", gapp.search);
-					XSetForeground(xdpy, xgc, WhitePixel(xdpy, xscr));
-					fillrect(0, 0, gapp.winw, 30);
-					windrawstring(&gapp, 10, 20, str);
-				}
-
-				if (!wasshowingpage && isshowingpage)
-					winsettmo(&tmo, &tmo_at);
 
 				break;
 
@@ -747,14 +695,35 @@ int main(int argc, char **argv)
 		}
 		while (!closing && XPending(xdpy));
 
-		if (!closing && dirty)
+		if (closing)
+			continue;
+
+		if (width != -1 || height != -1)
 		{
-			winblit(&gapp);
+			pdfapp_onresize(&gapp, width, height);
+			width = -1;
+			height = -1;
+		}
+
+		if (dirty || dirtysearch)
+		{
+			if (dirty)
+				winblit(&gapp);
+			else if (dirtysearch)
+				winblitsearch(&gapp);
 			dirty = 0;
-			if (isshowingpage)
+			dirtysearch = 0;
+		}
+
+		if (XPending(xdpy))
+			continue;
+
+		if (select(x11fd + 1, &fds, NULL, NULL, NULL) < 0)
+		{
+			if (reloading)
 			{
-				isshowingpage = 0;
-				winresettmo(&tmo, &tmo_at);
+				winreloadfile(&gapp);
+				reloading = 0;
 			}
 		}
 	}

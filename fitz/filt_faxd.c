@@ -170,34 +170,13 @@ const cfd_node cf_uncompressed_decode[] = {
 
 /* bit magic */
 
-static inline void
-printbits(FILE *f, int code, int nbits)
-{
-	int n, b;
-	for (n = nbits - 1; n >= 0; n--)
-	{
-		b = (code >> n) & 1;
-		fprintf(f, "%c", b ? '1' : '0');
-	}
-}
-
-static inline int
-getbit(const unsigned char *buf, int x)
+static inline int getbit(const unsigned char *buf, int x)
 {
 	return ( buf[x >> 3] >> ( 7 - (x & 7) ) ) & 1;
 }
 
-static inline void
-printline(FILE *f, unsigned char *line, int w)
-{
-	int i;
-	for (i = 0; i < w; i++)
-		fprintf(f, "%c", getbit(line, i) ? '#' : '.');
-	fprintf(f, "\n");
-}
-
-static inline int
-findchanging(const unsigned char *line, int x, int w)
+static int
+find_changing(const unsigned char *line, int x, int w)
 {
 	int a, b;
 
@@ -226,16 +205,16 @@ findchanging(const unsigned char *line, int x, int w)
 	return x;
 }
 
-static inline int
-findchangingcolor(const unsigned char *line, int x, int w, int color)
+static int
+find_changing_color(const unsigned char *line, int x, int w, int color)
 {
 	if (!line)
 		return w;
 
-	x = findchanging(line, x, w);
+	x = find_changing(line, x, w);
 
 	if (x < w && getbit(line, x) != color)
-		x = findchanging(line, x, w);
+		x = find_changing(line, x, w);
 
 	return x;
 }
@@ -248,8 +227,7 @@ static const unsigned char rm[8] = {
 	0x00, 0x80, 0xC0, 0xE0, 0xF0, 0xF8, 0xFC, 0xFE
 };
 
-static inline void
-setbits(unsigned char *line, int x0, int x1)
+static inline void setbits(unsigned char *line, int x0, int x1)
 {
 	int a0, a1, b0, b1, a;
 
@@ -278,11 +256,11 @@ typedef struct fz_faxd_s fz_faxd;
 
 enum
 {
-	SNORMAL,	/* neutral state, waiting for any code */
-	SMAKEUP,	/* got a 1d makeup code, waiting for terminating code */
-	SEOL,		/* at eol, needs output buffer space */
-	SH1, SH2,	/* in H part 1 and 2 (both makeup and terminating codes) */
-	SDONE		/* all done */
+	STATE_NORMAL,	/* neutral state, waiting for any code */
+	STATE_MAKEUP,	/* got a 1d makeup code, waiting for terminating code */
+	STATE_EOL,		/* at eol, needs output buffer space */
+	STATE_H1, STATE_H2,	/* in H part 1 and 2 (both makeup and terminating codes) */
+	STATE_DONE		/* all done */
 };
 
 struct fz_faxd_s
@@ -290,12 +268,12 @@ struct fz_faxd_s
 	fz_stream *chain;
 
 	int k;
-	int endofline;
-	int encodedbytealign;
+	int end_of_line;
+	int encoded_byte_align;
 	int columns;
 	int rows;
-	int endofblock;
-	int blackis1;
+	int end_of_block;
+	int black_is_1;
 
 	int stride;
 	int ridx;
@@ -311,19 +289,18 @@ struct fz_faxd_s
 	unsigned char *rp, *wp;
 };
 
-static inline void
-eatbits(fz_faxd *fax, int nbits)
+static inline void eat_bits(fz_faxd *fax, int nbits)
 {
 	fax->word <<= nbits;
 	fax->bidx += nbits;
 }
 
-static inline int
-fillbits(fz_faxd *fax)
+static int
+fill_bits(fz_faxd *fax)
 {
 	while (fax->bidx >= 8)
 	{
-		int c = fz_readbyte(fax->chain);
+		int c = fz_read_byte(fax->chain);
 		if (c == EOF)
 			return EOF;
 		fax->bidx -= 8;
@@ -332,8 +309,8 @@ fillbits(fz_faxd *fax)
 	return 0;
 }
 
-static inline int
-getcode(fz_faxd *fax, const cfd_node *table, int initialbits)
+static int
+get_code(fz_faxd *fax, const cfd_node *table, int initialbits)
 {
 	unsigned int word = fax->word;
 	int tidx = word >> (32 - initialbits);
@@ -348,7 +325,7 @@ getcode(fz_faxd *fax, const cfd_node *table, int initialbits)
 		nbits = initialbits + table[tidx].nbits;
 	}
 
-	eatbits(fax, nbits);
+	eat_bits(fax, nbits);
 
 	return val;
 }
@@ -363,9 +340,9 @@ dec1d(fz_faxd *fax)
 		fax->a = 0;
 
 	if (fax->c)
-		code = getcode(fax, cf_black_decode, cfd_black_initial_bits);
+		code = get_code(fax, cf_black_decode, cfd_black_initial_bits);
 	else
-		code = getcode(fax, cf_white_decode, cfd_white_initial_bits);
+		code = get_code(fax, cf_white_decode, cfd_white_initial_bits);
 
 	if (code == UNCOMPRESSED)
 		return fz_throw("uncompressed data in faxd");
@@ -384,10 +361,10 @@ dec1d(fz_faxd *fax)
 	if (code < 64)
 	{
 		fax->c = !fax->c;
-		fax->stage = SNORMAL;
+		fax->stage = STATE_NORMAL;
 	}
 	else
-		fax->stage = SMAKEUP;
+		fax->stage = STATE_MAKEUP;
 
 	return fz_okay;
 }
@@ -398,15 +375,15 @@ dec2d(fz_faxd *fax)
 {
 	int code, b1, b2;
 
-	if (fax->stage == SH1 || fax->stage == SH2)
+	if (fax->stage == STATE_H1 || fax->stage == STATE_H2)
 	{
 		if (fax->a == -1)
 			fax->a = 0;
 
 		if (fax->c)
-			code = getcode(fax, cf_black_decode, cfd_black_initial_bits);
+			code = get_code(fax, cf_black_decode, cfd_black_initial_bits);
 		else
-			code = getcode(fax, cf_white_decode, cfd_white_initial_bits);
+			code = get_code(fax, cf_white_decode, cfd_white_initial_bits);
 
 		if (code == UNCOMPRESSED)
 			return fz_throw("uncompressed data in faxd");
@@ -425,42 +402,42 @@ dec2d(fz_faxd *fax)
 		if (code < 64)
 		{
 			fax->c = !fax->c;
-			if (fax->stage == SH1)
-				fax->stage = SH2;
-			else if (fax->stage == SH2)
-				fax->stage = SNORMAL;
+			if (fax->stage == STATE_H1)
+				fax->stage = STATE_H2;
+			else if (fax->stage == STATE_H2)
+				fax->stage = STATE_NORMAL;
 		}
 
 		return fz_okay;
 	}
 
-	code = getcode(fax, cf_2d_decode, cfd_2d_initial_bits);
+	code = get_code(fax, cf_2d_decode, cfd_2d_initial_bits);
 
 	switch (code)
 	{
 	case H:
-		fax->stage = SH1;
+		fax->stage = STATE_H1;
 		break;
 
 	case P:
-		b1 = findchangingcolor(fax->ref, fax->a, fax->columns, !fax->c);
+		b1 = find_changing_color(fax->ref, fax->a, fax->columns, !fax->c);
 		if (b1 >= fax->columns)
 			b2 = fax->columns;
 		else
-			b2 = findchanging(fax->ref, b1, fax->columns);
+			b2 = find_changing(fax->ref, b1, fax->columns);
 		if (fax->c) setbits(fax->dst, fax->a, b2);
 		fax->a = b2;
 		break;
 
 	case V0:
-		b1 = findchangingcolor(fax->ref, fax->a, fax->columns, !fax->c);
+		b1 = find_changing_color(fax->ref, fax->a, fax->columns, !fax->c);
 		if (fax->c) setbits(fax->dst, fax->a, b1);
 		fax->a = b1;
 		fax->c = !fax->c;
 		break;
 
 	case VR1:
-		b1 = 1 + findchangingcolor(fax->ref, fax->a, fax->columns, !fax->c);
+		b1 = 1 + find_changing_color(fax->ref, fax->a, fax->columns, !fax->c);
 		if (b1 >= fax->columns) b1 = fax->columns;
 		if (fax->c) setbits(fax->dst, fax->a, b1);
 		fax->a = b1;
@@ -468,7 +445,7 @@ dec2d(fz_faxd *fax)
 		break;
 
 	case VR2:
-		b1 = 2 + findchangingcolor(fax->ref, fax->a, fax->columns, !fax->c);
+		b1 = 2 + find_changing_color(fax->ref, fax->a, fax->columns, !fax->c);
 		if (b1 >= fax->columns) b1 = fax->columns;
 		if (fax->c) setbits(fax->dst, fax->a, b1);
 		fax->a = b1;
@@ -476,7 +453,7 @@ dec2d(fz_faxd *fax)
 		break;
 
 	case VR3:
-		b1 = 3 + findchangingcolor(fax->ref, fax->a, fax->columns, !fax->c);
+		b1 = 3 + find_changing_color(fax->ref, fax->a, fax->columns, !fax->c);
 		if (b1 >= fax->columns) b1 = fax->columns;
 		if (fax->c) setbits(fax->dst, fax->a, b1);
 		fax->a = b1;
@@ -484,7 +461,7 @@ dec2d(fz_faxd *fax)
 		break;
 
 	case VL1:
-		b1 = -1 + findchangingcolor(fax->ref, fax->a, fax->columns, !fax->c);
+		b1 = -1 + find_changing_color(fax->ref, fax->a, fax->columns, !fax->c);
 		if (b1 < 0) b1 = 0;
 		if (fax->c) setbits(fax->dst, fax->a, b1);
 		fax->a = b1;
@@ -492,7 +469,7 @@ dec2d(fz_faxd *fax)
 		break;
 
 	case VL2:
-		b1 = -2 + findchangingcolor(fax->ref, fax->a, fax->columns, !fax->c);
+		b1 = -2 + find_changing_color(fax->ref, fax->a, fax->columns, !fax->c);
 		if (b1 < 0) b1 = 0;
 		if (fax->c) setbits(fax->dst, fax->a, b1);
 		fax->a = b1;
@@ -500,7 +477,7 @@ dec2d(fz_faxd *fax)
 		break;
 
 	case VL3:
-		b1 = -3 + findchangingcolor(fax->ref, fax->a, fax->columns, !fax->c);
+		b1 = -3 + find_changing_color(fax->ref, fax->a, fax->columns, !fax->c);
 		if (b1 < 0) b1 = 0;
 		if (fax->c) setbits(fax->dst, fax->a, b1);
 		fax->a = b1;
@@ -521,7 +498,7 @@ dec2d(fz_faxd *fax)
 }
 
 static int
-readfaxd(fz_stream *stm, unsigned char *buf, int len)
+read_faxd(fz_stream *stm, unsigned char *buf, int len)
 {
 	fz_faxd *fax = stm->state;
 	unsigned char *p = buf;
@@ -529,15 +506,15 @@ readfaxd(fz_stream *stm, unsigned char *buf, int len)
 	unsigned char *tmp;
 	fz_error error;
 
-	if (fax->stage == SDONE)
+	if (fax->stage == STATE_DONE)
 		return 0;
 
-	if (fax->stage == SEOL)
+	if (fax->stage == STATE_EOL)
 		goto eol;
 
 loop:
 
-	if (fillbits(fax))
+	if (fill_bits(fax))
 	{
 		if (fax->bidx > 31)
 		{
@@ -549,13 +526,13 @@ loop:
 
 	if ((fax->word >> (32 - 12)) == 0)
 	{
-		eatbits(fax, 1);
+		eat_bits(fax, 1);
 		goto loop;
 	}
 
 	if ((fax->word >> (32 - 12)) == 1)
 	{
-		eatbits(fax, 12);
+		eat_bits(fax, 12);
 		fax->eolc ++;
 
 		if (fax->k > 0)
@@ -566,7 +543,7 @@ loop:
 				fax->dim = 1;
 			else
 				fax->dim = 2;
-			eatbits(fax, 1);
+			eat_bits(fax, 1);
 		}
 	}
 	else if (fax->k > 0 && fax->a == -1)
@@ -576,7 +553,7 @@ loop:
 			fax->dim = 1;
 		else
 			fax->dim = 2;
-		eatbits(fax, 1);
+		eat_bits(fax, 1);
 	}
 	else if (fax->dim == 1)
 	{
@@ -594,7 +571,7 @@ loop:
 	}
 
 	/* no eol check after makeup codes nor in the middle of an H code */
-	if (fax->stage == SMAKEUP || fax->stage == SH1 || fax->stage == SH2)
+	if (fax->stage == STATE_MAKEUP || fax->stage == STATE_H1 || fax->stage == STATE_H2)
 		goto loop;
 
 	/* check for eol conditions */
@@ -609,9 +586,9 @@ loop:
 	goto loop;
 
 eol:
-	fax->stage = SEOL;
+	fax->stage = STATE_EOL;
 
-	if (fax->blackis1)
+	if (fax->black_is_1)
 	{
 		while (fax->rp < fax->wp && p < ep)
 			*p++ = *fax->rp++;
@@ -625,20 +602,20 @@ eol:
 	if (fax->rp < fax->wp)
 		return p - buf;
 
-	fax->rp = fax->dst;
-	fax->wp = fax->dst + fax->stride;
-
 	tmp = fax->ref;
 	fax->ref = fax->dst;
 	fax->dst = tmp;
 	memset(fax->dst, 0, fax->stride);
 
-	fax->stage = SNORMAL;
+	fax->rp = fax->dst;
+	fax->wp = fax->dst + fax->stride;
+
+	fax->stage = STATE_NORMAL;
 	fax->c = 0;
 	fax->a = -1;
 	fax->ridx ++;
 
-	if (!fax->endofblock && fax->rows)
+	if (!fax->end_of_block && fax->rows)
 	{
 		if (fax->ridx >= fax->rows)
 			goto rtc;
@@ -653,13 +630,13 @@ eol:
 			fax->dim = 2;
 	}
 
-	/* if endofline & encodedbytealign, EOLs are *not* optional */
-	if (fax->encodedbytealign)
+	/* if end_of_line & encoded_byte_align, EOLs are *not* optional */
+	if (fax->encoded_byte_align)
 	{
-		if (fax->endofline)
-			eatbits(fax, (12 - fax->bidx) & 7);
+		if (fax->end_of_line)
+			eat_bits(fax, (12 - fax->bidx) & 7);
 		else
-			eatbits(fax, (8 - fax->bidx) & 7);
+			eat_bits(fax, (8 - fax->bidx) & 7);
 	}
 
 	/* no more space in output, don't decode the next row yet */
@@ -669,12 +646,12 @@ eol:
 	goto loop;
 
 rtc:
-	fax->stage = SDONE;
+	fax->stage = STATE_DONE;
 	return p - buf;
 }
 
 static void
-closefaxd(fz_stream *stm)
+close_faxd(fz_stream *stm)
 {
 	fz_faxd *fax = stm->state;
 	int i;
@@ -682,7 +659,7 @@ closefaxd(fz_stream *stm)
 	/* if we read any extra bytes, try to put them back */
 	i = (32 - fax->bidx) / 8;
 	while (i--)
-		fz_unreadbyte(fax->chain);
+		fz_unread_byte(fax->chain);
 
 	fz_close(fax->chain);
 	fz_free(fax->ref);
@@ -691,7 +668,7 @@ closefaxd(fz_stream *stm)
 }
 
 fz_stream *
-fz_openfaxd(fz_stream *chain, fz_obj *params)
+fz_open_faxd(fz_stream *chain, fz_obj *params)
 {
 	fz_faxd *fax;
 	fz_obj *obj;
@@ -699,44 +676,44 @@ fz_openfaxd(fz_stream *chain, fz_obj *params)
 	fax = fz_malloc(sizeof(fz_faxd));
 	fax->chain = chain;
 
-	fax->ref = nil;
-	fax->dst = nil;
+	fax->ref = NULL;
+	fax->dst = NULL;
 
 	fax->k = 0;
-	fax->endofline = 0;
-	fax->encodedbytealign = 0;
+	fax->end_of_line = 0;
+	fax->encoded_byte_align = 0;
 	fax->columns = 1728;
 	fax->rows = 0;
-	fax->endofblock = 1;
-	fax->blackis1 = 0;
+	fax->end_of_block = 1;
+	fax->black_is_1 = 0;
 
-	obj = fz_dictgets(params, "K");
-	if (obj) fax->k = fz_toint(obj);
+	obj = fz_dict_gets(params, "K");
+	if (obj) fax->k = fz_to_int(obj);
 
-	obj = fz_dictgets(params, "EndOfLine");
-	if (obj) fax->endofline = fz_tobool(obj);
+	obj = fz_dict_gets(params, "EndOfLine");
+	if (obj) fax->end_of_line = fz_to_bool(obj);
 
-	obj = fz_dictgets(params, "EncodedByteAlign");
-	if (obj) fax->encodedbytealign = fz_tobool(obj);
+	obj = fz_dict_gets(params, "EncodedByteAlign");
+	if (obj) fax->encoded_byte_align = fz_to_bool(obj);
 
-	obj = fz_dictgets(params, "Columns");
-	if (obj) fax->columns = fz_toint(obj);
+	obj = fz_dict_gets(params, "Columns");
+	if (obj) fax->columns = fz_to_int(obj);
 
-	obj = fz_dictgets(params, "Rows");
-	if (obj) fax->rows = fz_toint(obj);
+	obj = fz_dict_gets(params, "Rows");
+	if (obj) fax->rows = fz_to_int(obj);
 
-	obj = fz_dictgets(params, "EndOfBlock");
-	if (obj) fax->endofblock = fz_tobool(obj);
+	obj = fz_dict_gets(params, "EndOfBlock");
+	if (obj) fax->end_of_block = fz_to_bool(obj);
 
-	obj = fz_dictgets(params, "BlackIs1");
-	if (obj) fax->blackis1 = fz_tobool(obj);
+	obj = fz_dict_gets(params, "BlackIs1");
+	if (obj) fax->black_is_1 = fz_to_bool(obj);
 
 	fax->stride = ((fax->columns - 1) >> 3) + 1;
 	fax->ridx = 0;
 	fax->bidx = 32;
 	fax->word = 0;
 
-	fax->stage = SNORMAL;
+	fax->stage = STATE_NORMAL;
 	fax->a = -1;
 	fax->c = 0;
 	fax->dim = fax->k < 0 ? 2 : 1;
@@ -750,5 +727,5 @@ fz_openfaxd(fz_stream *chain, fz_obj *params)
 	memset(fax->ref, 0, fax->stride);
 	memset(fax->dst, 0, fax->stride);
 
-	return fz_newstream(fax, readfaxd, closefaxd);
+	return fz_new_stream(fax, read_faxd, close_faxd);
 }

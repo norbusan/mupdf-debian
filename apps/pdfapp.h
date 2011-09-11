@@ -16,6 +16,7 @@ extern void winerror(pdfapp_t*, fz_error error);
 extern void wintitle(pdfapp_t*, char *title);
 extern void winresize(pdfapp_t*, int w, int h);
 extern void winrepaint(pdfapp_t*);
+extern void winrepaintsearch(pdfapp_t*);
 extern char *winpassword(pdfapp_t*, char *filename);
 extern void winopenuri(pdfapp_t*, char *s);
 extern void wincursor(pdfapp_t*, int curs);
@@ -31,8 +32,10 @@ struct pdfapp_s
 	char *doctitle;
 	pdf_xref *xref;
 	pdf_outline *outline;
+	xps_context *xps;
+
 	int pagecount;
-	fz_glyphcache *cache;
+	fz_glyph_cache *cache;
 
 	/* current view params */
 	int resolution;
@@ -42,7 +45,11 @@ struct pdfapp_s
 
 	/* current page params */
 	int pageno;
-	pdf_page *page;
+	fz_rect page_bbox;
+	float page_rotate;
+	fz_display_list *page_list;
+	fz_text_span *page_text;
+	pdf_link *page_links;
 
 	/* snapback history */
 	int hist[256];
@@ -63,6 +70,13 @@ struct pdfapp_s
 
 	int iscopying;
 	int selx, sely;
+	/* TODO - While sely keeps track of the relative change in
+	 * cursor position between two ticks/events, beyondy shall keep
+	 * track of the relative change in cursor position from the
+	 * point where the user hits a scrolling limit. This is ugly.
+	 * Used in pdfapp.c:pdfapp_onmouse.
+	 */
+	int beyondy;
 	fz_bbox selr;
 
 	/* search state */
@@ -76,7 +90,7 @@ struct pdfapp_s
 };
 
 void pdfapp_init(pdfapp_t *app);
-void pdfapp_open(pdfapp_t *app, char *filename, int fd);
+void pdfapp_open(pdfapp_t *app, char *filename, int fd, int reload);
 void pdfapp_close(pdfapp_t *app);
 
 char *pdfapp_version(pdfapp_t *app);

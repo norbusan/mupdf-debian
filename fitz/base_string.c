@@ -1,7 +1,7 @@
 #include "fitz.h"
 
 int
-fz_isbigendian(void)
+fz_is_big_endian(void)
 {
 	static const int one = 1;
 	return *(char*)&one == 0;
@@ -11,8 +11,8 @@ char *
 fz_strsep(char **stringp, const char *delim)
 {
 	char *ret = *stringp;
-	if (ret == nil) return nil;
-	if ((*stringp = strpbrk(*stringp, delim)) != nil)
+	if (ret == NULL) return NULL;
+	if ((*stringp = strpbrk(*stringp, delim)) != NULL)
 		*((*stringp)++) = '\0';
 	return ret;
 }
@@ -244,4 +244,22 @@ runelen(int c)
 {
 	char str[10];
 	return runetochar(str, &c);
+}
+
+float fz_atof(const char *s)
+{
+	double d;
+
+	/* The errno voodoo here checks for us reading numbers that are too
+	 * big to fit into a double. The checks for FLT_MAX ensure that we
+	 * don't read a number that's OK as a double and then become invalid
+	 * as we convert to a float. */
+	errno = 0;
+	d = strtod(s, NULL);
+	if (errno == ERANGE || d > FLT_MAX || d < -FLT_MAX) {
+		/* Return 1.0, as it's a small known value that won't cause a
+		 * divide by 0. */
+		return 1.0;
+	}
+	return (float)d;
 }

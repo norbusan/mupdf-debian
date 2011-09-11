@@ -1,5 +1,6 @@
-#include <fitz.h>
-#include <mupdf.h>
+#include "fitz.h"
+#include "mupdf.h"
+#include "muxps.h"
 #include "pdfapp.h"
 
 #ifndef UNICODE
@@ -38,6 +39,51 @@ static wchar_t wbuf[1024];
 static char filename[1024];
 
 /*
+ * Create registry keys to associate MuPDF with PDF and XPS files.
+ */
+
+#define OPEN_KEY(parent, name, ptr) \
+	RegCreateKeyExA(parent, name, 0, 0, 0, KEY_WRITE, 0, &ptr, 0)
+
+#define SET_KEY(parent, name, value) \
+	RegSetValueExA(parent, name, 0, REG_SZ, value, strlen(value) + 1)
+
+void install_app(char *argv0)
+{
+	char buf[512];
+	HKEY software, classes, mupdf, dotpdf, dotxps;
+	HKEY shell, open, command, supported_types;
+	HKEY pdf_progids, xps_progids;
+
+	OPEN_KEY(HKEY_CURRENT_USER, "Software", software);
+	OPEN_KEY(software, "Classes", classes);
+	OPEN_KEY(classes, ".pdf", dotpdf);
+	OPEN_KEY(dotpdf, "OpenWithProgids", pdf_progids);
+	OPEN_KEY(classes, ".xps", dotxps);
+	OPEN_KEY(dotxps, "OpenWithProgids", xps_progids);
+	OPEN_KEY(classes, "MuPDF", mupdf);
+	OPEN_KEY(mupdf, "SupportedTypes", supported_types);
+	OPEN_KEY(mupdf, "shell", shell);
+	OPEN_KEY(shell, "open", open);
+	OPEN_KEY(open, "command", command);
+
+	sprintf(buf, "\"%s\" \"%%1\"", argv0);
+
+	SET_KEY(open, "FriendlyAppName", "MuPDF");
+	SET_KEY(command, "", buf);
+	SET_KEY(supported_types, ".pdf", "");
+	SET_KEY(supported_types, ".xps", "");
+	SET_KEY(pdf_progids, "MuPDF", "");
+	SET_KEY(xps_progids, "MuPDF", "");
+
+	RegCloseKey(dotxps);
+	RegCloseKey(dotpdf);
+	RegCloseKey(mupdf);
+	RegCloseKey(classes);
+	RegCloseKey(software);
+}
+
+/*
  * Dialog boxes
  */
 
@@ -55,9 +101,9 @@ void winerror(pdfapp_t *app, fz_error error)
 	fz_catch(error, "displaying error message to user");
 
 	fz_strlcpy(msgbuf, "An error has occurred.\n\n", sizeof msgbuf);
-	for (i = 0; i < fz_geterrorcount(); i++)
+	for (i = 0; i < fz_get_error_count(); i++)
 	{
-		fz_strlcat(msgbuf, fz_geterrorline(i), sizeof msgbuf);
+		fz_strlcat(msgbuf, fz_get_error_line(i), sizeof msgbuf);
 		fz_strlcat(msgbuf, "\n", sizeof msgbuf);
 	}
 
@@ -90,7 +136,7 @@ int winfilename(wchar_t *buf, int len)
 	ofn.nMaxFile = len;
 	ofn.lpstrInitialDir = NULL;
 	ofn.lpstrTitle = L"MuPDF: Open PDF file";
-	ofn.lpstrFilter = L"PDF Files (*.pdf)\0*.pdf\0All Files\0*\0\0";
+	ofn.lpstrFilter = L"Documents (*.pdf;*.xps)\0*.xps;*.pdf\0PDF Files (*.pdf)\0*.pdf\0XPS Files (*.xps)\0*.xps\0All Files\0*\0\0";
 	ofn.Flags = OFN_FILEMUSTEXIST|OFN_HIDEREADONLY;
 	return GetOpenFileNameW(&ofn);
 }
@@ -127,7 +173,7 @@ dlogpassproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 char *winpassword(pdfapp_t *app, char *filename)
 {
-	char buf[124], *s;
+	char buf[1024], *s;
 	int code;
 	strcpy(buf, filename);
 	s = buf;
@@ -141,7 +187,7 @@ char *winpassword(pdfapp_t *app, char *filename)
 		win32error("cannot create password dialog");
 	if (pd_okay)
 		return pd_password;
-	return nil;
+	return NULL;
 }
 
 INT CALLBACK
@@ -157,22 +203,30 @@ dloginfoproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 		SetDlgItemTextW(hwnd, 0x10, wbuf);
 
+		if (!xref)
+		{
+			SetDlgItemTextA(hwnd, 0x11, "XPS");
+			SetDlgItemTextA(hwnd, 0x12, "None");
+			SetDlgItemTextA(hwnd, 0x13, "n/a");
+			return TRUE;
+		}
+
 		sprintf(buf, "PDF %d.%d", xref->version / 10, xref->version % 10);
 		SetDlgItemTextA(hwnd, 0x11, buf);
 
 		if (xref->crypt)
 		{
-			sprintf(buf, "Standard %d bit %s", xref->crypt->length,
-				xref->crypt->strf.method == PDF_CRYPT_AESV2 ? "AES" : "RC4");
+			sprintf(buf, "Standard V%d %d-bit %s", pdf_get_crypt_revision(xref),
+				pdf_get_crypt_length(xref), pdf_get_crypt_method(xref));
 			SetDlgItemTextA(hwnd, 0x12, buf);
 			strcpy(buf, "");
-			if (xref->crypt->p & (1 << 2))
+			if (pdf_has_permission(xref, PDF_PERM_PRINT))
 				strcat(buf, "print, ");
-			if (xref->crypt->p & (1 << 3))
+			if (pdf_has_permission(xref, PDF_PERM_CHANGE))
 				strcat(buf, "modify, ");
-			if (xref->crypt->p & (1 << 4))
+			if (pdf_has_permission(xref, PDF_PERM_COPY))
 				strcat(buf, "copy, ");
-			if (xref->crypt->p & (1 << 5))
+			if (pdf_has_permission(xref, PDF_PERM_NOTES))
 				strcat(buf, "annotate, ");
 			if (strlen(buf) > 2)
 				buf[strlen(buf)-2] = 0;
@@ -186,33 +240,33 @@ dloginfoproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 			SetDlgItemTextA(hwnd, 0x13, "n/a");
 		}
 
-		info = fz_dictgets(xref->trailer, "Info");
+		info = fz_dict_gets(xref->trailer, "Info");
 		if (!info)
 			return TRUE;
 
 #define SETUCS(ID) \
 		{ \
 			unsigned short *ucs; \
-			ucs = pdf_toucs2(obj); \
+			ucs = pdf_to_ucs2(obj); \
 			SetDlgItemTextW(hwnd, ID, ucs); \
 			fz_free(ucs); \
 		}
 
-		if ((obj = fz_dictgets(info, "Title")))
+		if ((obj = fz_dict_gets(info, "Title")))
 			SETUCS(0x20);
-		if ((obj = fz_dictgets(info, "Author")))
+		if ((obj = fz_dict_gets(info, "Author")))
 			SETUCS(0x21);
-		if ((obj = fz_dictgets(info, "Subject")))
+		if ((obj = fz_dict_gets(info, "Subject")))
 			SETUCS(0x22);
-		if ((obj = fz_dictgets(info, "Keywords")))
+		if ((obj = fz_dict_gets(info, "Keywords")))
 			SETUCS(0x23);
-		if ((obj = fz_dictgets(info, "Creator")))
+		if ((obj = fz_dict_gets(info, "Creator")))
 			SETUCS(0x24);
-		if ((obj = fz_dictgets(info, "Producer")))
+		if ((obj = fz_dict_gets(info, "Producer")))
 			SETUCS(0x25);
-		if ((obj = fz_dictgets(info, "CreationDate")))
+		if ((obj = fz_dict_gets(info, "CreationDate")))
 			SETUCS(0x26);
-		if ((obj = fz_dictgets(info, "ModDate")))
+		if ((obj = fz_dict_gets(info, "ModDate")))
 			SETUCS(0x27);
 		return TRUE;
 
@@ -409,6 +463,17 @@ void windrawstring(pdfapp_t *app, int x, int y, char *s)
 	TextOutA(hdc, x, y - 12, s, strlen(s));
 }
 
+void winblitsearch()
+{
+	if (gapp.isediting)
+	{
+		char buf[sizeof(gapp.search) + 50];
+		sprintf(buf, "Search: %s", gapp.search);
+		windrawrect(&gapp, 0, 0, gapp.winw, 30);
+		windrawstring(&gapp, 10, 20, buf);
+	}
+}
+
 void winblit()
 {
 	int x0 = gapp.panx;
@@ -490,13 +555,7 @@ void winblit()
 	r.bottom = y1;
 	FillRect(hdc, &r, shbrush);
 
-	if (gapp.isediting)
-	{
-		char buf[sizeof(gapp.search) + 50];
-		sprintf(buf, "Search: %s", gapp.search);
-		windrawrect(&gapp, 0, 0, gapp.winw, 30);
-		windrawstring(&gapp, 10, 20, buf);
-	}
+	winblitsearch();
 }
 
 void winresize(pdfapp_t *app, int w, int h)
@@ -510,6 +569,13 @@ void winresize(pdfapp_t *app, int w, int h)
 
 void winrepaint(pdfapp_t *app)
 {
+	InvalidateRect(hwndview, NULL, 0);
+}
+
+void winrepaintsearch(pdfapp_t *app)
+{
+	// TODO: invalidate only search area and
+	// call only search redraw routine.
 	InvalidateRect(hwndview, NULL, 0);
 }
 
@@ -553,7 +619,7 @@ void winreloadfile(pdfapp_t *app)
 	if (fd < 0)
 		winerror(&gapp, fz_throw("cannot reload file '%s'", filename));
 
-	pdfapp_open(app, filename, fd);
+	pdfapp_open(app, filename, fd, 1);
 }
 
 void winopenuri(pdfapp_t *app, char *buf)
@@ -635,6 +701,8 @@ frameproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 			info();
 			return 0;
 		}
+		if (wParam == SC_MAXIMIZE)
+			gapp.shrinkwrap = 0;
 		break;
 
 	case WM_SIZE:
@@ -781,6 +849,7 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShow
 {
 	int argc;
 	LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+	char argv0[256];
 	MSG msg;
 	int fd;
 	int code;
@@ -789,7 +858,9 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShow
 
 	pdfapp_init(&gapp);
 
-	/* associate(argv[0]); */
+	GetModuleFileNameA(NULL, argv0, sizeof argv0);
+	install_app(argv0);
+
 	winopen();
 
 	if (argc == 2)
@@ -810,7 +881,7 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShow
 	if (code == 0)
 		win32error("cannot convert filename to utf-8");
 
-	pdfapp_open(&gapp, filename, fd);
+	pdfapp_open(&gapp, filename, fd, 0);
 
 	while (GetMessage(&msg, NULL, 0, 0))
 	{
