@@ -1,5 +1,6 @@
 mupdf (0.9-2) unstable; urgency=low
 
+  * Enable harden flags.
   * debian/patches/bug621894.patch: Fix text copying with
     selection. (Closes: #621894)
   * debian/patches/bug646350.patch: Fix FTBFS with
