@@ -1,6 +1,6 @@
-Format-Specification: http://dep.debian.net/deps/dep5/
-Name: mupdf
-Maintainer: Kan-Ru Chen <koster@debian.org>
+Format: http://dep.debian.net/deps/dep5/
+Upstream-Name: mupdf
+Upstream-Contact: http://mupdf.com/
 Source: http://mupdf.com/download/
 
 Files: *
@@ -148,10 +148,14 @@ License: BSD
  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-Files: fitz/util_getopt.c
+Files: fitz/base_getopt.c
 Copyright: This is a version of the public domain getopt implementation by
            Henry Spencer originally posted to net.sources.
-License: Public Domain
+License: public-domain
+ None of this software is derived from Bell software.  I had no access
+ to the source for Bell's versions at the time I wrote it.  This software
+ is hereby explicitly placed in the public domain.  It may be used for
+ any purpose on any machine by anyone.
 
 Files: fonts/*.cff
 Copyright: (URW)++ Design & Development
