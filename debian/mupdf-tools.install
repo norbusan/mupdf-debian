@@ -1,3 +1,2 @@
-debian/tmp/usr/bin/pdfclean
-debian/tmp/usr/bin/pdfdraw
-debian/tmp/usr/bin/pdfshow
+debian/tmp/usr/bin/mutool
+debian/tmp/usr/bin/mudraw
