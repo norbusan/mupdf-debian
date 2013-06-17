@@ -1,19 +1,4 @@
-#include "fitz.h"
-
-#ifdef _WIN32 /* Microsoft Visual C++ */
-
-typedef signed char int8_t;
-typedef short int int16_t;
-typedef int int32_t;
-typedef __int64 int64_t;
-
-typedef unsigned char uint8_t;
-typedef unsigned short int uint16_t;
-typedef unsigned int uint32_t;
-
-#else
-#include <inttypes.h>
-#endif
+#include "fitz-internal.h"
 
 #include <jbig2.h>
 
@@ -29,16 +14,16 @@ struct fz_jbig2d_s
 };
 
 static void
-close_jbig2d(fz_stream *stm)
+close_jbig2d(fz_context *ctx, void *state_)
 {
-	fz_jbig2d *state = stm->state;
+	fz_jbig2d *state = (fz_jbig2d *)state_;
 	if (state->page)
 		jbig2_release_page(state->ctx, state->page);
 	if (state->gctx)
 		jbig2_global_ctx_free(state->gctx);
 	jbig2_ctx_free(state->ctx);
 	fz_close(state->chain);
-	fz_free(state);
+	fz_free(ctx, state);
 }
 
 static int
@@ -56,8 +41,6 @@ read_jbig2d(fz_stream *stm, unsigned char *buf, int len)
 		while (1)
 		{
 			n = fz_read(state->chain, tmp, sizeof tmp);
-			if (n < 0)
-				return fz_rethrow(n, "read error in jbig2 filter");
 			if (n == 0)
 				break;
 			jbig2_data_in(state->ctx, tmp, n);
@@ -67,7 +50,7 @@ read_jbig2d(fz_stream *stm, unsigned char *buf, int len)
 
 		state->page = jbig2_page_out(state->ctx);
 		if (!state->page)
-			return fz_throw("jbig2_page_out failed");
+			fz_throw(stm->ctx, "jbig2_page_out failed");
 	}
 
 	s = state->page->data;
@@ -83,21 +66,43 @@ read_jbig2d(fz_stream *stm, unsigned char *buf, int len)
 fz_stream *
 fz_open_jbig2d(fz_stream *chain, fz_buffer *globals)
 {
-	fz_jbig2d *state;
+	fz_jbig2d *state = NULL;
+	fz_context *ctx = chain->ctx;
 
-	state = fz_malloc(sizeof(fz_jbig2d));
-	state->chain = chain;
-	state->ctx = jbig2_ctx_new(NULL, JBIG2_OPTIONS_EMBEDDED, NULL, NULL, NULL);
-	state->gctx = NULL;
-	state->page = NULL;
-	state->idx = 0;
+	fz_var(state);
 
-	if (globals)
+	fz_try(ctx)
 	{
-		jbig2_data_in(state->ctx, globals->data, globals->len);
-		state->gctx = jbig2_make_global_ctx(state->ctx);
-		state->ctx = jbig2_ctx_new(NULL, JBIG2_OPTIONS_EMBEDDED, state->gctx, NULL, NULL);
-	}
+		state = fz_malloc_struct(chain->ctx, fz_jbig2d);
+		state->ctx = NULL;
+		state->gctx = NULL;
+		state->chain = chain;
+		state->ctx = jbig2_ctx_new(NULL, JBIG2_OPTIONS_EMBEDDED, NULL, NULL, NULL);
+		state->page = NULL;
+		state->idx = 0;
 
-	return fz_new_stream(state, read_jbig2d, close_jbig2d);
+		if (globals)
+		{
+			jbig2_data_in(state->ctx, globals->data, globals->len);
+			state->gctx = jbig2_make_global_ctx(state->ctx);
+			state->ctx = jbig2_ctx_new(NULL, JBIG2_OPTIONS_EMBEDDED, state->gctx, NULL, NULL);
+		}
+	}
+	fz_catch(ctx)
+	{
+		if (state)
+		{
+			if (state->gctx)
+				jbig2_global_ctx_free(state->gctx);
+			if (state->ctx)
+				jbig2_ctx_free(state->ctx);
+		}
+		fz_drop_buffer(ctx, globals);
+		fz_free(ctx, state);
+		fz_close(chain);
+		fz_rethrow(ctx);
+	}
+	fz_drop_buffer(ctx, globals);
+
+	return fz_new_stream(ctx, state, read_jbig2d, close_jbig2d);
 }

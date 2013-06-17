@@ -1,5 +1,19 @@
-#include "fitz.h"
-#include "mupdf.h"
+#include "fitz-internal.h"
+#include "mupdf-internal.h"
+
+/*
+	Which fonts are embedded is based on a few preprocessor definitions.
+
+	The base 14 fonts are always embedded.
+	For font substitution we embed DroidSans which has good glyph coverage.
+	For CJK font substitution we embed DroidSansFallback.
+
+	Set NOCJK to skip all CJK support (this also omits embedding the CJK CMaps)
+	Set NOCJKFONT to skip the embedded CJK font.
+	Set NOCJKFULL to embed a smaller CJK font without CJK Extension A support.
+
+	Set NODROIDFONT to use the base 14 fonts as substitute fonts.
+*/
 
 #ifdef NOCJK
 #define NOCJKFONT
@@ -12,20 +26,16 @@
 #endif
 
 #ifndef NOCJKFONT
+#ifndef NOCJKFULL
+#include "../generated/font_cjk_full.h"
+#else
 #include "../generated/font_cjk.h"
+#endif
 #endif
 
 unsigned char *
-pdf_find_builtin_font(char *name, unsigned int *len)
+pdf_lookup_builtin_font(char *name, unsigned int *len)
 {
-	if (!strcmp("Courier", name)) {
-		*len = sizeof pdf_font_NimbusMonL_Regu;
-		return (unsigned char*) pdf_font_NimbusMonL_Regu;
-	}
-	if (!strcmp("Courier-Bold", name)) {
-		*len = sizeof pdf_font_NimbusMonL_Bold;
-		return (unsigned char*) pdf_font_NimbusMonL_Bold;
-	}
 	if (!strcmp("Courier", name)) {
 		*len = sizeof pdf_font_NimbusMonL_Regu;
 		return (unsigned char*) pdf_font_NimbusMonL_Regu;
@@ -87,32 +97,32 @@ pdf_find_builtin_font(char *name, unsigned int *len)
 }
 
 unsigned char *
-pdf_find_substitute_font(int mono, int serif, int bold, int italic, unsigned int *len)
+pdf_lookup_substitute_font(int mono, int serif, int bold, int italic, unsigned int *len)
 {
 #ifdef NODROIDFONT
 	if (mono) {
 		if (bold) {
-			if (italic) return pdf_find_builtin_font("Courier-BoldOblique", len);
-			else return pdf_find_builtin_font("Courier-Bold", len);
+			if (italic) return pdf_lookup_builtin_font("Courier-BoldOblique", len);
+			else return pdf_lookup_builtin_font("Courier-Bold", len);
 		} else {
-			if (italic) return pdf_find_builtin_font("Courier-Oblique", len);
-			else return pdf_find_builtin_font("Courier", len);
+			if (italic) return pdf_lookup_builtin_font("Courier-Oblique", len);
+			else return pdf_lookup_builtin_font("Courier", len);
 		}
 	} else if (serif) {
 		if (bold) {
-			if (italic) return pdf_find_builtin_font("Times-BoldItalic", len);
-			else return pdf_find_builtin_font("Times-Bold", len);
+			if (italic) return pdf_lookup_builtin_font("Times-BoldItalic", len);
+			else return pdf_lookup_builtin_font("Times-Bold", len);
 		} else {
-			if (italic) return pdf_find_builtin_font("Times-Italic", len);
-			else return pdf_find_builtin_font("Times-Roman", len);
+			if (italic) return pdf_lookup_builtin_font("Times-Italic", len);
+			else return pdf_lookup_builtin_font("Times-Roman", len);
 		}
 	} else {
 		if (bold) {
-			if (italic) return pdf_find_builtin_font("Helvetica-BoldOblique", len);
-			else return pdf_find_builtin_font("Helvetica-Bold", len);
+			if (italic) return pdf_lookup_builtin_font("Helvetica-BoldOblique", len);
+			else return pdf_lookup_builtin_font("Helvetica-Bold", len);
 		} else {
-			if (italic) return pdf_find_builtin_font("Helvetica-Oblique", len);
-			else return pdf_find_builtin_font("Helvetica", len);
+			if (italic) return pdf_lookup_builtin_font("Helvetica-Oblique", len);
+			else return pdf_lookup_builtin_font("Helvetica", len);
 		}
 	}
 #else
@@ -127,11 +137,16 @@ pdf_find_substitute_font(int mono, int serif, int bold, int italic, unsigned int
 }
 
 unsigned char *
-pdf_find_substitute_cjk_font(int ros, int serif, unsigned int *len)
+pdf_lookup_substitute_cjk_font(int ros, int serif, unsigned int *len)
 {
 #ifndef NOCJKFONT
+#ifndef NOCJKFULL
+	*len = sizeof pdf_font_DroidSansFallbackFull;
+	return (unsigned char*) pdf_font_DroidSansFallbackFull;
+#else
 	*len = sizeof pdf_font_DroidSansFallback;
 	return (unsigned char*) pdf_font_DroidSansFallback;
+#endif
 #else
 	*len = 0;
 	return NULL;

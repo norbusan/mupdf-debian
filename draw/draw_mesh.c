@@ -1,4 +1,4 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
 /*
  * polygon clipping
@@ -123,7 +123,7 @@ static int clip_poly(float src[MAXV][MAXN],
 
 static void paint_scan(fz_pixmap *pix, int y, int x1, int x2, int *v1, int *v2, int n)
 {
-	unsigned char *p = pix->samples + ((y - pix->y) * pix->w + (x1 - pix->x)) * pix->n;
+	unsigned char *p = pix->samples + (unsigned int)(((y - pix->y) * pix->w + (x1 - pix->x)) * pix->n);
 	int v[FZ_MAX_COLORS];
 	int dv[FZ_MAX_COLORS];
 	int w = x2 - x1;
@@ -213,14 +213,14 @@ static inline void step_edge(int *ael, int *del, int n)
 }
 
 static void
-fz_paint_triangle(fz_pixmap *pix, float *av, float *bv, float *cv, int n, fz_bbox bbox)
+fz_paint_triangle(fz_pixmap *pix, float *av, float *bv, float *cv, int n, const fz_irect *bbox)
 {
 	float poly[MAXV][MAXN];
 	float temp[MAXV][MAXN];
-	float cx0 = bbox.x0;
-	float cy0 = bbox.y0;
-	float cx1 = bbox.x1;
-	float cy1 = bbox.y1;
+	float cx0 = bbox->x0;
+	float cy0 = bbox->y0;
+	float cx1 = bbox->x1;
+	float cy1 = bbox->y1;
 
 	int gel[MAXV][MAXN];
 	int ael[2][MAXN];
@@ -245,9 +245,9 @@ fz_paint_triangle(fz_pixmap *pix, float *av, float *bv, float *cv, int n, fz_bbo
 	for (i = 0; i < len; i++)
 	{
 		gel[i][0] = floorf(poly[i][0] + 0.5f) * 65536; /* trunc and fix */
-		gel[i][1] = floorf(poly[i][1] + 0.5f);	/* y is not fixpoint */
+		gel[i][1] = floorf(poly[i][1] + 0.5f); /* y is not fixpoint */
 		for (k = 2; k < n; k++)
-			gel[i][k] = poly[i][k] * 65536;	/* fix with precision */
+			gel[i][k] = poly[i][k] * 65536; /* fix with precision */
 	}
 
 	top = bot = 0;
@@ -302,273 +302,119 @@ fz_paint_triangle(fz_pixmap *pix, float *av, float *bv, float *cv, int n, fz_bbo
 	}
 }
 
-static void
-fz_paint_quad(fz_pixmap *pix,
-		fz_point p0, fz_point p1, fz_point p2, fz_point p3,
-		float c0, float c1, float c2, float c3,
-		int n, fz_bbox bbox)
+struct paint_tri_data
 {
-	float v[4][3];
-
-	v[0][0] = p0.x;
-	v[0][1] = p0.y;
-	v[0][2] = c0;
-
-	v[1][0] = p1.x;
-	v[1][1] = p1.y;
-	v[1][2] = c1;
-
-	v[2][0] = p2.x;
-	v[2][1] = p2.y;
-	v[2][2] = c2;
-
-	v[3][0] = p3.x;
-	v[3][1] = p3.y;
-	v[3][2] = c3;
-
-	fz_paint_triangle(pix, v[0], v[2], v[3], n, bbox);
-	fz_paint_triangle(pix, v[0], v[3], v[1], n, bbox);
-}
-
-/*
- * linear, radial and mesh painting
- */
-
-#define HUGENUM 32000 /* how far to extend axial/radial shadings */
-#define RADSEGS 32 /* how many segments to generate for radial meshes */
-
-static fz_point
-fz_point_on_circle(fz_point p, float r, float theta)
-{
-	p.x = p.x + cosf(theta) * r;
-	p.y = p.y + sinf(theta) * r;
-
-	return p;
-}
+	fz_context *ctx;
+	fz_shade *shade;
+	fz_pixmap *dest;
+	const fz_irect *bbox;
+};
 
 static void
-fz_paint_linear(fz_shade *shade, fz_matrix ctm, fz_pixmap *dest, fz_bbox bbox)
+do_paint_tri(void *arg, fz_vertex *av, fz_vertex *bv, fz_vertex *cv)
 {
-	fz_point p0, p1;
-	fz_point v0, v1, v2, v3;
-	fz_point e0, e1;
-	float theta;
-
-	p0.x = shade->mesh[0];
-	p0.y = shade->mesh[1];
-	p0 = fz_transform_point(ctm, p0);
-
-	p1.x = shade->mesh[3];
-	p1.y = shade->mesh[4];
-	p1 = fz_transform_point(ctm, p1);
-
-	theta = atan2f(p1.y - p0.y, p1.x - p0.x);
-	theta += (float)M_PI * 0.5f;
-
-	v0 = fz_point_on_circle(p0, HUGENUM, theta);
-	v1 = fz_point_on_circle(p1, HUGENUM, theta);
-	v2 = fz_point_on_circle(p0, -HUGENUM, theta);
-	v3 = fz_point_on_circle(p1, -HUGENUM, theta);
-
-	fz_paint_quad(dest, v0, v1, v2, v3, 0, 255, 0, 255, 3, bbox);
-
-	if (shade->extend[0])
-	{
-		e0.x = v0.x - (p1.x - p0.x) * HUGENUM;
-		e0.y = v0.y - (p1.y - p0.y) * HUGENUM;
-
-		e1.x = v2.x - (p1.x - p0.x) * HUGENUM;
-		e1.y = v2.y - (p1.y - p0.y) * HUGENUM;
-
-		fz_paint_quad(dest, e0, e1, v0, v2, 0, 0, 0, 0, 3, bbox);
-	}
-
-	if (shade->extend[1])
-	{
-		e0.x = v1.x + (p1.x - p0.x) * HUGENUM;
-		e0.y = v1.y + (p1.y - p0.y) * HUGENUM;
-
-		e1.x = v3.x + (p1.x - p0.x) * HUGENUM;
-		e1.y = v3.y + (p1.y - p0.y) * HUGENUM;
-
-		fz_paint_quad(dest, e0, e1, v1, v3, 255, 255, 255, 255, 3, bbox);
-	}
-}
-
-static void
-fz_paint_annulus(fz_matrix ctm,
-		fz_point p0, float r0, float c0,
-		fz_point p1, float r1, float c1,
-		fz_pixmap *dest, fz_bbox bbox)
-{
-	fz_point t0, t1, t2, t3, b0, b1, b2, b3;
-	float theta, step;
-	int i;
-
-	theta = atan2f(p1.y - p0.y, p1.x - p0.x);
-	step = (float)M_PI * 2 / RADSEGS;
-
-	for (i = 0; i < RADSEGS / 2; i++)
-	{
-		t0 = fz_point_on_circle(p0, r0, theta + i * step);
-		t1 = fz_point_on_circle(p0, r0, theta + i * step + step);
-		t2 = fz_point_on_circle(p1, r1, theta + i * step);
-		t3 = fz_point_on_circle(p1, r1, theta + i * step + step);
-		b0 = fz_point_on_circle(p0, r0, theta - i * step);
-		b1 = fz_point_on_circle(p0, r0, theta - i * step - step);
-		b2 = fz_point_on_circle(p1, r1, theta - i * step);
-		b3 = fz_point_on_circle(p1, r1, theta - i * step - step);
-
-		t0 = fz_transform_point(ctm, t0);
-		t1 = fz_transform_point(ctm, t1);
-		t2 = fz_transform_point(ctm, t2);
-		t3 = fz_transform_point(ctm, t3);
-		b0 = fz_transform_point(ctm, b0);
-		b1 = fz_transform_point(ctm, b1);
-		b2 = fz_transform_point(ctm, b2);
-		b3 = fz_transform_point(ctm, b3);
-
-		fz_paint_quad(dest, t0, t1, t2, t3, c0, c0, c1, c1, 3, bbox);
-		fz_paint_quad(dest, b0, b1, b2, b3, c0, c0, c1, c1, 3, bbox);
-	}
-}
-
-static void
-fz_paint_radial(fz_shade *shade, fz_matrix ctm, fz_pixmap *dest, fz_bbox bbox)
-{
-	fz_point p0, p1;
-	float r0, r1;
-	fz_point e;
-	float er, rs;
-
-	p0.x = shade->mesh[0];
-	p0.y = shade->mesh[1];
-	r0 = shade->mesh[2];
-
-	p1.x = shade->mesh[3];
-	p1.y = shade->mesh[4];
-	r1 = shade->mesh[5];
-
-	if (shade->extend[0])
-	{
-		if (r0 < r1)
-			rs = r0 / (r0 - r1);
-		else
-			rs = -HUGENUM;
-
-		e.x = p0.x + (p1.x - p0.x) * rs;
-		e.y = p0.y + (p1.y - p0.y) * rs;
-		er = r0 + (r1 - r0) * rs;
-
-		fz_paint_annulus(ctm, e, er, 0, p0, r0, 0, dest, bbox);
-	}
-
-	fz_paint_annulus(ctm, p0, r0, 0, p1, r1, 255, dest, bbox);
-
-	if (shade->extend[1])
-	{
-		if (r0 > r1)
-			rs = r1 / (r1 - r0);
-		else
-			rs = -HUGENUM;
-
-		e.x = p1.x + (p0.x - p1.x) * rs;
-		e.y = p1.y + (p0.y - p1.y) * rs;
-		er = r1 + (r0 - r1) * rs;
-
-		fz_paint_annulus(ctm, p1, r1, 255, e, er, 255, dest, bbox);
-	}
-}
-
-static void
-fz_paint_mesh(fz_shade *shade, fz_matrix ctm, fz_pixmap *dest, fz_bbox bbox)
-{
-	float tri[3][MAXN];
-	fz_point p;
-	float *mesh;
-	int ntris;
+	struct paint_tri_data *ptd = (struct paint_tri_data *)arg;
 	int i, k;
+	fz_vertex *vertices[3];
+	fz_vertex *v;
+	float *ltri;
+	fz_context *ctx;
+	fz_shade *shade;
+	fz_pixmap *dest;
+	float local[3][MAXN];
 
-	mesh = shade->mesh;
+	vertices[0] = av;
+	vertices[1] = bv;
+	vertices[2] = cv;
 
-	if (shade->use_function)
-		ntris = shade->mesh_len / 9;
-	else
-		ntris = shade->mesh_len / ((2 + shade->colorspace->n) * 3);
-
-	while (ntris--)
+	dest = ptd->dest;
+	ctx = ptd->ctx;
+	shade = ptd->shade;
+	for (k = 0; k < 3; k++)
 	{
-		for (k = 0; k < 3; k++)
+		v = vertices[k];
+		ltri = &local[k][0];
+		ltri[0] = v->p.x;
+		ltri[1] = v->p.y;
+		if (shade->use_function)
+			ltri[2] = v->c[0] * 255;
+		else
 		{
-			p.x = *mesh++;
-			p.y = *mesh++;
-			p = fz_transform_point(ctm, p);
-			tri[k][0] = p.x;
-			tri[k][1] = p.y;
-			if (shade->use_function)
-				tri[k][2] = *mesh++ * 255;
-			else
-			{
-				fz_convert_color(shade->colorspace, mesh, dest->colorspace, tri[k] + 2);
-				for (i = 0; i < dest->colorspace->n; i++)
-					tri[k][i + 2] *= 255;
-				mesh += shade->colorspace->n;
-			}
+			fz_convert_color(ctx, dest->colorspace, &ltri[2], shade->colorspace, v->c);
+			for (i = 0; i < dest->colorspace->n; i++)
+				ltri[i + 2] *= 255;
 		}
-		fz_paint_triangle(dest, tri[0], tri[1], tri[2], 2 + dest->colorspace->n, bbox);
 	}
+	fz_paint_triangle(dest, local[0], local[1], local[2], 2 + dest->colorspace->n, ptd->bbox);
 }
 
 void
-fz_paint_shade(fz_shade *shade, fz_matrix ctm, fz_pixmap *dest, fz_bbox bbox)
+fz_paint_shade(fz_context *ctx, fz_shade *shade, const fz_matrix *ctm, fz_pixmap *dest, const fz_irect *bbox)
 {
 	unsigned char clut[256][FZ_MAX_COLORS];
-	fz_pixmap *temp, *conv;
+	fz_pixmap *temp = NULL;
+	fz_pixmap *conv = NULL;
 	float color[FZ_MAX_COLORS];
+	struct paint_tri_data ptd;
 	int i, k;
+	fz_matrix local_ctm;
 
-	ctm = fz_concat(shade->matrix, ctm);
+	fz_var(temp);
+	fz_var(conv);
 
-	if (shade->use_function)
+	fz_try(ctx)
 	{
-		for (i = 0; i < 256; i++)
+		fz_concat(&local_ctm, &shade->matrix, ctm);
+
+		if (shade->use_function)
 		{
-			fz_convert_color(shade->colorspace, shade->function[i], dest->colorspace, color);
-			for (k = 0; k < dest->colorspace->n; k++)
-				clut[i][k] = color[k] * 255;
-			clut[i][k] = shade->function[i][shade->colorspace->n] * 255;
+			fz_color_converter cc;
+			fz_find_color_converter(&cc, ctx, dest->colorspace, shade->colorspace);
+			for (i = 0; i < 256; i++)
+			{
+				cc.convert(&cc, color, shade->function[i]);
+				for (k = 0; k < dest->colorspace->n; k++)
+					clut[i][k] = color[k] * 255;
+				clut[i][k] = shade->function[i][shade->colorspace->n] * 255;
+			}
+			conv = fz_new_pixmap_with_bbox(ctx, dest->colorspace, bbox);
+			temp = fz_new_pixmap_with_bbox(ctx, fz_device_gray, bbox);
+			fz_clear_pixmap(ctx, temp);
 		}
-		conv = fz_new_pixmap_with_rect(dest->colorspace, bbox);
-		temp = fz_new_pixmap_with_rect(fz_device_gray, bbox);
-		fz_clear_pixmap(temp);
-	}
-	else
-	{
-		temp = dest;
-	}
-
-	switch (shade->type)
-	{
-	case FZ_LINEAR: fz_paint_linear(shade, ctm, temp, bbox); break;
-	case FZ_RADIAL: fz_paint_radial(shade, ctm, temp, bbox); break;
-	case FZ_MESH: fz_paint_mesh(shade, ctm, temp, bbox); break;
-	}
-
-	if (shade->use_function)
-	{
-		unsigned char *s = temp->samples;
-		unsigned char *d = conv->samples;
-		int len = temp->w * temp->h;
-		while (len--)
+		else
 		{
-			int v = *s++;
-			int a = fz_mul255(*s++, clut[v][conv->n - 1]);
-			for (k = 0; k < conv->n - 1; k++)
-				*d++ = fz_mul255(clut[v][k], a);
-			*d++ = a;
+			temp = dest;
 		}
-		fz_paint_pixmap(dest, conv, 255);
-		fz_drop_pixmap(conv);
-		fz_drop_pixmap(temp);
+
+		ptd.ctx = ctx;
+		ptd.dest = temp;
+		ptd.shade = shade;
+		ptd.bbox = bbox;
+
+		fz_process_mesh(ctx, shade, &local_ctm, &do_paint_tri, &ptd);
+
+		if (shade->use_function)
+		{
+			unsigned char *s = temp->samples;
+			unsigned char *d = conv->samples;
+			int len = temp->w * temp->h;
+			while (len--)
+			{
+				int v = *s++;
+				int a = fz_mul255(*s++, clut[v][conv->n - 1]);
+				for (k = 0; k < conv->n - 1; k++)
+					*d++ = fz_mul255(clut[v][k], a);
+				*d++ = a;
+			}
+			fz_paint_pixmap(dest, conv, 255);
+			fz_drop_pixmap(ctx, conv);
+			fz_drop_pixmap(ctx, temp);
+		}
+	}
+	fz_catch(ctx)
+	{
+		fz_drop_pixmap(ctx, conv);
+		fz_drop_pixmap(ctx, temp);
+		fz_rethrow(ctx);
 	}
 }

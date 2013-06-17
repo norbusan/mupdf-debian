@@ -22,6 +22,12 @@
 
 extern int ffs(int);
 
+static int is_big_endian(void)
+{
+	static const int one = 1;
+	return *(char*)&one == 0;
+}
+
 typedef void (*ximage_convert_func_t)
 (
 	const unsigned char *src,
@@ -212,7 +218,7 @@ select_mode(void)
 	unsigned long rs, gs, bs;
 
 	byteorder = ImageByteOrder(info.display);
-	if (fz_is_big_endian())
+	if (is_big_endian())
 		byterev = byteorder != MSBFirst;
 	else
 		byterev = byteorder != LSBFirst;
@@ -285,7 +291,7 @@ create_pool(void)
 		info.pool[i] = createximage(info.display,
 			info.visual.visual, &info.shminfo[i], info.visual.depth,
 			WIDTH, HEIGHT);
-		if (info.pool[i] == NULL) {
+		if (!info.pool[i]) {
 			return 0;
 		}
 	}
@@ -426,10 +432,10 @@ ximage_blit(Drawable d, GC gc,
 
 	for (ay = 0; ay < srch; ay += HEIGHT)
 	{
-		h = MIN(srch - ay, HEIGHT);
+		h = fz_mini(srch - ay, HEIGHT);
 		for (ax = 0; ax < srcw; ax += WIDTH)
 		{
-			w = MIN(srcw - ax, WIDTH);
+			w = fz_mini(srcw - ax, WIDTH);
 
 			image = next_pool_image();
 

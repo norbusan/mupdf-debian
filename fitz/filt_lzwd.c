@@ -1,4 +1,4 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
 /* TODO: error checking */
 
@@ -80,6 +80,12 @@ read_lzwd(fz_stream *stm, unsigned char *buf, int len)
 			break;
 		}
 
+		if (next_code >= NUM_CODES && code != LZW_CLEAR)
+		{
+			fz_warn(stm->ctx, "missing clear code in lzw decode");
+			code = LZW_CLEAR;
+		}
+
 		if (code == LZW_CLEAR)
 		{
 			code_bits = MIN_BITS;
@@ -93,6 +99,10 @@ read_lzwd(fz_stream *stm, unsigned char *buf, int len)
 		{
 			old_code = code;
 		}
+		else if (code > next_code || next_code >= NUM_CODES)
+		{
+			fz_warn(stm->ctx, "out of range code encountered in lzw decode");
+		}
 		else
 		{
 			/* add new entry to the code table */
@@ -104,7 +114,7 @@ read_lzwd(fz_stream *stm, unsigned char *buf, int len)
 			else if (code == next_code)
 				table[next_code].value = table[next_code].first_char;
 			else
-				fz_warn("out of range code encountered in lzw decode");
+				fz_warn(stm->ctx, "out of range code encountered in lzw decode");
 
 			next_code ++;
 
@@ -112,7 +122,7 @@ read_lzwd(fz_stream *stm, unsigned char *buf, int len)
 			{
 				code_bits ++;
 				if (code_bits > MAX_BITS)
-					code_bits = MAX_BITS;	/* FIXME */
+					code_bits = MAX_BITS;
 			}
 
 			old_code = code;
@@ -156,51 +166,59 @@ read_lzwd(fz_stream *stm, unsigned char *buf, int len)
 }
 
 static void
-close_lzwd(fz_stream *stm)
+close_lzwd(fz_context *ctx, void *state_)
 {
-	fz_lzwd *lzw = stm->state;
+	fz_lzwd *lzw = (fz_lzwd *)state_;
 	fz_close(lzw->chain);
-	fz_free(lzw);
+	fz_free(ctx, lzw);
 }
 
+/* Default: early_change = 1 */
 fz_stream *
-fz_open_lzwd(fz_stream *chain, fz_obj *params)
+fz_open_lzwd(fz_stream *chain, int early_change)
 {
-	fz_lzwd *lzw;
-	fz_obj *obj;
+	fz_context *ctx = chain->ctx;
+	fz_lzwd *lzw = NULL;
 	int i;
 
-	lzw = fz_malloc(sizeof(fz_lzwd));
-	lzw->chain = chain;
-	lzw->eod = 0;
-	lzw->early_change = 1;
+	fz_var(lzw);
 
-	obj = fz_dict_gets(params, "EarlyChange");
-	if (obj)
-		lzw->early_change = !!fz_to_int(obj);
-
-	for (i = 0; i < 256; i++)
+	fz_try(ctx)
 	{
-		lzw->table[i].value = i;
-		lzw->table[i].first_char = i;
-		lzw->table[i].length = 1;
-		lzw->table[i].prev = -1;
+		lzw = fz_malloc_struct(ctx, fz_lzwd);
+		lzw->chain = chain;
+		lzw->eod = 0;
+		lzw->early_change = early_change;
+
+		for (i = 0; i < 256; i++)
+		{
+			lzw->table[i].value = i;
+			lzw->table[i].first_char = i;
+			lzw->table[i].length = 1;
+			lzw->table[i].prev = -1;
+		}
+
+		for (i = 256; i < NUM_CODES; i++)
+		{
+			lzw->table[i].value = 0;
+			lzw->table[i].first_char = 0;
+			lzw->table[i].length = 0;
+			lzw->table[i].prev = -1;
+		}
+
+		lzw->code_bits = MIN_BITS;
+		lzw->code = -1;
+		lzw->next_code = LZW_FIRST;
+		lzw->old_code = -1;
+		lzw->rp = lzw->bp;
+		lzw->wp = lzw->bp;
+	}
+	fz_catch(ctx)
+	{
+		fz_free(ctx, lzw);
+		fz_close(chain);
+		fz_rethrow(ctx);
 	}
 
-	for (i = 256; i < NUM_CODES; i++)
-	{
-		lzw->table[i].value = 0;
-		lzw->table[i].first_char = 0;
-		lzw->table[i].length = 0;
-		lzw->table[i].prev = -1;
-	}
-
-	lzw->code_bits = MIN_BITS;
-	lzw->code = -1;
-	lzw->next_code = LZW_FIRST;
-	lzw->old_code = -1;
-	lzw->rp = lzw->bp;
-	lzw->wp = lzw->bp;
-
-	return fz_new_stream(lzw, read_lzwd, close_lzwd);
+	return fz_new_stream(ctx, lzw, read_lzwd, close_lzwd);
 }

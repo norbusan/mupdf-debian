@@ -1,18 +1,53 @@
 # GNU Makefile for third party libraries used by MuPDF
 #
 # If thirdparty libraries are supplied, they will be built as
-# static libraries. Download and unzip the the mupdf-thirdparty.zip
-# archive in the source directory.
+# static libraries.
+#
+# Use 'git submodule init' and 'git submodule update' to check
+# out the thirdparty libraries from git.
 
-FREETYPE_DIR := $(wildcard thirdparty/freetype*)
-JBIG2DEC_DIR := $(wildcard thirdparty/jbig2dec*)
-JPEG_DIR := $(wildcard thirdparty/jpeg*)
-OPENJPEG_DIR := $(wildcard thirdparty/openjpeg*/libopenjpeg)
-ZLIB_DIR := $(wildcard thirdparty/zlib*)
+FREETYPE_DIR := thirdparty/freetype
+JBIG2DEC_DIR := thirdparty/jbig2dec
+JPEG_DIR := thirdparty/jpeg
+OPENJPEG_DIR := thirdparty/openjpeg
+ZLIB_DIR := thirdparty/zlib
+
+# --- V8 ---
+#
+# V8 is too big to be used as a submodule.
+#
+
+V8_DIR := $(wildcard thirdparty/v8*)
+
+ifneq "$(V8_DIR)" ""
+
+CFLAGS += -I$(V8_DIR)/include
+ifeq "$(BUILD)" "release"
+V8LIB_CHOICE := release
+else ifeq "$(BUILD)" "profile"
+V8LIB_CHOICE := release
+else
+V8LIB_CHOICE := debug
+endif
+
+# If you are building for 32bit linux use V8_ARCH=ia32
+# MacOSX has a 64bit kernel, but a 32 bit userspace.
+ifeq "$(OS)" "Darwin"
+V8_ARCH ?= ia32
+V8LIBS = -L$(V8_DIR)/out-mac/$(V8_ARCH).$(V8LIB_CHOICE)/ -lv8_base -lv8_snapshot
+else
+V8_ARCH ?= x64
+V8LIBS = -L$(V8_DIR)/out/$(V8_ARCH).$(V8LIB_CHOICE)/obj.target/tools/gyp -lv8_base -lv8_snapshot -lpthread
+endif
+
+V8_PRESENT := 1
+else
+V8_PRESENT := 0
+endif
 
 # --- FreeType 2 ---
 
-ifneq "$(FREETYPE_DIR)" ""
+ifneq "$(wildcard $(FREETYPE_DIR)/README)" ""
 CFLAGS += -I$(FREETYPE_DIR)/include
 LIBS := $(filter-out -lfreetype, $(LIBS))
 FREETYPE_LIB := $(OUT)/libfreetype.a
@@ -75,7 +110,7 @@ endif
 
 # --- JBIG2DEC ---
 
-ifneq "$(JBIG2DEC_DIR)" ""
+ifneq "$(wildcard $(JBIG2DEC_DIR)/README)" ""
 CFLAGS += -I$(JBIG2DEC_DIR)
 LIBS := $(filter-out -ljbig2dec, $(LIBS))
 JBIG2DEC_LIB := $(OUT)/libjbig2dec.a
@@ -86,6 +121,7 @@ JBIG2DEC_SRC := \
 	jbig2_arith_iaid.c \
 	jbig2_arith_int.c \
 	jbig2_generic.c \
+	jbig2_halftone.c \
 	jbig2_huffman.c \
 	jbig2_image.c \
 	jbig2_metadata.c \
@@ -103,7 +139,7 @@ endif
 
 # --- JPEG library from IJG ---
 
-ifneq "$(JPEG_DIR)" ""
+ifneq "$(wildcard $(JPEG_DIR)/README)" ""
 CFLAGS += -I$(JPEG_DIR)
 LIBS := $(filter-out -ljpeg, $(LIBS))
 JPEG_LIB := $(OUT)/libjpeg.a
@@ -135,8 +171,8 @@ JPEG_SRC := \
 	jidctflt.c \
 	jidctfst.c \
 	jidctint.c \
-	jmemansi.c \
 	jmemmgr.c \
+	jmemnobs.c \
 	jquant1.c \
 	jquant2.c \
 	jutils.c \
@@ -148,13 +184,14 @@ endif
 
 # --- OpenJPEG ---
 
-ifneq "$(OPENJPEG_DIR)" ""
-CFLAGS += -I$(OPENJPEG_DIR)
+ifneq "$(wildcard $(OPENJPEG_DIR)/README)" ""
+CFLAGS += -I$(OPENJPEG_DIR)/libopenjpeg
 LIBS := $(filter-out -lopenjpeg, $(LIBS))
 OPENJPEG_LIB := $(OUT)/libopenjpeg.a
 
 OPENJPEG_SRC := \
 	bio.c \
+	cidx_manager.c \
 	cio.c \
 	dwt.c \
 	event.c \
@@ -166,22 +203,28 @@ OPENJPEG_SRC := \
 	mct.c \
 	mqc.c \
 	openjpeg.c \
+	phix_manager.c \
 	pi.c \
+	ppix_manager.c \
 	raw.c \
 	t1.c \
 	t2.c \
 	tcd.c \
 	tgt.c \
+	thix_manager.c \
+	tpix_manager.c \
 
 $(OPENJPEG_LIB): $(addprefix $(OUT)/opj_, $(OPENJPEG_SRC:%.c=%.o))
-$(OUT)/opj_%.o: $(OPENJPEG_DIR)/%.c | $(OUT)
+$(OUT)/opj_%.o: $(OPENJPEG_DIR)/libopenjpeg/%.c | $(OUT)
 	$(CC_CMD) -DOPJ_STATIC
+else
+CFLAGS += $(SYS_OPENJPEG_INC)
 endif
 
 # --- ZLIB ---
 
-ifneq "$(ZLIB_DIR)" ""
-CFLAGS += -I$(ZLIB_DIR)
+ifneq "$(wildcard $(ZLIB_DIR)/README)" ""
+CFLAGS += -I$(ZLIB_DIR) -Dverbose=-1
 LIBS := $(filter-out -lz, $(LIBS))
 ZLIB_LIB := $(OUT)/libz.a
 

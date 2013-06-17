@@ -1,5 +1,4 @@
-#include "fitz.h"
-#include "muxps.h"
+#include "muxps-internal.h"
 
 #define MAX_STOPS 256
 
@@ -35,7 +34,7 @@ static inline float lerp(float a, float b, float x)
 }
 
 static int
-xps_parse_gradient_stops(xps_context *ctx, char *base_uri, xml_element *node,
+xps_parse_gradient_stops(xps_document *doc, char *base_uri, fz_xml *node,
 	struct stop *stops, int maxcount)
 {
 	fz_colorspace *colorspace;
@@ -51,17 +50,17 @@ xps_parse_gradient_stops(xps_context *ctx, char *base_uri, xml_element *node,
 	count = 0;
 	while (node && count < maxcount)
 	{
-		if (!strcmp(xml_tag(node), "GradientStop"))
+		if (!strcmp(fz_xml_tag(node), "GradientStop"))
 		{
-			char *offset = xml_att(node, "Offset");
-			char *color = xml_att(node, "Color");
+			char *offset = fz_xml_att(node, "Offset");
+			char *color = fz_xml_att(node, "Color");
 			if (offset && color)
 			{
 				stops[count].offset = fz_atof(offset);
 
-				xps_parse_color(ctx, base_uri, color, &colorspace, sample);
+				xps_parse_color(doc, base_uri, color, &colorspace, sample);
 
-				fz_convert_color(colorspace, sample + 1, fz_device_rgb, rgb);
+				fz_convert_color(doc->ctx, fz_device_rgb, rgb, colorspace, sample + 1);
 
 				stops[count].r = rgb[0];
 				stops[count].g = rgb[1];
@@ -71,12 +70,12 @@ xps_parse_gradient_stops(xps_context *ctx, char *base_uri, xml_element *node,
 				count ++;
 			}
 		}
-		node = xml_next(node);
+		node = fz_xml_next(node);
 	}
 
 	if (count == 0)
 	{
-		fz_warn("gradient brush has no gradient stops");
+		fz_warn(doc->ctx, "gradient brush has no gradient stops");
 		stops[0].offset = 0;
 		stops[0].r = 0;
 		stops[0].g = 0;
@@ -91,7 +90,7 @@ xps_parse_gradient_stops(xps_context *ctx, char *base_uri, xml_element *node,
 	}
 
 	if (count == maxcount)
-		fz_warn("gradient brush exceeded maximum number of gradient stops");
+		fz_warn(doc->ctx, "gradient brush exceeded maximum number of gradient stops");
 
 	/* Postprocess to make sure the range of offsets is 0.0 to 1.0 */
 
@@ -147,10 +146,10 @@ xps_parse_gradient_stops(xps_context *ctx, char *base_uri, xml_element *node,
 	{
 		float d = (1 - stops[count-2].offset) / (stops[count-1].offset - stops[count-2].offset);
 		stops[count-1].offset = 1;
-		stops[0].r = lerp(stops[count-2].r, stops[count-1].r, d);
-		stops[0].g = lerp(stops[count-2].g, stops[count-1].g, d);
-		stops[0].b = lerp(stops[count-2].b, stops[count-1].b, d);
-		stops[0].a = lerp(stops[count-2].a, stops[count-1].a, d);
+		stops[count-1].r = lerp(stops[count-2].r, stops[count-1].r, d);
+		stops[count-1].g = lerp(stops[count-2].g, stops[count-1].g, d);
+		stops[count-1].b = lerp(stops[count-2].b, stops[count-1].b, d);
+		stops[count-1].a = lerp(stops[count-2].a, stops[count-1].a, d);
 	}
 
 	/* First stop > 0 -- insert a duplicate at 0 */
@@ -203,7 +202,7 @@ xps_sample_gradient_stops(fz_shade *shade, struct stop *stops, int count)
  */
 
 static void
-xps_draw_one_radial_gradient(xps_context *ctx, fz_matrix ctm,
+xps_draw_one_radial_gradient(xps_document *doc, const fz_matrix *ctm,
 	struct stop *stops, int count,
 	int extend,
 	float x0, float y0, float r0,
@@ -212,40 +211,37 @@ xps_draw_one_radial_gradient(xps_context *ctx, fz_matrix ctm,
 	fz_shade *shade;
 
 	/* TODO: this (and the stuff in pdf_shade) should move to res_shade.c */
-	shade = fz_malloc(sizeof(fz_shade));
-	shade->refs = 1;
+	shade = fz_malloc_struct(doc->ctx, fz_shade);
+	FZ_INIT_STORABLE(shade, 1, fz_free_shade_imp);
 	shade->colorspace = fz_device_rgb;
 	shade->bbox = fz_infinite_rect;
 	shade->matrix = fz_identity;
 	shade->use_background = 0;
 	shade->use_function = 1;
 	shade->type = FZ_RADIAL;
-	shade->extend[0] = extend;
-	shade->extend[1] = extend;
+	shade->u.l_or_r.extend[0] = extend;
+	shade->u.l_or_r.extend[1] = extend;
 
 	xps_sample_gradient_stops(shade, stops, count);
 
-	shade->mesh_len = 6;
-	shade->mesh_cap = 6;
-	shade->mesh = fz_calloc(shade->mesh_cap, sizeof(float));
-	shade->mesh[0] = x0;
-	shade->mesh[1] = y0;
-	shade->mesh[2] = r0;
-	shade->mesh[3] = x1;
-	shade->mesh[4] = y1;
-	shade->mesh[5] = r1;
+	shade->u.l_or_r.coords[0][0] = x0;
+	shade->u.l_or_r.coords[0][1] = y0;
+	shade->u.l_or_r.coords[0][2] = r0;
+	shade->u.l_or_r.coords[1][0] = x1;
+	shade->u.l_or_r.coords[1][1] = y1;
+	shade->u.l_or_r.coords[1][2] = r1;
 
-	fz_fill_shade(ctx->dev, shade, ctm, 1);
+	fz_fill_shade(doc->dev, shade, ctm, 1);
 
-	fz_drop_shade(shade);
+	fz_drop_shade(doc->ctx, shade);
 }
 
 /*
- * Linear gradients map to Axial shadings.
+ * Linear gradients.
  */
 
 static void
-xps_draw_one_linear_gradient(xps_context *ctx, fz_matrix ctm,
+xps_draw_one_linear_gradient(xps_document *doc, const fz_matrix *ctm,
 	struct stop *stops, int count,
 	int extend,
 	float x0, float y0, float x1, float y1)
@@ -253,32 +249,29 @@ xps_draw_one_linear_gradient(xps_context *ctx, fz_matrix ctm,
 	fz_shade *shade;
 
 	/* TODO: this (and the stuff in pdf_shade) should move to res_shade.c */
-	shade = fz_malloc(sizeof(fz_shade));
-	shade->refs = 1;
+	shade = fz_malloc_struct(doc->ctx, fz_shade);
+	FZ_INIT_STORABLE(shade, 1, fz_free_shade_imp);
 	shade->colorspace = fz_device_rgb;
 	shade->bbox = fz_infinite_rect;
 	shade->matrix = fz_identity;
 	shade->use_background = 0;
 	shade->use_function = 1;
 	shade->type = FZ_LINEAR;
-	shade->extend[0] = extend;
-	shade->extend[1] = extend;
+	shade->u.l_or_r.extend[0] = extend;
+	shade->u.l_or_r.extend[1] = extend;
 
 	xps_sample_gradient_stops(shade, stops, count);
 
-	shade->mesh_len = 6;
-	shade->mesh_cap = 6;
-	shade->mesh = fz_calloc(shade->mesh_cap, sizeof(float));
-	shade->mesh[0] = x0;
-	shade->mesh[1] = y0;
-	shade->mesh[2] = 0;
-	shade->mesh[3] = x1;
-	shade->mesh[4] = y1;
-	shade->mesh[5] = 0;
+	shade->u.l_or_r.coords[0][0] = x0;
+	shade->u.l_or_r.coords[0][1] = y0;
+	shade->u.l_or_r.coords[0][2] = 0;
+	shade->u.l_or_r.coords[1][0] = x1;
+	shade->u.l_or_r.coords[1][1] = y1;
+	shade->u.l_or_r.coords[1][2] = 0;
 
-	fz_fill_shade(ctx->dev, shade, ctm, 1);
+	fz_fill_shade(doc->dev, shade, ctm, doc->opacity[doc->opacity_top]);
 
-	fz_drop_shade(shade);
+	fz_drop_shade(doc->ctx, shade);
 }
 
 /*
@@ -297,41 +290,83 @@ static inline float point_inside_circle(float px, float py, float x, float y, fl
 }
 
 static void
-xps_draw_radial_gradient(xps_context *ctx, fz_matrix ctm,
+xps_draw_radial_gradient(xps_document *doc, const fz_matrix *ctm, const fz_rect *area,
 	struct stop *stops, int count,
-	xml_element *root, int spread)
+	fz_xml *root, int spread)
 {
 	float x0, y0, r0;
 	float x1, y1, r1;
 	float xrad = 1;
 	float yrad = 1;
 	float invscale;
+	int i, ma = 1;
+	fz_matrix local_ctm = *ctm;
+	fz_matrix inv;
+	fz_rect local_area = *area;
 
-	char *center_att = xml_att(root, "Center");
-	char *origin_att = xml_att(root, "GradientOrigin");
-	char *radius_x_att = xml_att(root, "RadiusX");
-	char *radius_y_att = xml_att(root, "RadiusY");
+	char *center_att = fz_xml_att(root, "Center");
+	char *origin_att = fz_xml_att(root, "GradientOrigin");
+	char *radius_x_att = fz_xml_att(root, "RadiusX");
+	char *radius_y_att = fz_xml_att(root, "RadiusY");
+
+	x0 = y0 = 0.0;
+	x1 = y1 = 1.0;
+	xrad = 1.0;
+	yrad = 1.0;
 
 	if (origin_att)
-		sscanf(origin_att, "%g,%g", &x0, &y0);
+		xps_parse_point(origin_att, &x0, &y0);
 	if (center_att)
-		sscanf(center_att, "%g,%g", &x1, &y1);
+		xps_parse_point(center_att, &x1, &y1);
 	if (radius_x_att)
 		xrad = fz_atof(radius_x_att);
 	if (radius_y_att)
 		yrad = fz_atof(radius_y_att);
 
-	/* scale the ctm to make ellipses */
-	ctm = fz_concat(fz_scale(1, yrad / xrad), ctm);
+	xrad = fz_max(0.01f, xrad);
+	yrad = fz_max(0.01f, yrad);
 
-	invscale = xrad / yrad;
-	y0 = y0 * invscale;
-	y1 = y1 * invscale;
+	/* scale the ctm to make ellipses */
+	if (fz_abs(xrad) > FLT_EPSILON)
+	{
+		fz_pre_scale(&local_ctm, 1, yrad/xrad);
+	}
+
+	if (yrad != 0.0)
+	{
+		invscale = xrad / yrad;
+		y0 = y0 * invscale;
+		y1 = y1 * invscale;
+	}
 
 	r0 = 0;
 	r1 = xrad;
 
-	xps_draw_one_radial_gradient(ctx, ctm, stops, count, 1, x0, y0, r0, x1, y1, r1);
+	fz_transform_rect(&local_area, fz_invert_matrix(&inv, &local_ctm));
+	ma = fz_maxi(ma, ceilf(hypotf(local_area.x0 - x0, local_area.y0 - y0) / xrad));
+	ma = fz_maxi(ma, ceilf(hypotf(local_area.x1 - x0, local_area.y0 - y0) / xrad));
+	ma = fz_maxi(ma, ceilf(hypotf(local_area.x0 - x0, local_area.y1 - y0) / xrad));
+	ma = fz_maxi(ma, ceilf(hypotf(local_area.x1 - x0, local_area.y1 - y0) / xrad));
+
+	if (spread == SPREAD_REPEAT)
+	{
+		for (i = ma - 1; i >= 0; i--)
+			xps_draw_one_radial_gradient(doc, &local_ctm, stops, count, 0, x0, y0, r0 + i * xrad, x1, y1, r1 + i * xrad);
+	}
+	else if (spread == SPREAD_REFLECT)
+	{
+		if ((ma % 2) != 0)
+			ma++;
+		for (i = ma - 2; i >= 0; i -= 2)
+		{
+			xps_draw_one_radial_gradient(doc, &local_ctm, stops, count, 0, x0, y0, r0 + i * xrad, x1, y1, r1 + i * xrad);
+			xps_draw_one_radial_gradient(doc, &local_ctm, stops, count, 0, x0, y0, r0 + (i + 2) * xrad, x1, y1, r1 + i * xrad);
+		}
+	}
+	else
+	{
+		xps_draw_one_radial_gradient(doc, &local_ctm, stops, count, 1, x0, y0, r0, x1, y1, r1);
+	}
 }
 
 /*
@@ -340,24 +375,60 @@ xps_draw_radial_gradient(xps_context *ctx, fz_matrix ctm,
  */
 
 static void
-xps_draw_linear_gradient(xps_context *ctx, fz_matrix ctm,
+xps_draw_linear_gradient(xps_document *doc, const fz_matrix *ctm, const fz_rect *area,
 	struct stop *stops, int count,
-	xml_element *root, int spread)
+	fz_xml *root, int spread)
 {
 	float x0, y0, x1, y1;
+	int i, mi, ma;
+	float dx, dy, x, y, k;
+	fz_point p1, p2;
+	fz_matrix inv;
+	fz_rect local_area = *area;
 
-	char *start_point_att = xml_att(root, "StartPoint");
-	char *end_point_att = xml_att(root, "EndPoint");
+	char *start_point_att = fz_xml_att(root, "StartPoint");
+	char *end_point_att = fz_xml_att(root, "EndPoint");
 
 	x0 = y0 = 0;
 	x1 = y1 = 1;
 
 	if (start_point_att)
-		sscanf(start_point_att, "%g,%g", &x0, &y0);
+		xps_parse_point(start_point_att, &x0, &y0);
 	if (end_point_att)
-		sscanf(end_point_att, "%g,%g", &x1, &y1);
+		xps_parse_point(end_point_att, &x1, &y1);
 
-	xps_draw_one_linear_gradient(ctx, ctm, stops, count, 1, x0, y0, x1, y1);
+	p1.x = x0; p1.y = y0; p2.x = x1; p2.y = y1;
+	fz_transform_rect(&local_area, fz_invert_matrix(&inv, ctm));
+	x = p2.x - p1.x; y = p2.y - p1.y;
+	k = ((local_area.x0 - p1.x) * x + (local_area.y0 - p1.y) * y) / (x * x + y * y);
+	mi = floorf(k); ma = ceilf(k);
+	k = ((local_area.x1 - p1.x) * x + (local_area.y0 - p1.y) * y) / (x * x + y * y);
+	mi = fz_mini(mi, floorf(k)); ma = fz_maxi(ma, ceilf(k));
+	k = ((local_area.x0 - p1.x) * x + (local_area.y1 - p1.y) * y) / (x * x + y * y);
+	mi = fz_mini(mi, floorf(k)); ma = fz_maxi(ma, ceilf(k));
+	k = ((local_area.x1 - p1.x) * x + (local_area.y1 - p1.y) * y) / (x * x + y * y);
+	mi = fz_mini(mi, floorf(k)); ma = fz_maxi(ma, ceilf(k));
+	dx = x1 - x0; dy = y1 - y0;
+
+	if (spread == SPREAD_REPEAT)
+	{
+		for (i = mi; i < ma; i++)
+			xps_draw_one_linear_gradient(doc, ctm, stops, count, 0, x0 + i * dx, y0 + i * dy, x1 + i * dx, y1 + i * dy);
+	}
+	else if (spread == SPREAD_REFLECT)
+	{
+		if ((mi % 2) != 0)
+			mi--;
+		for (i = mi; i < ma; i += 2)
+		{
+			xps_draw_one_linear_gradient(doc, ctm, stops, count, 0, x0 + i * dx, y0 + i * dy, x1 + i * dx, y1 + i * dy);
+			xps_draw_one_linear_gradient(doc, ctm, stops, count, 0, x0 + (i + 2) * dx, y0 + (i + 2) * dy, x1 + i * dx, y1 + i * dy);
+		}
+	}
+	else
+	{
+		xps_draw_one_linear_gradient(doc, ctm, stops, count, 1, x0, y0, x1, y1);
+	}
 }
 
 /*
@@ -366,11 +437,11 @@ xps_draw_linear_gradient(xps_context *ctx, fz_matrix ctm,
  */
 
 static void
-xps_parse_gradient_brush(xps_context *ctx, fz_matrix ctm, fz_rect area,
-	char *base_uri, xps_resource *dict, xml_element *root,
-	void (*draw)(xps_context *, fz_matrix, struct stop *, int, xml_element *, int))
+xps_parse_gradient_brush(xps_document *doc, const fz_matrix *ctm, const fz_rect *area,
+	char *base_uri, xps_resource *dict, fz_xml *root,
+	void (*draw)(xps_document *, const fz_matrix*, const fz_rect *, struct stop *, int, fz_xml *, int))
 {
-	xml_element *node;
+	fz_xml *node;
 
 	char *opacity_att;
 	char *interpolation_att;
@@ -378,33 +449,33 @@ xps_parse_gradient_brush(xps_context *ctx, fz_matrix ctm, fz_rect area,
 	char *mapping_att;
 	char *transform_att;
 
-	xml_element *transform_tag = NULL;
-	xml_element *stop_tag = NULL;
+	fz_xml *transform_tag = NULL;
+	fz_xml *stop_tag = NULL;
 
 	struct stop stop_list[MAX_STOPS];
 	int stop_count;
 	fz_matrix transform;
 	int spread_method;
 
-	opacity_att = xml_att(root, "Opacity");
-	interpolation_att = xml_att(root, "ColorInterpolationMode");
-	spread_att = xml_att(root, "SpreadMethod");
-	mapping_att = xml_att(root, "MappingMode");
-	transform_att = xml_att(root, "Transform");
+	opacity_att = fz_xml_att(root, "Opacity");
+	interpolation_att = fz_xml_att(root, "ColorInterpolationMode");
+	spread_att = fz_xml_att(root, "SpreadMethod");
+	mapping_att = fz_xml_att(root, "MappingMode");
+	transform_att = fz_xml_att(root, "Transform");
 
-	for (node = xml_down(root); node; node = xml_next(node))
+	for (node = fz_xml_down(root); node; node = fz_xml_next(node))
 	{
-		if (!strcmp(xml_tag(node), "LinearGradientBrush.Transform"))
-			transform_tag = xml_down(node);
-		if (!strcmp(xml_tag(node), "RadialGradientBrush.Transform"))
-			transform_tag = xml_down(node);
-		if (!strcmp(xml_tag(node), "LinearGradientBrush.GradientStops"))
-			stop_tag = xml_down(node);
-		if (!strcmp(xml_tag(node), "RadialGradientBrush.GradientStops"))
-			stop_tag = xml_down(node);
+		if (!strcmp(fz_xml_tag(node), "LinearGradientBrush.Transform"))
+			transform_tag = fz_xml_down(node);
+		if (!strcmp(fz_xml_tag(node), "RadialGradientBrush.Transform"))
+			transform_tag = fz_xml_down(node);
+		if (!strcmp(fz_xml_tag(node), "LinearGradientBrush.GradientStops"))
+			stop_tag = fz_xml_down(node);
+		if (!strcmp(fz_xml_tag(node), "RadialGradientBrush.GradientStops"))
+			stop_tag = fz_xml_down(node);
 	}
 
-	xps_resolve_resource_reference(ctx, dict, &transform_att, &transform_tag, NULL);
+	xps_resolve_resource_reference(doc, dict, &transform_att, &transform_tag, NULL);
 
 	spread_method = SPREAD_PAD;
 	if (spread_att)
@@ -419,40 +490,40 @@ xps_parse_gradient_brush(xps_context *ctx, fz_matrix ctm, fz_rect area,
 
 	transform = fz_identity;
 	if (transform_att)
-		xps_parse_render_transform(ctx, transform_att, &transform);
+		xps_parse_render_transform(doc, transform_att, &transform);
 	if (transform_tag)
-		xps_parse_matrix_transform(ctx, transform_tag, &transform);
-	ctm = fz_concat(transform, ctm);
+		xps_parse_matrix_transform(doc, transform_tag, &transform);
+	fz_concat(&transform, &transform, ctm);
 
 	if (!stop_tag) {
-		fz_warn("missing gradient stops tag");
+		fz_warn(doc->ctx, "missing gradient stops tag");
 		return;
 	}
 
-	stop_count = xps_parse_gradient_stops(ctx, base_uri, stop_tag, stop_list, MAX_STOPS);
+	stop_count = xps_parse_gradient_stops(doc, base_uri, stop_tag, stop_list, MAX_STOPS);
 	if (stop_count == 0)
 	{
-		fz_warn("no gradient stops found");
+		fz_warn(doc->ctx, "no gradient stops found");
 		return;
 	}
 
-	xps_begin_opacity(ctx, ctm, area, base_uri, dict, opacity_att, NULL);
+	xps_begin_opacity(doc, &transform, area, base_uri, dict, opacity_att, NULL);
 
-	draw(ctx, ctm, stop_list, stop_count, root, spread_method);
+	draw(doc, &transform, area, stop_list, stop_count, root, spread_method);
 
-	xps_end_opacity(ctx, base_uri, dict, opacity_att, NULL);
+	xps_end_opacity(doc, base_uri, dict, opacity_att, NULL);
 }
 
 void
-xps_parse_linear_gradient_brush(xps_context *ctx, fz_matrix ctm, fz_rect area,
-	char *base_uri, xps_resource *dict, xml_element *root)
+xps_parse_linear_gradient_brush(xps_document *doc, const fz_matrix *ctm, const fz_rect *area,
+	char *base_uri, xps_resource *dict, fz_xml *root)
 {
-	xps_parse_gradient_brush(ctx, ctm, area, base_uri, dict, root, xps_draw_linear_gradient);
+	xps_parse_gradient_brush(doc, ctm, area, base_uri, dict, root, xps_draw_linear_gradient);
 }
 
 void
-xps_parse_radial_gradient_brush(xps_context *ctx, fz_matrix ctm, fz_rect area,
-	char *base_uri, xps_resource *dict, xml_element *root)
+xps_parse_radial_gradient_brush(xps_document *doc, const fz_matrix *ctm, const fz_rect *area,
+	char *base_uri, xps_resource *dict, fz_xml *root)
 {
-	xps_parse_gradient_brush(ctx, ctm, area, base_uri, dict, root, xps_draw_radial_gradient);
+	xps_parse_gradient_brush(doc, ctm, area, base_uri, dict, root, xps_draw_radial_gradient);
 }

@@ -2,25 +2,17 @@
  * pdfshow -- the ultimate pdf debugging tool
  */
 
-#include "fitz.h"
-#include "mupdf.h"
+#include "mupdf-internal.h"
 
-static pdf_xref *xref = NULL;
+static pdf_document *doc = NULL;
+static fz_context *ctx = NULL;
 static int showbinary = 0;
 static int showdecode = 1;
 static int showcolumn;
 
-void die(fz_error error)
-{
-	fz_catch(error, "aborting");
-	if (xref)
-		pdf_free_xref(xref);
-	exit(1);
-}
-
 static void usage(void)
 {
-	fprintf(stderr, "usage: pdfshow [options] file.pdf [grepable] [xref] [trailer] [pagetree] [object numbers]\n");
+	fprintf(stderr, "usage: mutool show [options] file.pdf [grepable] [xref] [trailer] [pagetree] [object numbers]\n");
 	fprintf(stderr, "\t-b\tprint streams as binary data\n");
 	fprintf(stderr, "\t-e\tprint encoded streams (don't decode)\n");
 	fprintf(stderr, "\t-p\tpassword\n");
@@ -29,43 +21,49 @@ static void usage(void)
 
 static void showtrailer(void)
 {
-	if (!xref)
-		die(fz_throw("no file specified"));
+	if (!doc)
+		fz_throw(ctx, "no file specified");
 	printf("trailer\n");
-	fz_debug_obj(xref->trailer);
+	pdf_fprint_obj(stdout, doc->trailer, 0);
+	printf("\n");
+}
+
+static void showencrypt(void)
+{
+	pdf_obj *encrypt;
+
+	if (!doc)
+		fz_throw(ctx, "no file specified");
+	encrypt = pdf_dict_gets(doc->trailer, "Encrypt");
+	if (!encrypt)
+		fz_throw(ctx, "document not encrypted");
+	printf("encryption dictionary\n");
+	pdf_fprint_obj(stdout, pdf_resolve_indirect(encrypt), 0);
 	printf("\n");
 }
 
 static void showxref(void)
 {
-	if (!xref)
-		die(fz_throw("no file specified"));
-	pdf_debug_xref(xref);
+	if (!doc)
+		fz_throw(ctx, "no file specified");
+	pdf_print_xref(doc);
 	printf("\n");
 }
 
 static void showpagetree(void)
 {
-	fz_error error;
-	fz_obj *ref;
+	pdf_obj *ref;
 	int count;
 	int i;
 
-	if (!xref)
-		die(fz_throw("no file specified"));
+	if (!doc)
+		fz_throw(ctx, "no file specified");
 
-	if (!xref->page_len)
-	{
-		error = pdf_load_page_tree(xref);
-		if (error)
-			die(fz_rethrow(error, "cannot load page tree"));
-	}
-
-	count = pdf_count_pages(xref);
+	count = pdf_count_pages(doc);
 	for (i = 0; i < count; i++)
 	{
-		ref = xref->page_refs[i];
-		printf("page %d = %d %d R\n", i + 1, fz_to_num(ref), fz_to_gen(ref));
+		ref = doc->page_refs[i];
+		printf("page %d = %d %d R\n", i + 1, pdf_to_num(ref), pdf_to_gen(ref));
 	}
 	printf("\n");
 }
@@ -95,7 +93,6 @@ static void showsafe(unsigned char *buf, int n)
 
 static void showstream(int num, int gen)
 {
-	fz_error error;
 	fz_stream *stm;
 	unsigned char buf[2048];
 	int n;
@@ -103,17 +100,13 @@ static void showstream(int num, int gen)
 	showcolumn = 0;
 
 	if (showdecode)
-		error = pdf_open_stream(&stm, xref, num, gen);
+		stm = pdf_open_stream(doc, num, gen);
 	else
-		error = pdf_open_raw_stream(&stm, xref, num, gen);
-	if (error)
-		die(error);
+		stm = pdf_open_raw_stream(doc, num, gen);
 
 	while (1)
 	{
 		n = fz_read(stm, buf, sizeof buf);
-		if (n < 0)
-			die(n);
 		if (n == 0)
 			break;
 		if (showbinary)
@@ -127,17 +120,14 @@ static void showstream(int num, int gen)
 
 static void showobject(int num, int gen)
 {
-	fz_error error;
-	fz_obj *obj;
+	pdf_obj *obj;
 
-	if (!xref)
-		die(fz_throw("no file specified"));
+	if (!doc)
+		fz_throw(ctx, "no file specified");
 
-	error = pdf_load_object(&obj, xref, num, gen);
-	if (error)
-		die(error);
+	obj = pdf_load_object(doc, num, gen);
 
-	if (pdf_is_stream(xref, num, gen))
+	if (pdf_is_stream(doc, num, gen))
 	{
 		if (showbinary)
 		{
@@ -146,7 +136,7 @@ static void showobject(int num, int gen)
 		else
 		{
 			printf("%d %d obj\n", num, gen);
-			fz_debug_obj(obj);
+			pdf_fprint_obj(stdout, obj, 0);
 			printf("stream\n");
 			showstream(num, gen);
 			printf("endstream\n");
@@ -156,45 +146,50 @@ static void showobject(int num, int gen)
 	else
 	{
 		printf("%d %d obj\n", num, gen);
-		fz_debug_obj(obj);
+		pdf_fprint_obj(stdout, obj, 0);
 		printf("endobj\n\n");
 	}
 
-	fz_drop_obj(obj);
+	pdf_drop_obj(obj);
 }
 
 static void showgrep(char *filename)
 {
-	fz_error error;
-	fz_obj *obj;
-	int i;
+	pdf_obj *obj;
+	int i, len;
 
-	for (i = 0; i < xref->len; i++)
+	len = pdf_count_objects(doc);
+	for (i = 0; i < len; i++)
 	{
-		if (xref->table[i].type == 'n' || xref->table[i].type == 'o')
+		if (doc->table[i].type == 'n' || doc->table[i].type == 'o')
 		{
-			error = pdf_load_object(&obj, xref, i, 0);
-			if (error)
-				die(error);
+			fz_try(ctx)
+			{
+				obj = pdf_load_object(doc, i, 0);
+			}
+			fz_catch(ctx)
+			{
+				fz_warn(ctx, "skipping object (%d 0 R)", i);
+				continue;
+			}
 
-			fz_sort_dict(obj);
+			pdf_sort_dict(obj);
 
 			printf("%s:%d: ", filename, i);
-			fz_fprint_obj(stdout, obj, 1);
+			pdf_fprint_obj(stdout, obj, 1);
 
-			fz_drop_obj(obj);
+			pdf_drop_obj(obj);
 		}
 	}
 
 	printf("%s:trailer: ", filename);
-	fz_fprint_obj(stdout, xref->trailer, 1);
+	pdf_fprint_obj(stdout, doc->trailer, 1);
 }
 
-int main(int argc, char **argv)
+int pdfshow_main(int argc, char **argv)
 {
 	char *password = NULL; /* don't throw errors if encrypted */
 	char *filename;
-	fz_error error;
 	int c;
 
 	while ((c = fz_getopt(argc, argv, "p:be")) != -1)
@@ -212,29 +207,44 @@ int main(int argc, char **argv)
 		usage();
 
 	filename = argv[fz_optind++];
-	error = pdf_open_xref(&xref, filename, password);
-	if (error)
-		die(fz_rethrow(error, "cannot open document: %s", filename));
 
-	if (fz_optind == argc)
-		showtrailer();
-
-	while (fz_optind < argc)
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx)
 	{
-		switch (argv[fz_optind][0])
-		{
-		case 't': showtrailer(); break;
-		case 'x': showxref(); break;
-		case 'p': showpagetree(); break;
-		case 'g': showgrep(filename); break;
-		default: showobject(atoi(argv[fz_optind]), 0); break;
-		}
-		fz_optind++;
+		fprintf(stderr, "cannot initialise context\n");
+		exit(1);
 	}
 
-	pdf_free_xref(xref);
+	fz_var(doc);
+	fz_try(ctx)
+	{
+		doc = pdf_open_document_no_run(ctx, filename);
+		if (pdf_needs_password(doc))
+			if (!pdf_authenticate_password(doc, password))
+				fz_warn(ctx, "cannot authenticate password: %s", filename);
 
-	fz_flush_warnings();
+		if (fz_optind == argc)
+			showtrailer();
 
+		while (fz_optind < argc)
+		{
+			switch (argv[fz_optind][0])
+			{
+			case 't': showtrailer(); break;
+			case 'e': showencrypt(); break;
+			case 'x': showxref(); break;
+			case 'p': showpagetree(); break;
+			case 'g': showgrep(filename); break;
+			default: showobject(atoi(argv[fz_optind]), 0); break;
+			}
+			fz_optind++;
+		}
+	}
+	fz_catch(ctx)
+	{
+	}
+
+	pdf_close_document(doc);
+	fz_free_context(ctx);
 	return 0;
 }

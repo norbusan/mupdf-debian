@@ -1,4 +1,4 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
 /* Fax G3/G4 decoder */
 
@@ -31,7 +31,7 @@ enum
 	cfd_white_initial_bits = 8,
 	cfd_black_initial_bits = 7,
 	cfd_2d_initial_bits = 7,
-	cfd_uncompressed_initial_bits = 6	/* must be 6 */
+	cfd_uncompressed_initial_bits = 6 /* must be 6 */
 };
 
 /* non-run codes in tables */
@@ -57,7 +57,7 @@ enum
 };
 
 /* White decoding table. */
-const cfd_node cf_white_decode[] = {
+static const cfd_node cf_white_decode[] = {
 	{256,12},{272,12},{29,8},{30,8},{45,8},{46,8},{22,7},{22,7},
 	{23,7},{23,7},{47,8},{48,8},{13,6},{13,6},{13,6},{13,6},{20,7},
 	{20,7},{33,8},{34,8},{35,8},{36,8},{37,8},{38,8},{19,7},{19,7},
@@ -95,7 +95,7 @@ const cfd_node cf_white_decode[] = {
 };
 
 /* Black decoding table. */
-const cfd_node cf_black_decode[] = {
+static const cfd_node cf_black_decode[] = {
 	{128,12},{160,13},{224,12},{256,12},{10,7},{11,7},{288,12},{12,7},
 	{9,6},{9,6},{8,6},{8,6},{7,5},{7,5},{7,5},{7,5},{6,4},{6,4},{6,4},
 	{6,4},{6,4},{6,4},{6,4},{6,4},{5,4},{5,4},{5,4},{5,4},{5,4},{5,4},
@@ -134,7 +134,7 @@ const cfd_node cf_black_decode[] = {
 };
 
 /* 2-D decoding table. */
-const cfd_node cf_2d_decode[] = {
+static const cfd_node cf_2d_decode[] = {
 	{128,11},{144,10},{6,7},{0,7},{5,6},{5,6},{1,6},{1,6},{-4,4},
 	{-4,4},{-4,4},{-4,4},{-4,4},{-4,4},{-4,4},{-4,4},{-5,3},{-5,3},
 	{-5,3},{-5,3},{-5,3},{-5,3},{-5,3},{-5,3},{-5,3},{-5,3},{-5,3},
@@ -152,8 +152,8 @@ const cfd_node cf_2d_decode[] = {
 	{-1,0},{-1,0},{-1,0},{-1,0},{-1,0},{-1,0},{-1,0},{-1,0},{-3,3}
 };
 
-/* Uncompresssed decoding table. */
-const cfd_node cf_uncompressed_decode[] = {
+/* Uncompressed decoding table. */
+static const cfd_node cf_uncompressed_decode[] = {
 	{64,12},{5,6},{4,5},{4,5},{3,4},{3,4},{3,4},{3,4},{2,3},{2,3},
 	{2,3},{2,3},{2,3},{2,3},{2,3},{2,3},{1,2},{1,2},{1,2},{1,2},{1,2},
 	{1,2},{1,2},{1,2},{1,2},{1,2},{1,2},{1,2},{1,2},{1,2},{1,2},{1,2},
@@ -175,43 +175,95 @@ static inline int getbit(const unsigned char *buf, int x)
 	return ( buf[x >> 3] >> ( 7 - (x & 7) ) ) & 1;
 }
 
-static int
+static const unsigned char mask[8] = {
+	0x7F, 0x3F, 0x1F, 0x0F, 0x07, 0x03, 0x01, 0
+};
+
+static const unsigned char clz[256] = {
+	8, 7, 6, 6, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4, 4, 4,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+	2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
+static inline int
 find_changing(const unsigned char *line, int x, int w)
 {
-	int a, b;
+	int a, b, m, W;
 
 	if (!line)
 		return w;
 
-	if (x == -1)
+	/* We assume w > 0, -1 <= x < w */
+	if (x < 0)
 	{
-		a = 0;
 		x = 0;
+		m = 0xFF;
 	}
 	else
 	{
-		a = getbit(line, x);
-		x++;
+		/* Mask out the bits we've already used (including the one
+		 * we started from) */
+		m = mask[x & 7];
 	}
-
-	while (x < w)
+	/* We have 'w' pixels (bits) in line. The last pixel that can be
+	 * safely accessed is the (w-1)th bit of line.
+	 * By taking W = w>>3, we know that the first W bytes of line are
+	 * full, with w&7 stray bits following. */
+	W = w>>3;
+	x >>= 3;
+	a = line[x]; /* Safe as x < w => x <= w-1 => x>>3 <= (w-1)>>3 */
+	b = a ^ (a>>1);
+	b &= m;
+	if (x >= W)
 	{
-		b = getbit(line, x);
-		if (a != b)
-			break;
-		x++;
+		/* Within the last byte already */
+		x = (x<<3) + clz[b];
+		if (x > w)
+			x = w;
+		return x;
 	}
-
+	while (b == 0)
+	{
+		if (++x >= W)
+			goto nearend;
+		b = a & 1;
+		a = line[x];
+		b = (b<<7) ^ a ^ (a>>1);
+	}
+	return (x<<3) + clz[b];
+nearend:
+	/* We have less than a byte to go. If no stray bits, exit now. */
+	if ((x<<3) == w)
+		return w;
+	b = a&1;
+	a = line[x];
+	b = (b<<7) ^ a ^ (a>>1);
+	x = (x<<3) + clz[b];
+	if (x > w)
+		x = w;
 	return x;
 }
 
-static int
+static inline int
 find_changing_color(const unsigned char *line, int x, int w, int color)
 {
-	if (!line)
+	if (!line || x >= w)
 		return w;
 
-	x = find_changing(line, x, w);
+	x = find_changing(line, (x > 0 || !color) ? x : -1, w);
 
 	if (x < w && getbit(line, x) != color)
 		x = find_changing(line, x, w);
@@ -230,6 +282,9 @@ static const unsigned char rm[8] = {
 static inline void setbits(unsigned char *line, int x0, int x1)
 {
 	int a0, a1, b0, b1, a;
+
+	if (x1 <= x0)
+		return;
 
 	a0 = x0 >> 3;
 	a1 = x1 >> 3;
@@ -265,6 +320,7 @@ enum
 
 struct fz_faxd_s
 {
+	fz_context *ctx;
 	fz_stream *chain;
 
 	int k;
@@ -331,8 +387,8 @@ get_code(fz_faxd *fax, const cfd_node *table, int initialbits)
 }
 
 /* decode one 1d code */
-static fz_error
-dec1d(fz_faxd *fax)
+static void
+dec1d(fz_context *ctx, fz_faxd *fax)
 {
 	int code;
 
@@ -345,13 +401,13 @@ dec1d(fz_faxd *fax)
 		code = get_code(fax, cf_white_decode, cfd_white_initial_bits);
 
 	if (code == UNCOMPRESSED)
-		return fz_throw("uncompressed data in faxd");
+		fz_throw(ctx, "uncompressed data in faxd");
 
 	if (code < 0)
-		return fz_throw("negative code in 1d faxd");
+		fz_throw(ctx, "negative code in 1d faxd");
 
 	if (fax->a + code > fax->columns)
-		return fz_throw("overflow in 1d faxd");
+		fz_throw(ctx, "overflow in 1d faxd");
 
 	if (fax->c)
 		setbits(fax->dst, fax->a, fax->a + code);
@@ -365,13 +421,11 @@ dec1d(fz_faxd *fax)
 	}
 	else
 		fax->stage = STATE_MAKEUP;
-
-	return fz_okay;
 }
 
 /* decode one 2d code */
-static fz_error
-dec2d(fz_faxd *fax)
+static void
+dec2d(fz_context *ctx, fz_faxd *fax)
 {
 	int code, b1, b2;
 
@@ -386,13 +440,13 @@ dec2d(fz_faxd *fax)
 			code = get_code(fax, cf_white_decode, cfd_white_initial_bits);
 
 		if (code == UNCOMPRESSED)
-			return fz_throw("uncompressed data in faxd");
+			fz_throw(ctx, "uncompressed data in faxd");
 
 		if (code < 0)
-			return fz_throw("negative code in 2d faxd");
+			fz_throw(ctx, "negative code in 2d faxd");
 
 		if (fax->a + code > fax->columns)
-			return fz_throw("overflow in 2d faxd");
+			fz_throw(ctx, "overflow in 2d faxd");
 
 		if (fax->c)
 			setbits(fax->dst, fax->a, fax->a + code);
@@ -408,7 +462,7 @@ dec2d(fz_faxd *fax)
 				fax->stage = STATE_NORMAL;
 		}
 
-		return fz_okay;
+		return;
 	}
 
 	code = get_code(fax, cf_2d_decode, cfd_2d_initial_bits);
@@ -485,16 +539,14 @@ dec2d(fz_faxd *fax)
 		break;
 
 	case UNCOMPRESSED:
-		return fz_throw("uncompressed data in faxd");
+		fz_throw(ctx, "uncompressed data in faxd");
 
 	case ERROR:
-		return fz_throw("invalid code in 2d faxd");
+		fz_throw(ctx, "invalid code in 2d faxd");
 
 	default:
-		return fz_throw("invalid code in 2d faxd (%d)", code);
+		fz_throw(ctx, "invalid code in 2d faxd (%d)", code);
 	}
-
-	return 0;
 }
 
 static int
@@ -504,7 +556,6 @@ read_faxd(fz_stream *stm, unsigned char *buf, int len)
 	unsigned char *p = buf;
 	unsigned char *ep = buf + len;
 	unsigned char *tmp;
-	fz_error error;
 
 	if (fax->stage == STATE_DONE)
 		return 0;
@@ -558,16 +609,12 @@ loop:
 	else if (fax->dim == 1)
 	{
 		fax->eolc = 0;
-		error = dec1d(fax);
-		if (error)
-			return fz_rethrow(error, "cannot decode 1d code");
+		dec1d(stm->ctx, fax);
 	}
 	else if (fax->dim == 2)
 	{
 		fax->eolc = 0;
-		error = dec2d(fax);
-		if (error)
-			return fz_rethrow(error, "cannot decode 2d code");
+		dec2d(stm->ctx, fax);
 	}
 
 	/* no eol check after makeup codes nor in the middle of an H code */
@@ -651,9 +698,9 @@ rtc:
 }
 
 static void
-close_faxd(fz_stream *stm)
+close_faxd(fz_context *ctx, void *state_)
 {
-	fz_faxd *fax = stm->state;
+	fz_faxd *fax = (fz_faxd *)state_;
 	int i;
 
 	/* if we read any extra bytes, try to put them back */
@@ -662,70 +709,68 @@ close_faxd(fz_stream *stm)
 		fz_unread_byte(fax->chain);
 
 	fz_close(fax->chain);
-	fz_free(fax->ref);
-	fz_free(fax->dst);
-	fz_free(fax);
+	fz_free(ctx, fax->ref);
+	fz_free(ctx, fax->dst);
+	fz_free(ctx, fax);
 }
 
+/* Default: columns = 1728, end_of_block = 1, the rest = 0 */
 fz_stream *
-fz_open_faxd(fz_stream *chain, fz_obj *params)
+fz_open_faxd(fz_stream *chain,
+	int k, int end_of_line, int encoded_byte_align,
+	int columns, int rows, int end_of_block, int black_is_1)
 {
-	fz_faxd *fax;
-	fz_obj *obj;
+	fz_context *ctx = chain->ctx;
+	fz_faxd *fax = NULL;
 
-	fax = fz_malloc(sizeof(fz_faxd));
-	fax->chain = chain;
+	fz_var(fax);
 
-	fax->ref = NULL;
-	fax->dst = NULL;
+	fz_try(ctx)
+	{
+		fax = fz_malloc_struct(ctx, fz_faxd);
+		fax->chain = chain;
 
-	fax->k = 0;
-	fax->end_of_line = 0;
-	fax->encoded_byte_align = 0;
-	fax->columns = 1728;
-	fax->rows = 0;
-	fax->end_of_block = 1;
-	fax->black_is_1 = 0;
+		fax->ref = NULL;
+		fax->dst = NULL;
 
-	obj = fz_dict_gets(params, "K");
-	if (obj) fax->k = fz_to_int(obj);
+		fax->k = k;
+		fax->end_of_line = end_of_line;
+		fax->encoded_byte_align = encoded_byte_align;
+		fax->columns = columns;
+		fax->rows = rows;
+		fax->end_of_block = end_of_block;
+		fax->black_is_1 = black_is_1;
 
-	obj = fz_dict_gets(params, "EndOfLine");
-	if (obj) fax->end_of_line = fz_to_bool(obj);
+		fax->stride = ((fax->columns - 1) >> 3) + 1;
+		fax->ridx = 0;
+		fax->bidx = 32;
+		fax->word = 0;
 
-	obj = fz_dict_gets(params, "EncodedByteAlign");
-	if (obj) fax->encoded_byte_align = fz_to_bool(obj);
+		fax->stage = STATE_NORMAL;
+		fax->a = -1;
+		fax->c = 0;
+		fax->dim = fax->k < 0 ? 2 : 1;
+		fax->eolc = 0;
 
-	obj = fz_dict_gets(params, "Columns");
-	if (obj) fax->columns = fz_to_int(obj);
+		fax->ref = fz_malloc(ctx, fax->stride);
+		fax->dst = fz_malloc(ctx, fax->stride);
+		fax->rp = fax->dst;
+		fax->wp = fax->dst + fax->stride;
 
-	obj = fz_dict_gets(params, "Rows");
-	if (obj) fax->rows = fz_to_int(obj);
+		memset(fax->ref, 0, fax->stride);
+		memset(fax->dst, 0, fax->stride);
+	}
+	fz_catch(ctx)
+	{
+		if (fax)
+		{
+			fz_free(ctx, fax->dst);
+			fz_free(ctx, fax->ref);
+		}
+		fz_free(ctx, fax);
+		fz_close(chain);
+		fz_rethrow(ctx);
+	}
 
-	obj = fz_dict_gets(params, "EndOfBlock");
-	if (obj) fax->end_of_block = fz_to_bool(obj);
-
-	obj = fz_dict_gets(params, "BlackIs1");
-	if (obj) fax->black_is_1 = fz_to_bool(obj);
-
-	fax->stride = ((fax->columns - 1) >> 3) + 1;
-	fax->ridx = 0;
-	fax->bidx = 32;
-	fax->word = 0;
-
-	fax->stage = STATE_NORMAL;
-	fax->a = -1;
-	fax->c = 0;
-	fax->dim = fax->k < 0 ? 2 : 1;
-	fax->eolc = 0;
-
-	fax->ref = fz_malloc(fax->stride);
-	fax->dst = fz_malloc(fax->stride);
-	fax->rp = fax->dst;
-	fax->wp = fax->dst + fax->stride;
-
-	memset(fax->ref, 0, fax->stride);
-	memset(fax->dst, 0, fax->stride);
-
-	return fz_new_stream(fax, read_faxd, close_faxd);
+	return fz_new_stream(ctx, fax, read_faxd, close_faxd);
 }

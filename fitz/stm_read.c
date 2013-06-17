@@ -1,11 +1,13 @@
-#include "fitz.h"
+#include "fitz-internal.h"
+
+#define MIN_BOMB (100 << 20)
 
 int
 fz_read(fz_stream *stm, unsigned char *buf, int len)
 {
 	int count, n;
 
-	count = MIN(len, stm->wp - stm->rp);
+	count = fz_mini(len, stm->wp - stm->rp);
 	if (count)
 	{
 		memcpy(buf, stm->rp, count);
@@ -20,12 +22,7 @@ fz_read(fz_stream *stm, unsigned char *buf, int len)
 	if (len - count < stm->ep - stm->bp)
 	{
 		n = stm->read(stm, stm->bp, stm->ep - stm->bp);
-		if (n < 0)
-		{
-			stm->error = 1;
-			return fz_rethrow(n, "read error");
-		}
-		else if (n == 0)
+		if (n == 0)
 		{
 			stm->eof = 1;
 		}
@@ -36,7 +33,7 @@ fz_read(fz_stream *stm, unsigned char *buf, int len)
 			stm->pos += n;
 		}
 
-		n = MIN(len - count, stm->wp - stm->rp);
+		n = fz_mini(len - count, stm->wp - stm->rp);
 		if (n)
 		{
 			memcpy(buf + count, stm->rp, n);
@@ -47,12 +44,7 @@ fz_read(fz_stream *stm, unsigned char *buf, int len)
 	else
 	{
 		n = stm->read(stm, buf + count, len - count);
-		if (n < 0)
-		{
-			stm->error = 1;
-			return fz_rethrow(n, "read error");
-		}
-		else if (n == 0)
+		if (n == 0)
 		{
 			stm->eof = 1;
 		}
@@ -76,60 +68,84 @@ fz_fill_buffer(fz_stream *stm)
 	if (stm->error || stm->eof)
 		return;
 
-	n = stm->read(stm, stm->bp, stm->ep - stm->bp);
-	if (n < 0)
+	fz_try(stm->ctx)
 	{
+		n = stm->read(stm, stm->bp, stm->ep - stm->bp);
+		if (n == 0)
+		{
+			stm->eof = 1;
+		}
+		else if (n > 0)
+		{
+			stm->rp = stm->bp;
+			stm->wp = stm->bp + n;
+			stm->pos += n;
+		}
+	}
+	fz_catch(stm->ctx)
+	{
+		fz_warn(stm->ctx, "read error; treating as end of file");
 		stm->error = 1;
-		fz_catch(n, "read error; treating as end of file");
-	}
-	else if (n == 0)
-	{
-		stm->eof = 1;
-	}
-	else if (n > 0)
-	{
-		stm->rp = stm->bp;
-		stm->wp = stm->bp + n;
-		stm->pos += n;
 	}
 }
 
-fz_error
-fz_read_all(fz_buffer **bufp, fz_stream *stm, int initial)
+fz_buffer *
+fz_read_all(fz_stream *stm, int initial)
 {
-	fz_buffer *buf;
+	return fz_read_best(stm, initial, NULL);
+}
+
+fz_buffer *
+fz_read_best(fz_stream *stm, int initial, int *truncated)
+{
+	fz_buffer *buf = NULL;
 	int n;
+	fz_context *ctx = stm->ctx;
 
-	if (initial < 1024)
-		initial = 1024;
+	fz_var(buf);
 
-	buf = fz_new_buffer(initial);
+	if (truncated)
+		*truncated = 0;
 
-	while (1)
+	fz_try(ctx)
 	{
-		if (buf->len == buf->cap)
-			fz_grow_buffer(buf);
+		if (initial < 1024)
+			initial = 1024;
 
-		if (buf->len / 200 > initial)
+		buf = fz_new_buffer(ctx, initial+1);
+
+		while (1)
 		{
-			fz_drop_buffer(buf);
-			return fz_throw("compression bomb detected");
-		}
+			if (buf->len == buf->cap)
+				fz_grow_buffer(ctx, buf);
 
-		n = fz_read(stm, buf->data + buf->len, buf->cap - buf->len);
-		if (n < 0)
-		{
-			fz_drop_buffer(buf);
-			return fz_rethrow(n, "read error");
-		}
-		if (n == 0)
-			break;
+			if (buf->len >= MIN_BOMB && buf->len / 200 > initial)
+			{
+				fz_throw(ctx, "compression bomb detected");
+			}
 
-		buf->len += n;
+			n = fz_read(stm, buf->data + buf->len, buf->cap - buf->len);
+			if (n == 0)
+				break;
+
+			buf->len += n;
+		}
 	}
+	fz_catch(ctx)
+	{
+		if (truncated)
+		{
+			*truncated = 1;
+		}
+		else
+		{
+			fz_drop_buffer(ctx, buf);
+			fz_rethrow(ctx);
+		}
+	}
+	fz_trim_buffer(ctx, buf);
 
-	*bufp = buf;
-	return fz_okay;
+	return buf;
 }
 
 void
@@ -175,10 +191,10 @@ fz_seek(fz_stream *stm, int offset, int whence)
 		}
 		if (whence == 0)
 		{
-			unsigned char *p = stm->wp - (stm->pos - offset);
-			if (p >= stm->bp && p <= stm->wp)
+			int dist = stm->pos - offset;
+			if (dist >= 0 && dist <= stm->wp - stm->bp)
 			{
-				stm->rp = p;
+				stm->rp = stm->wp - dist;
 				stm->eof = 0;
 				return;
 			}
@@ -191,11 +207,11 @@ fz_seek(fz_stream *stm, int offset, int whence)
 		if (whence == 0)
 			offset -= fz_tell(stm);
 		if (offset < 0)
-			fz_warn("cannot seek backwards");
+			fz_warn(stm->ctx, "cannot seek backwards");
 		/* dog slow, but rare enough */
 		while (offset-- > 0)
 			fz_read_byte(stm);
 	}
 	else
-		fz_warn("cannot seek");
+		fz_warn(stm->ctx, "cannot seek");
 }

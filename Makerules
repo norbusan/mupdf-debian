@@ -6,24 +6,36 @@ OS := $(OS:MINGW%=MINGW)
 CFLAGS += -Wall
 
 ifeq "$(build)" "debug"
-CFLAGS += -pipe -g
+CFLAGS += -pipe -g -DDEBUG
 else ifeq "$(build)" "profile"
 CFLAGS += -pipe -O2 -DNDEBUG -pg
 LDFLAGS += -pg
 else ifeq "$(build)" "release"
 CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer
+else ifeq "$(build)" "coverage"
+CFLAGS += -pipe -g -DDEBUG -pg -fprofile-arcs -ftest-coverage
+LIBS += -lgcov
 else ifeq "$(build)" "native"
 CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer -march=native -mfpmath=sse
+else ifeq "$(build)" "memento"
+CFLAGS += -pipe -g -DMEMENTO -DDEBUG
 else
 $(error unknown build setting: '$(build)')
 endif
 
 ifeq "$(OS)" "Linux"
 SYS_FREETYPE_INC := `pkg-config --cflags freetype2`
+SYS_OPENJPEG_INC := `pkg-config --cflags libopenjpeg`
 X11_LIBS := -lX11 -lXext
 endif
 
 ifeq "$(OS)" "FreeBSD"
+SYS_FREETYPE_INC := `pkg-config --cflags freetype2`
+LDFLAGS += -L/usr/local/lib
+X11_LIBS := -lX11 -lXext
+endif
+
+ifeq "$(OS)" "SunOS"
 SYS_FREETYPE_INC := `pkg-config --cflags freetype2`
 LDFLAGS += -L/usr/local/lib
 X11_LIBS := -lX11 -lXext
@@ -34,6 +46,7 @@ ifeq "$(OS)" "Darwin"
 SYS_FREETYPE_INC := -I/usr/X11R6/include/freetype2
 CFLAGS += -I/usr/X11R6/include
 LDFLAGS += -L/usr/X11R6/lib
+RANLIB_CMD = ranlib $@
 X11_LIBS := -lX11 -lXext
 ifeq "$(arch)" "amd64"
 CFLAGS += -m64
@@ -56,6 +69,7 @@ endif
 #   cygwin)
 #   2) do a non cross compile build (e.g. windows in MSVC) first.
 #   3) download the generated files from mupdf.com.
+
 ifeq "$(OS)" "beagle-cross"
 CC = arm-none-linux-gnueabi-gcc
 LD = arm-none-linux-gnueabi-gcc
@@ -82,3 +96,32 @@ CFLAGS += -O3 -mcpu=arm1136jf-s -mfpu=vfp -mfloat-abi=softfp -ffast-math -fsingl
 CROSSCOMPILE=yes
 NOX11=yes
 endif
+
+ifeq "$(OS)" "w64_x86-cross-mingw32"
+CC = i686-w64-mingw32-gcc
+LD = i686-w64-mingw32-gcc
+AR = i686-w64-mingw32-ar
+CROSSCOMPILE=yes
+NOX11=yes
+endif
+
+ifeq "$(OS)" "w64_amd64-cross-mingw32"
+CC = x86_64-w64-mingw32-gcc
+LD = x86_64-w64-mingw32-gcc
+AR = x86_64-w64-mingw32-ar
+CROSSCOMPILE=yes
+NOX11=yes
+endif
+
+# Most variables when building for iOS are set up in ios/build_libs.sh,
+# which is called from the Xcode project as a "Run Script" build step.
+# The following section works for both device and simulator builds.
+
+ifeq "$(OS)" "ios"
+CC = $(PLATFORM_DEVELOPER_BIN_DIR)/gcc
+AR = $(PLATFORM_DEVELOPER_BIN_DIR)/ar
+RANLIB_CMD = $(PLATFORM_DEVELOPER_BIN_DIR)/ranlib $@
+CROSSCOMPILE=yes
+NOX11=yes
+endif
+
