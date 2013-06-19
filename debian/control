@@ -1,9 +1,8 @@
 Source: mupdf
 Section: text
 Priority: optional
-Maintainer: Kan-Ru Chen <koster@debian.org>
-Uploaders: Kan-Ru Chen <koster@debian.org>,
-           Quoc-Viet Nguyen <afelion@gmail.com>
+Maintainer: Kan-Ru Chen (陳侃如) <koster@debian.org>
+Uploaders: Quoc-Viet Nguyen <afelion@gmail.com>
 Build-Depends: debhelper (>= 7.0.50~), dpkg-dev (>= 1.16.1.1~),
  libfreetype6-dev, pkg-config, libjpeg-dev, libjbig2dec-dev,
  libopenjpeg-dev (>= 1.5), libx11-dev, libxext-dev, zlib1g-dev
