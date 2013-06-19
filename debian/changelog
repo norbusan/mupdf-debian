@@ -1,10 +1,14 @@
 mupdf (1.2-1) experimental; urgency=low
 
+  [ Quoc-Viet Nguyen ]
   * New upstream release: 1.2. (Closes: #690983)
-  - Changed MuPDF license to AGPL.
-  - Increased openjpeg version dependency to 1.5.
+    - Changed MuPDF license to AGPL.
+    - Increased openjpeg version dependency to 1.5.
   
- -- Quoc-Viet Nguyen <afelion@gmail.com>  Tue, 18 Jun 2013 00:12:39 +1000
+  [ Kan-Ru Chen (陳侃如) ]
+  * Add Quoc-Viet Nguyen as co-maintainer. Congratulations!
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Thu, 20 Jun 2013 00:54:48 +0800
 
 mupdf (0.9-2) unstable; urgency=low
 
