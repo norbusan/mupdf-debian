@@ -1,0 +1,18 @@
+Description: Fix the format of mudraw.1
+ manpage-has-errors-from-man 40: warning: macro `Fit'' not defined
+Author: Kan-Ru Chen (陳侃如) <koster@debian.org>
+---
+ apps/man/mudraw.1 |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/apps/man/mudraw.1
++++ b/apps/man/mudraw.1
+@@ -37,7 +37,7 @@
+ render with a maximum height).
+ .TP
+ .B \-f
+-'Fit' exactly; ignore the aspect ratio when matching specified width/heights.
++\`Fit\' exactly; ignore the aspect ratio when matching specified width/heights.
+ .TP
+ .B \-R angle
+ Rotate clockwise by given number of degrees.
