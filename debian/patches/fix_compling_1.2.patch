@@ -1,0 +1,27 @@
+---
+ Makefile  |    2 +-
+ Makerules |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+--- a/Makefile
++++ b/Makefile
+@@ -212,7 +212,7 @@
+ 	install -d $(DESTDIR)$(bindir) $(DESTDIR)$(libdir) $(DESTDIR)$(incdir) $(DESTDIR)$(mandir)/man1
+ 	install $(FITZ_LIB) $(DESTDIR)$(libdir)
+ 	install fitz/memento.h fitz/fitz.h pdf/mupdf.h xps/muxps.h cbz/mucbz.h $(DESTDIR)$(incdir)
+-	install $(MUVIEW) $(MUDRAW) $(MUBUSY) $(DESTDIR)$(bindir)
++	install $(MUVIEW) $(MUDRAW) $(MUTOOL) $(DESTDIR)$(bindir)
+ 	install $(wildcard apps/man/*.1) $(DESTDIR)$(mandir)/man1
+ 
+ # --- Clean and Default ---
+--- a/Makerules
++++ b/Makerules
+@@ -25,7 +25,7 @@
+ 
+ ifeq "$(OS)" "Linux"
+ SYS_FREETYPE_INC := `pkg-config --cflags freetype2`
+-SYS_OPENJPEG_INC := `pkg-config --cflags libopenjpeg`
++SYS_OPENJPEG_INC := `pkg-config --cflags libopenjpeg1`
+ X11_LIBS := -lX11 -lXext
+ endif
+ 
