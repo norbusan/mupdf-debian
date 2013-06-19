@@ -6,6 +6,21 @@ Source: http://mupdf.com/download/
 Files: *
 Copyright: 2006-2013, Artifex Software, Inc.
 License: AGPL-3+
+ MuPDF is Copyright 2006-2013 Artifex Software, Inc.
+ .
+ This program is free software: you can redistribute it and/or modify it under
+ the terms of the GNU Affero General Public License as published by the Free
+ Software Foundation, either version 3 of the License, or (at your option) any
+ later version.
+ .
+ This program is distributed in the hope that it will be useful, but WITHOUT ANY
+ WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ PARTICULAR PURPOSE. See the GNU General Public License for more details.
+ .
+ You should have received a copy of the GNU Affero General Public License along
+ with this program. If not, see <http://www.gnu.org/licenses/>.
+ .
+ For commercial licensing please contact sales@artifex.com.
 
 Files: cmaps/*
 Copyright: 1990-2009, Adobe Systems Incorporated.
@@ -183,10 +198,6 @@ License: Apache-2.0
 
 Files: debian/*
 Copyright: 2010, Kan-Ru Chen <koster@debian.org>
-License: GPL-3+
-
-Files: debian/*.1
-Copyright: 2006-2010, Artifex Software, Inc.
 License: GPL-3+
 
 License: GPL-2+
