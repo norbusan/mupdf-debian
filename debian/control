@@ -24,6 +24,7 @@ Package: mupdf
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Suggests: mupdf-tools
+Provides: pdf-viewer
 Description: lightweight PDF viewer
  MuPDF is a lightweight PDF viewer and toolkit written in portable C.
  .
