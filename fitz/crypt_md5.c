@@ -23,7 +23,7 @@ These notices must be retained in any copies of any part of this
 documentation and/or software.
 */
 
-#include "fitz.h"
+#include "fitz-internal.h"
 
 /* Constants for MD5Transform routine */
 enum
@@ -210,7 +210,7 @@ void fz_md5_init(fz_md5 *context)
 /* MD5 block update operation. Continues an MD5 message-digest operation,
  * processing another message block, and updating the context.
  */
-void fz_md5_update(fz_md5 *context, const unsigned char *input, const unsigned inlen)
+void fz_md5_update(fz_md5 *context, const unsigned char *input, unsigned inlen)
 {
 	unsigned i, index, partlen;
 

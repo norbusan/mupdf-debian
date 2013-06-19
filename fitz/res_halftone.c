@@ -1,12 +1,12 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
 fz_halftone *
-fz_new_halftone(int comps)
+fz_new_halftone(fz_context *ctx, int comps)
 {
 	fz_halftone *ht;
 	int i;
 
-	ht = fz_malloc(sizeof(fz_halftone) + (comps-1)*sizeof(fz_pixmap *));
+	ht = fz_malloc(ctx, sizeof(fz_halftone) + (comps-1)*sizeof(fz_pixmap *));
 	ht->refs = 1;
 	ht->n = comps;
 	for (i = 0; i < comps; i++)
@@ -16,25 +16,30 @@ fz_new_halftone(int comps)
 }
 
 fz_halftone *
-fz_keep_halftone(fz_halftone *ht)
+fz_keep_halftone(fz_context *ctx, fz_halftone *ht)
 {
-	ht->refs++;
+	if (ht)
+		ht->refs++;
 	return ht;
 }
 
 void
-fz_drop_halftone(fz_halftone *ht)
+fz_drop_halftone(fz_context *ctx, fz_halftone *ht)
 {
 	int i;
 
 	if (!ht || --ht->refs != 0)
 		return;
 	for (i = 0; i < ht->n; i++)
-		fz_drop_pixmap(ht->comp[i]);
-	fz_free(ht);
+		fz_drop_pixmap(ctx, ht->comp[i]);
+	fz_free(ctx, ht);
 }
 
 /* Default mono halftone, lifted from Ghostscript. */
+/* The 0x00 entry has been changed to 0x01 to avoid problems with white
+ * pixels appearing in the output; as we use < 0 should not appear in the
+ * array. I think that gs scales this slighly and hence never actually uses
+ * the raw values here. */
 static unsigned char mono_ht[] =
 {
 	0x0E, 0x8E, 0x2E, 0xAE, 0x06, 0x86, 0x26, 0xA6, 0x0C, 0x8C, 0x2C, 0xAC, 0x04, 0x84, 0x24, 0xA4,
@@ -49,17 +54,17 @@ static unsigned char mono_ht[] =
 	0xCD, 0x4D, 0xED, 0x6D, 0xC5, 0x45, 0xE5, 0x65, 0xCF, 0x4F, 0xEF, 0x6F, 0xC7, 0x47, 0xE7, 0x67,
 	0x3D, 0xBD, 0x1D, 0x9D, 0x35, 0xB5, 0x15, 0x95, 0x3F, 0xBF, 0x1F, 0x9F, 0x37, 0xB7, 0x17, 0x97,
 	0xFD, 0x7D, 0xDD, 0x5D, 0xF5, 0x75, 0xD5, 0x55, 0xFF, 0x7F, 0xDF, 0x5F, 0xF7, 0x77, 0xD7, 0x57,
-	0x02, 0x82, 0x22, 0xA2, 0x0A, 0x8A, 0x2A, 0xAA, 0x00, 0x80, 0x20, 0xA0, 0x08, 0x88, 0x28, 0xA8,
+	0x02, 0x82, 0x22, 0xA2, 0x0A, 0x8A, 0x2A, 0xAA, 0x01 /*0x00*/, 0x80, 0x20, 0xA0, 0x08, 0x88, 0x28, 0xA8,
 	0xC2, 0x42, 0xE2, 0x62, 0xCA, 0x4A, 0xEA, 0x6A, 0xC0, 0x40, 0xE0, 0x60, 0xC8, 0x48, 0xE8, 0x68,
 	0x32, 0xB2, 0x12, 0x92, 0x3A, 0xBA, 0x1A, 0x9A, 0x30, 0xB0, 0x10, 0x90, 0x38, 0xB8, 0x18, 0x98,
 	0xF2, 0x72, 0xD2, 0x52, 0xFA, 0x7A, 0xDA, 0x5A, 0xF0, 0x70, 0xD0, 0x50, 0xF8, 0x78, 0xD8, 0x58
 };
 
-fz_halftone *fz_get_default_halftone(int num_comps)
+fz_halftone *fz_default_halftone(fz_context *ctx, int num_comps)
 {
-	fz_halftone *ht = fz_new_halftone(num_comps);
+	fz_halftone *ht = fz_new_halftone(ctx, num_comps);
 	assert(num_comps == 1); /* Only support 1 component for now */
-	ht->comp[0] = fz_new_pixmap_with_data(NULL, 16, 16, mono_ht);
+	ht->comp[0] = fz_new_pixmap_with_data(ctx, NULL, 16, 16, mono_ht);
 	return ht;
 }
 
@@ -94,7 +99,7 @@ static void make_ht_line(unsigned char *buf, fz_halftone *ht, int x, int y, int 
 		assert(tile->n == 1);
 
 		/* Left hand section; from x to tile width */
-		tbase = tile->samples + py * tw;
+		tbase = tile->samples + (unsigned int)(py * tw);
 		t = tbase + px;
 		len = tw - px;
 		if (len > w2)
@@ -156,20 +161,25 @@ static void do_threshold_1(unsigned char *ht_line, unsigned char *pixmap, unsign
 		*out++ = h;
 }
 
-fz_bitmap *fz_halftone_pixmap(fz_pixmap *pix, fz_halftone *ht)
+fz_bitmap *fz_halftone_pixmap(fz_context *ctx, fz_pixmap *pix, fz_halftone *ht)
 {
 	fz_bitmap *out;
 	unsigned char *ht_line, *o, *p;
 	int w, h, x, y, n, pstride, ostride;
+	fz_halftone *ht_orig = ht;
 
-	if (pix == NULL || ht == NULL)
+	if (!pix)
 		return NULL;
 
 	assert(pix->n == 2); /* Mono + Alpha */
 
 	n = pix->n-1; /* Remove alpha */
-	ht_line = fz_malloc(pix->w * n);
-	out = fz_new_bitmap(pix->w, pix->h, n);
+	if (ht == NULL)
+	{
+		ht = fz_default_halftone(ctx, n);
+	}
+	ht_line = fz_malloc(ctx, pix->w * n);
+	out = fz_new_bitmap(ctx, pix->w, pix->h, n);
 	o = out->samples;
 	p = pix->samples;
 
@@ -186,5 +196,7 @@ fz_bitmap *fz_halftone_pixmap(fz_pixmap *pix, fz_halftone *ht)
 		o += ostride;
 		p += pstride;
 	}
+	if (!ht_orig)
+		fz_drop_halftone(ctx, ht);
 	return out;
 }

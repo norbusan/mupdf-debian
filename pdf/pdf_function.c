@@ -1,5 +1,5 @@
-#include "fitz.h"
-#include "mupdf.h"
+#include "fitz-internal.h"
+#include "mupdf-internal.h"
 
 enum
 {
@@ -19,7 +19,8 @@ enum
 
 struct pdf_function_s
 {
-	int refs;
+	fz_storable storable;
+	unsigned int size;
 	int type;				/* 0=sample 2=exponential 3=stitching 4=postscript */
 	int m;					/* number of input values */
 	int n;					/* number of output values */
@@ -79,22 +80,20 @@ enum
 	PS_OP_ABS, PS_OP_ADD, PS_OP_AND, PS_OP_ATAN, PS_OP_BITSHIFT,
 	PS_OP_CEILING, PS_OP_COPY, PS_OP_COS, PS_OP_CVI, PS_OP_CVR,
 	PS_OP_DIV, PS_OP_DUP, PS_OP_EQ, PS_OP_EXCH, PS_OP_EXP,
-	PS_OP_FALSE, PS_OP_FLOOR, PS_OP_GE, PS_OP_GT, PS_OP_IDIV,
-	PS_OP_INDEX, PS_OP_LE, PS_OP_LN, PS_OP_LOG, PS_OP_LT, PS_OP_MOD,
-	PS_OP_MUL, PS_OP_NE, PS_OP_NEG, PS_OP_NOT, PS_OP_OR, PS_OP_POP,
-	PS_OP_ROLL, PS_OP_ROUND, PS_OP_SIN, PS_OP_SQRT, PS_OP_SUB,
-	PS_OP_TRUE, PS_OP_TRUNCATE, PS_OP_XOR, PS_OP_IF, PS_OP_IFELSE,
-	PS_OP_RETURN
+	PS_OP_FALSE, PS_OP_FLOOR, PS_OP_GE, PS_OP_GT, PS_OP_IDIV, PS_OP_IF,
+	PS_OP_IFELSE, PS_OP_INDEX, PS_OP_LE, PS_OP_LN, PS_OP_LOG, PS_OP_LT,
+	PS_OP_MOD, PS_OP_MUL, PS_OP_NE, PS_OP_NEG, PS_OP_NOT, PS_OP_OR,
+	PS_OP_POP, PS_OP_RETURN, PS_OP_ROLL, PS_OP_ROUND, PS_OP_SIN,
+	PS_OP_SQRT, PS_OP_SUB, PS_OP_TRUE, PS_OP_TRUNCATE, PS_OP_XOR
 };
 
 static char *ps_op_names[] =
 {
 	"abs", "add", "and", "atan", "bitshift", "ceiling", "copy",
 	"cos", "cvi", "cvr", "div", "dup", "eq", "exch", "exp",
-	"false", "floor", "ge", "gt", "idiv", "index", "le", "ln",
-	"log", "lt", "mod", "mul", "ne", "neg", "not", "or", "pop",
-	"roll", "round", "sin", "sqrt", "sub", "true", "truncate",
-	"xor", "if", "ifelse", "return"
+	"false", "floor", "ge", "gt", "idiv", "if", "ifelse", "index", "le", "ln",
+	"log", "lt", "mod", "mul", "ne", "neg", "not", "or", "pop", "return",
+	"roll", "round", "sin", "sqrt", "sub", "true", "truncate", "xor"
 };
 
 struct psobj_s
@@ -118,6 +117,7 @@ struct ps_stack_s
 	int sp;
 };
 
+#ifndef NDEBUG
 void
 pdf_debug_ps_stack(ps_stack *st)
 {
@@ -148,6 +148,7 @@ pdf_debug_ps_stack(ps_stack *st)
 	printf("\n");
 
 }
+#endif
 
 static void
 ps_init_stack(ps_stack *st)
@@ -204,7 +205,13 @@ ps_push_real(ps_stack *st, float n)
 	if (!ps_overflow(st, 1))
 	{
 		st->stack[st->sp].type = PS_REAL;
-		st->stack[st->sp].u.f = n;
+		if (isnan(n))
+		{
+			/* Push 1.0, as it's a small known value that won't
+			 * cause a divide by 0. Same reason as in fz_atof. */
+			n = 1.0;
+		}
+		st->stack[st->sp].u.f = fz_clamp(n, -FLT_MAX, FLT_MAX);
 		st->sp++;
 	}
 }
@@ -295,7 +302,7 @@ ps_index(ps_stack *st, int n)
 }
 
 static void
-ps_run(psobj *code, ps_stack *st, int pc)
+ps_run(fz_context *ctx, psobj *code, ps_stack *st, int pc)
 {
 	int i1, i2;
 	float r1, r2;
@@ -361,10 +368,10 @@ ps_run(psobj *code, ps_stack *st, int pc)
 			case PS_OP_BITSHIFT:
 				i2 = ps_pop_int(st);
 				i1 = ps_pop_int(st);
-				if (i2 > 0)
+				if (i2 > 0 && i2 < 8 * sizeof (i2))
 					ps_push_int(st, i1 << i2);
-				else if (i2 < 0)
-					ps_push_int(st, (int)((unsigned int)i1 >> i2));
+				else if (i2 < 0 && i2 > -8 * (int)sizeof (i2))
+					ps_push_int(st, (int)((unsigned int)i1 >> -i2));
 				else
 					ps_push_int(st, i1);
 				break;
@@ -394,7 +401,10 @@ ps_run(psobj *code, ps_stack *st, int pc)
 			case PS_OP_DIV:
 				r2 = ps_pop_real(st);
 				r1 = ps_pop_real(st);
-				ps_push_real(st, r1 / r2);
+				if (fabsf(r2) >= FLT_EPSILON)
+					ps_push_real(st, r1 / r2);
+				else
+					ps_push_real(st, DIV_BY_ZERO(r1, r2, -FLT_MAX, FLT_MAX));
 				break;
 
 			case PS_OP_DUP:
@@ -467,7 +477,10 @@ ps_run(psobj *code, ps_stack *st, int pc)
 			case PS_OP_IDIV:
 				i2 = ps_pop_int(st);
 				i1 = ps_pop_int(st);
-				ps_push_int(st, i1 / i2);
+				if (i2 != 0)
+					ps_push_int(st, i1 / i2);
+				else
+					ps_push_int(st, DIV_BY_ZERO(i1, i2, INT_MIN, INT_MAX));
 				break;
 
 			case PS_OP_INDEX:
@@ -489,7 +502,9 @@ ps_run(psobj *code, ps_stack *st, int pc)
 
 			case PS_OP_LN:
 				r1 = ps_pop_real(st);
-				ps_push_real(st, logf(r1));
+				/* Bug 692941 - logf as separate statement */
+				r2 = logf(r1);
+				ps_push_real(st, r2);
 				break;
 
 			case PS_OP_LOG:
@@ -513,7 +528,10 @@ ps_run(psobj *code, ps_stack *st, int pc)
 			case PS_OP_MOD:
 				i2 = ps_pop_int(st);
 				i1 = ps_pop_int(st);
-				ps_push_int(st, i1 % i2);
+				if (i2 != 0)
+					ps_push_int(st, i1 % i2);
+				else
+					ps_push_int(st, DIV_BY_ZERO(i1, i2, INT_MIN, INT_MAX));
 				break;
 
 			case PS_OP_MUL:
@@ -642,16 +660,16 @@ ps_run(psobj *code, ps_stack *st, int pc)
 			case PS_OP_IF:
 				b1 = ps_pop_bool(st);
 				if (b1)
-					ps_run(code, st, code[pc + 1].u.block);
+					ps_run(ctx, code, st, code[pc + 1].u.block);
 				pc = code[pc + 2].u.block;
 				break;
 
 			case PS_OP_IFELSE:
 				b1 = ps_pop_bool(st);
 				if (b1)
-					ps_run(code, st, code[pc + 1].u.block);
+					ps_run(ctx, code, st, code[pc + 1].u.block);
 				else
-					ps_run(code, st, code[pc + 0].u.block);
+					ps_run(ctx, code, st, code[pc + 0].u.block);
 				pc = code[pc + 2].u.block;
 				break;
 
@@ -659,62 +677,71 @@ ps_run(psobj *code, ps_stack *st, int pc)
 				return;
 
 			default:
-				fz_warn("foreign operator in calculator function");
+				fz_warn(ctx, "foreign operator in calculator function");
 				return;
 			}
 			break;
 
 		default:
-			fz_warn("foreign object in calculator function");
+			fz_warn(ctx, "foreign object in calculator function");
 			return;
 		}
 	}
 }
 
 static void
-resize_code(pdf_function *func, int newsize)
+resize_code(fz_context *ctx, pdf_function *func, int newsize)
 {
 	if (newsize >= func->u.p.cap)
 	{
-		func->u.p.cap = func->u.p.cap + 64;
-		func->u.p.code = fz_realloc(func->u.p.code, func->u.p.cap, sizeof(psobj));
+		int new_cap = func->u.p.cap + 64;
+		func->u.p.code = fz_resize_array(ctx, func->u.p.code, new_cap, sizeof(psobj));
+		func->u.p.cap = new_cap;
 	}
 }
 
-static fz_error
-parse_code(pdf_function *func, fz_stream *stream, int *codeptr)
+static void
+parse_code(pdf_function *func, fz_stream *stream, int *codeptr, pdf_lexbuf *buf)
 {
-	fz_error error;
-	char buf[64];
-	int len;
-	int tok;
+	pdf_token tok;
 	int opptr, elseptr, ifptr;
 	int a, b, mid, cmp;
-
-	memset(buf, 0, sizeof(buf));
+	fz_context *ctx = stream->ctx;
 
 	while (1)
 	{
-		error = pdf_lex(&tok, stream, buf, sizeof buf, &len);
-		if (error)
-			return fz_rethrow(error, "calculator function lexical error");
+		tok = pdf_lex(stream, buf);
 
 		switch(tok)
 		{
 		case PDF_TOK_EOF:
-			return fz_throw("truncated calculator function");
+			fz_throw(ctx, "truncated calculator function");
 
 		case PDF_TOK_INT:
-			resize_code(func, *codeptr);
+			resize_code(ctx, func, *codeptr);
 			func->u.p.code[*codeptr].type = PS_INT;
-			func->u.p.code[*codeptr].u.i = atoi(buf);
+			func->u.p.code[*codeptr].u.i = buf->i;
+			++*codeptr;
+			break;
+
+		case PDF_TOK_TRUE:
+			resize_code(ctx, func, *codeptr);
+			func->u.p.code[*codeptr].type = PS_BOOL;
+			func->u.p.code[*codeptr].u.b = 1;
+			++*codeptr;
+			break;
+
+		case PDF_TOK_FALSE:
+			resize_code(ctx, func, *codeptr);
+			func->u.p.code[*codeptr].type = PS_BOOL;
+			func->u.p.code[*codeptr].u.b = 0;
 			++*codeptr;
 			break;
 
 		case PDF_TOK_REAL:
-			resize_code(func, *codeptr);
+			resize_code(ctx, func, *codeptr);
 			func->u.p.code[*codeptr].type = PS_REAL;
-			func->u.p.code[*codeptr].u.f = fz_atof(buf);
+			func->u.p.code[*codeptr].u.f = buf->f;
 			++*codeptr;
 			break;
 
@@ -722,76 +749,64 @@ parse_code(pdf_function *func, fz_stream *stream, int *codeptr)
 			opptr = *codeptr;
 			*codeptr += 4;
 
-			resize_code(func, *codeptr);
+			resize_code(ctx, func, *codeptr);
 
 			ifptr = *codeptr;
-			error = parse_code(func, stream, codeptr);
-			if (error)
-				return fz_rethrow(error, "error in 'if' branch");
+			parse_code(func, stream, codeptr, buf);
 
-			error = pdf_lex(&tok, stream, buf, sizeof buf, &len);
-			if (error)
-				return fz_rethrow(error, "calculator function syntax error");
+			tok = pdf_lex(stream, buf);
 
 			if (tok == PDF_TOK_OPEN_BRACE)
 			{
 				elseptr = *codeptr;
-				error = parse_code(func, stream, codeptr);
-				if (error)
-					return fz_rethrow(error, "error in 'else' branch");
+				parse_code(func, stream, codeptr, buf);
 
-				error = pdf_lex(&tok, stream, buf, sizeof buf, &len);
-				if (error)
-					return fz_rethrow(error, "calculator function syntax error");
+				tok = pdf_lex(stream, buf);
 			}
 			else
 			{
 				elseptr = -1;
 			}
 
-			if (tok == PDF_TOK_KEYWORD)
+			if (tok != PDF_TOK_KEYWORD)
+				fz_throw(ctx, "missing keyword in 'if-else' context");
+
+			if (!strcmp(buf->scratch, "if"))
 			{
-				if (!strcmp(buf, "if"))
-				{
-					if (elseptr >= 0)
-						return fz_throw("too many branches for 'if'");
-					func->u.p.code[opptr].type = PS_OPERATOR;
-					func->u.p.code[opptr].u.op = PS_OP_IF;
-					func->u.p.code[opptr+2].type = PS_BLOCK;
-					func->u.p.code[opptr+2].u.block = ifptr;
-					func->u.p.code[opptr+3].type = PS_BLOCK;
-					func->u.p.code[opptr+3].u.block = *codeptr;
-				}
-				else if (!strcmp(buf, "ifelse"))
-				{
-					if (elseptr < 0)
-						return fz_throw("not enough branches for 'ifelse'");
-					func->u.p.code[opptr].type = PS_OPERATOR;
-					func->u.p.code[opptr].u.op = PS_OP_IFELSE;
-					func->u.p.code[opptr+1].type = PS_BLOCK;
-					func->u.p.code[opptr+1].u.block = elseptr;
-					func->u.p.code[opptr+2].type = PS_BLOCK;
-					func->u.p.code[opptr+2].u.block = ifptr;
-					func->u.p.code[opptr+3].type = PS_BLOCK;
-					func->u.p.code[opptr+3].u.block = *codeptr;
-				}
-				else
-				{
-					return fz_throw("unknown keyword in 'if-else' context: '%s'", buf);
-				}
+				if (elseptr >= 0)
+					fz_throw(ctx, "too many branches for 'if'");
+				func->u.p.code[opptr].type = PS_OPERATOR;
+				func->u.p.code[opptr].u.op = PS_OP_IF;
+				func->u.p.code[opptr+2].type = PS_BLOCK;
+				func->u.p.code[opptr+2].u.block = ifptr;
+				func->u.p.code[opptr+3].type = PS_BLOCK;
+				func->u.p.code[opptr+3].u.block = *codeptr;
+			}
+			else if (!strcmp(buf->scratch, "ifelse"))
+			{
+				if (elseptr < 0)
+					fz_throw(ctx, "not enough branches for 'ifelse'");
+				func->u.p.code[opptr].type = PS_OPERATOR;
+				func->u.p.code[opptr].u.op = PS_OP_IFELSE;
+				func->u.p.code[opptr+1].type = PS_BLOCK;
+				func->u.p.code[opptr+1].u.block = elseptr;
+				func->u.p.code[opptr+2].type = PS_BLOCK;
+				func->u.p.code[opptr+2].u.block = ifptr;
+				func->u.p.code[opptr+3].type = PS_BLOCK;
+				func->u.p.code[opptr+3].u.block = *codeptr;
 			}
 			else
 			{
-				return fz_throw("missing keyword in 'if-else' context");
+				fz_throw(ctx, "unknown keyword in 'if-else' context: '%s'", buf->scratch);
 			}
 			break;
 
 		case PDF_TOK_CLOSE_BRACE:
-			resize_code(func, *codeptr);
+			resize_code(ctx, func, *codeptr);
 			func->u.p.code[*codeptr].type = PS_OPERATOR;
 			func->u.p.code[*codeptr].u.op = PS_OP_RETURN;
 			++*codeptr;
-			return fz_okay;
+			return;
 
 		case PDF_TOK_KEYWORD:
 			cmp = -1;
@@ -800,7 +815,7 @@ parse_code(pdf_function *func, fz_stream *stream, int *codeptr)
 			while (b - a > 1)
 			{
 				mid = (a + b) / 2;
-				cmp = strcmp(buf, ps_op_names[mid]);
+				cmp = strcmp(buf->scratch, ps_op_names[mid]);
 				if (cmp > 0)
 					a = mid;
 				else if (cmp < 0)
@@ -809,64 +824,66 @@ parse_code(pdf_function *func, fz_stream *stream, int *codeptr)
 					a = b = mid;
 			}
 			if (cmp != 0)
-				return fz_throw("unknown operator: '%s'", buf);
+				fz_throw(ctx, "unknown operator: '%s'", buf->scratch);
 
-			resize_code(func, *codeptr);
+			resize_code(ctx, func, *codeptr);
 			func->u.p.code[*codeptr].type = PS_OPERATOR;
 			func->u.p.code[*codeptr].u.op = a;
 			++*codeptr;
 			break;
 
 		default:
-			return fz_throw("calculator function syntax error");
+			fz_throw(ctx, "calculator function syntax error");
 		}
 	}
 }
 
-static fz_error
-load_postscript_func(pdf_function *func, pdf_xref *xref, fz_obj *dict, int num, int gen)
+static void
+load_postscript_func(pdf_function *func, pdf_document *xref, pdf_obj *dict, int num, int gen)
 {
-	fz_error error;
-	fz_stream *stream;
+	fz_stream *stream = NULL;
 	int codeptr;
-	char buf[64];
-	int tok;
-	int len;
+	pdf_lexbuf buf;
+	pdf_token tok;
+	fz_context *ctx = xref->ctx;
+	int locked = 0;
 
-	error = pdf_open_stream(&stream, xref, num, gen);
-	if (error)
-		return fz_rethrow(error, "cannot open calculator function stream");
+	pdf_lexbuf_init(ctx, &buf, PDF_LEXBUF_SMALL);
 
-	error = pdf_lex(&tok, stream, buf, sizeof buf, &len);
-	if (error)
+	fz_var(stream);
+	fz_var(locked);
+
+	fz_try(ctx)
+	{
+		stream = pdf_open_stream(xref, num, gen);
+
+		tok = pdf_lex(stream, &buf);
+		if (tok != PDF_TOK_OPEN_BRACE)
+		{
+			fz_throw(ctx, "stream is not a calculator function");
+		}
+
+		func->u.p.code = NULL;
+		func->u.p.cap = 0;
+
+		codeptr = 0;
+		parse_code(func, stream, &codeptr, &buf);
+	}
+	fz_always(ctx)
 	{
 		fz_close(stream);
-		return fz_rethrow(error, "stream is not a calculator function");
+		pdf_lexbuf_fin(&buf);
 	}
-
-	if (tok != PDF_TOK_OPEN_BRACE)
+	fz_catch(ctx)
 	{
-		fz_close(stream);
-		return fz_throw("stream is not a calculator function");
+		fz_throw(ctx, "cannot parse calculator function (%d %d R)", num, gen);
 	}
 
-	func->u.p.code = NULL;
-	func->u.p.cap = 0;
-
-	codeptr = 0;
-	error = parse_code(func, stream, &codeptr);
-	if (error)
-	{
-		fz_close(stream);
-		return fz_rethrow(error, "cannot parse calculator function (%d %d R)", num, gen);
-	}
-
-	fz_close(stream);
-	return fz_okay;
+	func->size += func->u.p.cap * sizeof(psobj);
 }
 
 static void
-eval_postscript_func(pdf_function *func, float *in, float *out)
+eval_postscript_func(fz_context *ctx, pdf_function *func, float *in, float *out)
 {
 	ps_stack st;
 	float x;
@@ -876,16 +893,16 @@ eval_postscript_func(pdf_function *func, float *in, float *out)
 
 	for (i = 0; i < func->m; i++)
 	{
-		x = CLAMP(in[i], func->domain[i][0], func->domain[i][1]);
+		x = fz_clamp(in[i], func->domain[i][0], func->domain[i][1]);
 		ps_push_real(&st, x);
 	}
 
-	ps_run(func->u.p.code, &st, 0);
+	ps_run(ctx, func->u.p.code, &st, 0);
 
 	for (i = func->n - 1; i >= 0; i--)
 	{
 		x = ps_pop_real(&st);
-		out[i] = CLAMP(x, func->range[i][0], func->range[i][1]);
+		out[i] = fz_clamp(x, func->range[i][0], func->range[i][1]);
 	}
 }
 
@@ -893,77 +910,87 @@ eval_postscript_func(pdf_function *func, float *in, float *out)
  * Sample function
  */
 
-static fz_error
-load_sample_func(pdf_function *func, pdf_xref *xref, fz_obj *dict, int num, int gen)
+#define MAX_SAMPLE_FUNCTION_SIZE (100 << 20)
+
+static void
+load_sample_func(pdf_function *func, pdf_document *xref, pdf_obj *dict, int num, int gen)
 {
-	fz_error error;
+	fz_context *ctx = xref->ctx;
 	fz_stream *stream;
-	fz_obj *obj;
+	pdf_obj *obj;
 	int samplecount;
 	int bps;
 	int i;
 
 	func->u.sa.samples = NULL;
 
-	obj = fz_dict_gets(dict, "Size");
-	if (!fz_is_array(obj) || fz_array_len(obj) != func->m)
-		return fz_throw("malformed /Size");
+	obj = pdf_dict_gets(dict, "Size");
+	if (pdf_array_len(obj) < func->m)
+		fz_throw(ctx, "too few sample function dimension sizes");
+	if (pdf_array_len(obj) > func->m)
+		fz_warn(ctx, "too many sample function dimension sizes");
 	for (i = 0; i < func->m; i++)
-		func->u.sa.size[i] = fz_to_int(fz_array_get(obj, i));
-
-	obj = fz_dict_gets(dict, "BitsPerSample");
-	if (!fz_is_int(obj))
-		return fz_throw("malformed /BitsPerSample");
-	func->u.sa.bps = bps = fz_to_int(obj);
-
-	obj = fz_dict_gets(dict, "Encode");
-	if (fz_is_array(obj))
 	{
-		if (fz_array_len(obj) != func->m * 2)
-			return fz_throw("malformed /Encode");
-		for (i = 0; i < func->m; i++)
+		func->u.sa.size[i] = pdf_to_int(pdf_array_get(obj, i));
+		if (func->u.sa.size[i] <= 0)
 		{
-			func->u.sa.encode[i][0] = fz_to_real(fz_array_get(obj, i*2+0));
-			func->u.sa.encode[i][1] = fz_to_real(fz_array_get(obj, i*2+1));
-		}
-	}
-	else
-	{
-		for (i = 0; i < func->m; i++)
-		{
-			func->u.sa.encode[i][0] = 0;
-			func->u.sa.encode[i][1] = func->u.sa.size[i] - 1;
+			fz_warn(ctx, "non-positive sample function dimension size");
+			func->u.sa.size[i] = 1;
 		}
 	}
 
-	obj = fz_dict_gets(dict, "Decode");
-	if (fz_is_array(obj))
+	obj = pdf_dict_gets(dict, "BitsPerSample");
+	func->u.sa.bps = bps = pdf_to_int(obj);
+
+	for (i = 0; i < func->m; i++)
 	{
-		if (fz_array_len(obj) != func->n * 2)
-			return fz_throw("malformed /Decode");
-		for (i = 0; i < func->n; i++)
+		func->u.sa.encode[i][0] = 0;
+		func->u.sa.encode[i][1] = func->u.sa.size[i] - 1;
+	}
+	obj = pdf_dict_gets(dict, "Encode");
+	if (pdf_is_array(obj))
+	{
+		int ranges = fz_mini(func->m, pdf_array_len(obj) / 2);
+		if (ranges != func->m)
+			fz_warn(ctx, "wrong number of sample function input mappings");
+
+		for (i = 0; i < ranges; i++)
 		{
-			func->u.sa.decode[i][0] = fz_to_real(fz_array_get(obj, i*2+0));
-			func->u.sa.decode[i][1] = fz_to_real(fz_array_get(obj, i*2+1));
+			func->u.sa.encode[i][0] = pdf_to_real(pdf_array_get(obj, i * 2 + 0));
+			func->u.sa.encode[i][1] = pdf_to_real(pdf_array_get(obj, i * 2 + 1));
 		}
 	}
-	else
+
+	for (i = 0; i < func->n; i++)
 	{
-		for (i = 0; i < func->n; i++)
+		func->u.sa.decode[i][0] = func->range[i][0];
+		func->u.sa.decode[i][1] = func->range[i][1];
+	}
+
+	obj = pdf_dict_gets(dict, "Decode");
+	if (pdf_is_array(obj))
+	{
+		int ranges = fz_mini(func->n, pdf_array_len(obj) / 2);
+		if (ranges != func->n)
+			fz_warn(ctx, "wrong number of sample function output mappings");
+
+		for (i = 0; i < ranges; i++)
 		{
-			func->u.sa.decode[i][0] = func->range[i][0];
-			func->u.sa.decode[i][1] = func->range[i][1];
+			func->u.sa.decode[i][0] = pdf_to_real(pdf_array_get(obj, i * 2 + 0));
+			func->u.sa.decode[i][1] = pdf_to_real(pdf_array_get(obj, i * 2 + 1));
 		}
 	}
 
 	for (i = 0, samplecount = func->n; i < func->m; i++)
 		samplecount *= func->u.sa.size[i];
 
-	func->u.sa.samples = fz_calloc(samplecount, sizeof(float));
+	if (samplecount > MAX_SAMPLE_FUNCTION_SIZE)
+		fz_throw(ctx, "sample function too large");
 
-	error = pdf_open_stream(&stream, xref, num, gen);
-	if (error)
-		return fz_rethrow(error, "cannot open samples stream (%d %d R)", num, gen);
+	func->u.sa.samples = fz_malloc_array(ctx, samplecount, sizeof(float));
+	func->size += samplecount * sizeof(float);
+
+	stream = pdf_open_stream(xref, num, gen);
 
 	/* read samples */
 	for (i = 0; i < samplecount; i++)
@@ -974,7 +1001,7 @@ load_sample_func(pdf_function *func, pdf_xref *xref, fz_obj *dict, int num, int 
 		if (fz_is_eof_bits(stream))
 		{
 			fz_close(stream);
-			return fz_throw("truncated sample stream");
+			fz_throw(ctx, "truncated sample function stream");
 		}
 
 		switch (bps)
@@ -1004,15 +1031,13 @@ load_sample_func(pdf_function *func, pdf_xref *xref, fz_obj *dict, int num, int 
 			break;
 		default:
 			fz_close(stream);
-			return fz_throw("sample stream bit depth %d unsupported", bps);
+			fz_throw(ctx, "sample stream bit depth %d unsupported", bps);
 		}
 
 		func->u.sa.samples[i] = s;
 	}
 
 	fz_close(stream);
-
-	return fz_okay;
 }
 
 static float
@@ -1039,7 +1064,7 @@ interpolate_sample(pdf_function *func, int *scale, int *e0, int *e1, float *efra
 }
 
 static void
-eval_sample_func(pdf_function *func, float *in, float *out)
+eval_sample_func(fz_context *ctx, pdf_function *func, float *in, float *out)
 {
 	int e0[MAXM], e1[MAXM], scale[MAXM];
 	float efrac[MAXM];
@@ -1049,10 +1074,10 @@ eval_sample_func(pdf_function *func, float *in, float *out)
 	/* encode input coordinates */
 	for (i = 0; i < func->m; i++)
 	{
-		x = CLAMP(in[i], func->domain[i][0], func->domain[i][1]);
+		x = fz_clamp(in[i], func->domain[i][0], func->domain[i][1]);
 		x = lerp(x, func->domain[i][0], func->domain[i][1],
 			func->u.sa.encode[i][0], func->u.sa.encode[i][1]);
-		x = CLAMP(x, 0, func->u.sa.size[i] - 1);
+		x = fz_clamp(x, 0, func->u.sa.size[i] - 1);
 		e0[i] = floorf(x);
 		e1[i] = ceilf(x);
 		efrac[i] = x - floorf(x);
@@ -1072,7 +1097,7 @@ eval_sample_func(pdf_function *func, float *in, float *out)
 			float ab = a + (b - a) * efrac[0];
 
 			out[i] = lerp(ab, 0, 1, func->u.sa.decode[i][0], func->u.sa.decode[i][1]);
-			out[i] = CLAMP(out[i], func->range[i][0], func->range[i][1]);
+			out[i] = fz_clamp(out[i], func->range[i][0], func->range[i][1]);
 		}
 
 		else if (func->m == 2)
@@ -1090,14 +1115,14 @@ eval_sample_func(pdf_function *func, float *in, float *out)
 			float abcd = ab + (cd - ab) * efrac[1];
 
 			out[i] = lerp(abcd, 0, 1, func->u.sa.decode[i][0], func->u.sa.decode[i][1]);
-			out[i] = CLAMP(out[i], func->range[i][0], func->range[i][1]);
+			out[i] = fz_clamp(out[i], func->range[i][0], func->range[i][1]);
 		}
 
 		else
 		{
 			float x = interpolate_sample(func, scale, e0, e1, efrac, func->m - 1, i);
 			out[i] = lerp(x, 0, 1, func->u.sa.decode[i][0], func->u.sa.decode[i][1]);
-			out[i] = CLAMP(out[i], func->range[i][0], func->range[i][1]);
+			out[i] = fz_clamp(out[i], func->range[i][0], func->range[i][1]);
 		}
 	}
 }
@@ -1106,75 +1131,84 @@ eval_sample_func(pdf_function *func, float *in, float *out)
  * Exponential function
  */
 
-static fz_error
-load_exponential_func(pdf_function *func, fz_obj *dict)
+static void
+load_exponential_func(fz_context *ctx, pdf_function *func, pdf_obj *dict)
 {
-	fz_obj *obj;
+	pdf_obj *obj;
 	int i;
 
-	if (func->m != 1)
-		return fz_throw("/Domain must be one dimension (%d)", func->m);
+	if (func->m > 1)
+		fz_warn(ctx, "exponential functions have at most one input");
+	func->m = 1;
 
-	obj = fz_dict_gets(dict, "N");
-	if (!fz_is_int(obj) && !fz_is_real(obj))
-		return fz_throw("malformed /N");
-	func->u.e.n = fz_to_real(obj);
+	obj = pdf_dict_gets(dict, "N");
+	func->u.e.n = pdf_to_real(obj);
 
-	obj = fz_dict_gets(dict, "C0");
-	if (fz_is_array(obj))
+	/* See exponential functions (PDF 1.7 section 3.9.2) */
+	if (func->u.e.n != (int) func->u.e.n)
 	{
-		func->n = fz_array_len(obj);
-		if (func->n >= MAXN)
-			return fz_throw("exponential function result array out of range");
-		for (i = 0; i < func->n; i++)
-			func->u.e.c0[i] = fz_to_real(fz_array_get(obj, i));
+		/* If N is non-integer, input values may never be negative */
+		for (i = 0; i < func->m; i++)
+			if (func->domain[i][0] < 0 || func->domain[i][1] < 0)
+				fz_warn(ctx, "exponential function input domain includes illegal negative input values");
 	}
-	else
+	else if (func->u.e.n < 0)
 	{
-		func->n = 1;
-		func->u.e.c0[0] = 0;
-	}
-
-	obj = fz_dict_gets(dict, "C1");
-	if (fz_is_array(obj))
-	{
-		if (fz_array_len(obj) != func->n)
-			return fz_throw("/C1 must match /C0 length");
-		for (i = 0; i < func->n; i++)
-			func->u.e.c1[i] = fz_to_real(fz_array_get(obj, i));
-	}
-	else
-	{
-		if (func->n != 1)
-			return fz_throw("/C1 must match /C0 length");
-		func->u.e.c1[0] = 1;
+		/* if N is negative, input values may never be zero */
+		for (i = 0; i < func->m; i++)
+			if (func->domain[i][0] == 0 || func->domain[i][1] == 0 ||
+				(func->domain[i][0] < 0 && func->domain[i][1] > 0))
+				fz_warn(ctx, "exponential function input domain includes illegal input value zero");
 	}
 
-	return fz_okay;
+	for (i = 0; i < func->n; i++)
+	{
+		func->u.e.c0[i] = 0;
+		func->u.e.c1[i] = 1;
+	}
+
+	obj = pdf_dict_gets(dict, "C0");
+	if (pdf_is_array(obj))
+	{
+		int ranges = fz_mini(func->n, pdf_array_len(obj));
+		if (ranges != func->n)
+			fz_warn(ctx, "wrong number of C0 constants for exponential function");
+
+		for (i = 0; i < ranges; i++)
+			func->u.e.c0[i] = pdf_to_real(pdf_array_get(obj, i));
+	}
+
+	obj = pdf_dict_gets(dict, "C1");
+	if (pdf_is_array(obj))
+	{
+		int ranges = fz_mini(func->n, pdf_array_len(obj));
+		if (ranges != func->n)
+			fz_warn(ctx, "wrong number of C1 constants for exponential function");
+
+		for (i = 0; i < ranges; i++)
+			func->u.e.c1[i] = pdf_to_real(pdf_array_get(obj, i));
+	}
 }
 
 static void
-eval_exponential_func(pdf_function *func, float in, float *out)
+eval_exponential_func(fz_context *ctx, pdf_function *func, float in, float *out)
 {
 	float x = in;
 	float tmp;
 	int i;
 
-	x = CLAMP(x, func->domain[0][0], func->domain[0][1]);
+	x = fz_clamp(x, func->domain[0][0], func->domain[0][1]);
 
-	/* constraint */
+	/* Default output is zero, which is suitable for violated constraints */
 	if ((func->u.e.n != (int)func->u.e.n && x < 0) || (func->u.e.n < 0 && x == 0))
-	{
-		fz_warn("constraint error");
 		return;
-	}
 
 	tmp = powf(x, func->u.e.n);
 	for (i = 0; i < func->n; i++)
 	{
 		out[i] = func->u.e.c0[i] + tmp * (func->u.e.c1[i] - func->u.e.c0[i]);
 		if (func->has_range)
-			out[i] = CLAMP(out[i], func->range[i][0], func->range[i][1]);
+			out[i] = fz_clamp(out[i], func->range[i][0], func->range[i][1]);
 	}
 }
 
@@ -1182,97 +1216,112 @@ eval_exponential_func(pdf_function *func, float in, float *out)
  * Stitching function
  */
 
-static fz_error
-load_stitching_func(pdf_function *func, pdf_xref *xref, fz_obj *dict)
+static void
+load_stitching_func(pdf_function *func, pdf_document *xref, pdf_obj *dict)
 {
+	fz_context *ctx = xref->ctx;
 	pdf_function **funcs;
-	fz_error error;
-	fz_obj *obj;
-	fz_obj *sub;
-	fz_obj *num;
+	pdf_obj *obj;
+	pdf_obj *sub;
+	pdf_obj *num;
 	int k;
 	int i;
 
 	func->u.st.k = 0;
 
-	if (func->m != 1)
-		return fz_throw("/Domain must be one dimension (%d)", func->m);
+	if (func->m > 1)
+		fz_warn(ctx, "stitching functions have at most one input");
+	func->m = 1;
 
-	obj = fz_dict_gets(dict, "Functions");
-	if (!fz_is_array(obj))
-		return fz_throw("stitching function has no input functions");
+	obj = pdf_dict_gets(dict, "Functions");
+	if (!pdf_is_array(obj))
+		fz_throw(ctx, "stitching function has no input functions");
+
+	fz_try(ctx)
 	{
-		k = fz_array_len(obj);
+		pdf_obj_mark(obj);
+		k = pdf_array_len(obj);
 
-		func->u.st.funcs = fz_calloc(k, sizeof(pdf_function*));
-		func->u.st.bounds = fz_calloc(k - 1, sizeof(float));
-		func->u.st.encode = fz_calloc(k * 2, sizeof(float));
+		func->u.st.funcs = fz_malloc_array(ctx, k, sizeof(pdf_function*));
+		func->u.st.bounds = fz_malloc_array(ctx, k - 1, sizeof(float));
+		func->u.st.encode = fz_malloc_array(ctx, k * 2, sizeof(float));
 		funcs = func->u.st.funcs;
 
 		for (i = 0; i < k; i++)
 		{
-			sub = fz_array_get(obj, i);
-			error = pdf_load_function(&funcs[i], xref, sub);
-			if (error)
-				return fz_rethrow(error, "cannot load sub function %d (%d %d R)", i, fz_to_num(sub), fz_to_gen(sub));
-			if (funcs[i]->m != 1 || funcs[i]->n != funcs[0]->n)
-				return fz_throw("sub function %d /Domain or /Range mismatch", i);
+			sub = pdf_array_get(obj, i);
+			funcs[i] = pdf_load_function(xref, sub, 1, func->n);
+
+			func->size += pdf_function_size(funcs[i]);
 			func->u.st.k ++;
+
+			if (funcs[i]->m != func->m)
+				fz_warn(ctx, "wrong number of inputs for sub function %d", i);
+			if (funcs[i]->n != func->n)
+				fz_warn(ctx, "wrong number of outputs for sub function %d", i);
 		}
-
-		if (!func->n)
-			func->n = funcs[0]->n;
-		else if (func->n != funcs[0]->n)
-			return fz_throw("sub function /Domain or /Range mismatch");
 	}
-
-	obj = fz_dict_gets(dict, "Bounds");
-	if (!fz_is_array(obj))
-		return fz_throw("stitching function has no bounds");
+	fz_always(ctx)
 	{
-		if (!fz_is_array(obj) || fz_array_len(obj) != k - 1)
-			return fz_throw("malformed /Bounds (not array or wrong length)");
-
-		for (i = 0; i < k-1; i++)
-		{
-			num = fz_array_get(obj, i);
-			if (!fz_is_int(num) && !fz_is_real(num))
-				return fz_throw("malformed /Bounds (item not real)");
-			func->u.st.bounds[i] = fz_to_real(num);
-			if (i && func->u.st.bounds[i-1] > func->u.st.bounds[i])
-				return fz_throw("malformed /Bounds (item not monotonic)");
-		}
-
-		if (k != 1 && (func->domain[0][0] > func->u.st.bounds[0] ||
-			func->domain[0][1] < func->u.st.bounds[k-2]))
-			fz_warn("malformed shading function bounds (domain mismatch), proceeding anyway.");
+		pdf_obj_unmark(obj);
 	}
-
-	obj = fz_dict_gets(dict, "Encode");
-	if (!fz_is_array(obj))
-		return fz_throw("stitching function is missing encoding");
+	fz_catch(ctx)
 	{
-		if (!fz_is_array(obj) || fz_array_len(obj) != k * 2)
-			return fz_throw("malformed /Encode");
-		for (i = 0; i < k; i++)
-		{
-			func->u.st.encode[i*2+0] = fz_to_real(fz_array_get(obj, i*2+0));
-			func->u.st.encode[i*2+1] = fz_to_real(fz_array_get(obj, i*2+1));
-		}
+		fz_rethrow(ctx);
 	}
 
-	return fz_okay;
+	obj = pdf_dict_gets(dict, "Bounds");
+	if (!pdf_is_array(obj))
+		fz_throw(ctx, "stitching function has no bounds");
+	{
+		if (pdf_array_len(obj) < k - 1)
+			fz_throw(ctx, "too few subfunction boundaries");
+		if (pdf_array_len(obj) > k)
+			fz_warn(ctx, "too many subfunction boundaries");
+
+		for (i = 0; i < k - 1; i++)
+		{
+			num = pdf_array_get(obj, i);
+			func->u.st.bounds[i] = pdf_to_real(num);
+			if (i && func->u.st.bounds[i - 1] > func->u.st.bounds[i])
+				fz_throw(ctx, "subfunction %d boundary out of range", i);
+		}
+
+		if (k > 1 && (func->domain[0][0] > func->u.st.bounds[0] ||
+			func->domain[0][1] < func->u.st.bounds[k - 2]))
+			fz_warn(ctx, "subfunction boundaries outside of input mapping");
+	}
+
+	for (i = 0; i < k; i++)
+	{
+		func->u.st.encode[i * 2 + 0] = 0;
+		func->u.st.encode[i * 2 + 1] = 0;
+	}
+
+	obj = pdf_dict_gets(dict, "Encode");
+	if (pdf_is_array(obj))
+	{
+		int ranges = fz_mini(k, pdf_array_len(obj) / 2);
+		if (ranges != k)
+			fz_warn(ctx, "wrong number of stitching function input mappings");
+
+		for (i = 0; i < ranges; i++)
+		{
+			func->u.st.encode[i * 2 + 0] = pdf_to_real(pdf_array_get(obj, i * 2 + 0));
+			func->u.st.encode[i * 2 + 1] = pdf_to_real(pdf_array_get(obj, i * 2 + 1));
+		}
+	}
 }
 
 static void
-eval_stitching_func(pdf_function *func, float in, float *out)
+eval_stitching_func(fz_context *ctx, pdf_function *func, float in, float *out)
 {
 	float low, high;
 	int k = func->u.st.k;
 	float *bounds = func->u.st.bounds;
 	int i;
 
-	in = CLAMP(in, func->domain[0][0], func->domain[0][1]);
+	in = fz_clamp(in, func->domain[0][0], func->domain[0][1]);
 
 	for (i = 0; i < k - 1; i++)
 	{
@@ -1292,18 +1341,18 @@ eval_stitching_func(pdf_function *func, float in, float *out)
 	}
 	else if (i == k - 1)
 	{
-		low = bounds[k-2];
+		low = bounds[k - 2];
 		high = func->domain[0][1];
 	}
 	else
 	{
-		low = bounds[i-1];
+		low = bounds[i - 1];
 		high = bounds[i];
 	}
 
-	in = lerp(in, low, high, func->u.st.encode[i*2+0], func->u.st.encode[i*2+1]);
+	in = lerp(in, low, high, func->u.st.encode[i * 2 + 0], func->u.st.encode[i * 2 + 1]);
 
-	pdf_eval_function(func->u.st.funcs[i], &in, 1, out, func->n);
+	pdf_eval_function(ctx, func->u.st.funcs[i], &in, 1, out, func->n);
 }
 
 /*
@@ -1311,172 +1360,188 @@ eval_stitching_func(pdf_function *func, float in, float *out)
  */
 
 pdf_function *
-pdf_keep_function(pdf_function *func)
+pdf_keep_function(fz_context *ctx, pdf_function *func)
 {
-	func->refs ++;
-	return func;
+	return (pdf_function *)fz_keep_storable(ctx, &func->storable);
 }
 
 void
-pdf_drop_function(pdf_function *func)
+pdf_drop_function(fz_context *ctx, pdf_function *func)
 {
-	int i;
-	if (--func->refs == 0)
-	{
-		switch(func->type)
-		{
-		case SAMPLE:
-			fz_free(func->u.sa.samples);
-			break;
-		case EXPONENTIAL:
-			break;
-		case STITCHING:
-			for (i = 0; i < func->u.st.k; i++)
-				pdf_drop_function(func->u.st.funcs[i]);
-			fz_free(func->u.st.funcs);
-			fz_free(func->u.st.bounds);
-			fz_free(func->u.st.encode);
-			break;
-		case POSTSCRIPT:
-			fz_free(func->u.p.code);
-			break;
-		}
-		fz_free(func);
-	}
+	fz_drop_storable(ctx, &func->storable);
 }
 
-fz_error
-pdf_load_function(pdf_function **funcp, pdf_xref *xref, fz_obj *dict)
+static void
+pdf_free_function_imp(fz_context *ctx, fz_storable *func_)
 {
-	fz_error error;
-	pdf_function *func;
-	fz_obj *obj;
+	pdf_function *func = (pdf_function *)func_;
 	int i;
 
-	if ((*funcp = pdf_find_item(xref->store, pdf_drop_function, dict)))
+	switch(func->type)
 	{
-		pdf_keep_function(*funcp);
-		return fz_okay;
+	case SAMPLE:
+		fz_free(ctx, func->u.sa.samples);
+		break;
+	case EXPONENTIAL:
+		break;
+	case STITCHING:
+		for (i = 0; i < func->u.st.k; i++)
+			pdf_drop_function(ctx, func->u.st.funcs[i]);
+		fz_free(ctx, func->u.st.funcs);
+		fz_free(ctx, func->u.st.bounds);
+		fz_free(ctx, func->u.st.encode);
+		break;
+	case POSTSCRIPT:
+		fz_free(ctx, func->u.p.code);
+		break;
+	}
+	fz_free(ctx, func);
+}
+
+unsigned int
+pdf_function_size(pdf_function *func)
+{
+	return (func ? func->size : 0);
+}
+
+pdf_function *
+pdf_load_function(pdf_document *xref, pdf_obj *dict, int in, int out)
+{
+	fz_context *ctx = xref->ctx;
+	pdf_function *func;
+	pdf_obj *obj;
+	int i;
+
+	if (pdf_obj_marked(dict))
+		fz_throw(ctx, "Recursion in function definition");
+
+	if ((func = pdf_find_item(ctx, pdf_free_function_imp, dict)))
+	{
+		return func;
 	}
 
-	func = fz_malloc(sizeof(pdf_function));
-	memset(func, 0, sizeof(pdf_function));
-	func->refs = 1;
+	func = fz_malloc_struct(ctx, pdf_function);
+	FZ_INIT_STORABLE(func, 1, pdf_free_function_imp);
+	func->size = sizeof(*func);
 
-	obj = fz_dict_gets(dict, "FunctionType");
-	func->type = fz_to_int(obj);
+	obj = pdf_dict_gets(dict, "FunctionType");
+	func->type = pdf_to_int(obj);
 
 	/* required for all */
-	obj = fz_dict_gets(dict, "Domain");
-	func->m = fz_array_len(obj) / 2;
+	obj = pdf_dict_gets(dict, "Domain");
+	func->m = fz_clampi(pdf_array_len(obj) / 2, 1, MAXM);
 	for (i = 0; i < func->m; i++)
 	{
-		func->domain[i][0] = fz_to_real(fz_array_get(obj, i * 2 + 0));
-		func->domain[i][1] = fz_to_real(fz_array_get(obj, i * 2 + 1));
+		func->domain[i][0] = pdf_to_real(pdf_array_get(obj, i * 2 + 0));
+		func->domain[i][1] = pdf_to_real(pdf_array_get(obj, i * 2 + 1));
 	}
 
 	/* required for type0 and type4, optional otherwise */
-	obj = fz_dict_gets(dict, "Range");
-	if (fz_is_array(obj))
+	obj = pdf_dict_gets(dict, "Range");
+	if (pdf_is_array(obj))
 	{
 		func->has_range = 1;
-		func->n = fz_array_len(obj) / 2;
+		func->n = fz_clampi(pdf_array_len(obj) / 2, 1, MAXN);
 		for (i = 0; i < func->n; i++)
 		{
-			func->range[i][0] = fz_to_real(fz_array_get(obj, i * 2 + 0));
-			func->range[i][1] = fz_to_real(fz_array_get(obj, i * 2 + 1));
+			func->range[i][0] = pdf_to_real(pdf_array_get(obj, i * 2 + 0));
+			func->range[i][1] = pdf_to_real(pdf_array_get(obj, i * 2 + 1));
 		}
 	}
 	else
 	{
 		func->has_range = 0;
-		func->n = 0;
+		func->n = out;
 	}
 
-	if (func->m >= MAXM || func->n >= MAXN)
+	if (func->m != in)
+		fz_warn(ctx, "wrong number of function inputs");
+	if (func->n != out)
+		fz_warn(ctx, "wrong number of function outputs");
+
+	fz_try(ctx)
 	{
-		fz_free(func);
-		return fz_throw("assert: /Domain or /Range too big");
-	}
+		switch(func->type)
+		{
+		case SAMPLE:
+			load_sample_func(func, xref, dict, pdf_to_num(dict), pdf_to_gen(dict));
+			break;
 
-	switch(func->type)
+		case EXPONENTIAL:
+			load_exponential_func(ctx, func, dict);
+			break;
+
+		case STITCHING:
+			load_stitching_func(func, xref, dict);
+			break;
+
+		case POSTSCRIPT:
+			load_postscript_func(func, xref, dict, pdf_to_num(dict), pdf_to_gen(dict));
+			break;
+
+		default:
+			fz_free(ctx, func);
+			fz_throw(ctx, "unknown function type (%d %d R)", pdf_to_num(dict), pdf_to_gen(dict));
+		}
+
+		pdf_store_item(ctx, dict, func, func->size);
+	}
+	fz_catch(ctx)
 	{
-	case SAMPLE:
-		error = load_sample_func(func, xref, dict, fz_to_num(dict), fz_to_gen(dict));
-		if (error)
-		{
-			pdf_drop_function(func);
-			return fz_rethrow(error, "cannot load sampled function (%d %d R)", fz_to_num(dict), fz_to_gen(dict));
-		}
-		break;
-
-	case EXPONENTIAL:
-		error = load_exponential_func(func, dict);
-		if (error)
-		{
-			pdf_drop_function(func);
-			return fz_rethrow(error, "cannot load exponential function (%d %d R)", fz_to_num(dict), fz_to_gen(dict));
-		}
-		break;
-
-	case STITCHING:
-		error = load_stitching_func(func, xref, dict);
-		if (error)
-		{
-			pdf_drop_function(func);
-			return fz_rethrow(error, "cannot load stitching function (%d %d R)", fz_to_num(dict), fz_to_gen(dict));
-		}
-		break;
-
-	case POSTSCRIPT:
-		error = load_postscript_func(func, xref, dict, fz_to_num(dict), fz_to_gen(dict));
-		if (error)
-		{
-			pdf_drop_function(func);
-			return fz_rethrow(error, "cannot load calculator function (%d %d R)", fz_to_num(dict), fz_to_gen(dict));
-		}
-		break;
-
-	default:
-		fz_free(func);
-		return fz_throw("unknown function type (%d %d R)", fz_to_num(dict), fz_to_gen(dict));
+		int type = func->type;
+		pdf_drop_function(ctx, func);
+		fz_throw(ctx, "cannot load %s function (%d %d R)",
+				type == SAMPLE ? "sampled" :
+				type == EXPONENTIAL ? "exponential" :
+				type == STITCHING ? "stitching" :
+				type == POSTSCRIPT ? "calculator" :
+				"unknown",
+				pdf_to_num(dict), pdf_to_gen(dict));
 	}
 
-	pdf_store_item(xref->store, pdf_keep_function, pdf_drop_function, dict, func);
-
-	*funcp = func;
-	return fz_okay;
+	return func;
 }
 
 void
-pdf_eval_function(pdf_function *func, float *in, int inlen, float *out, int outlen)
+pdf_eval_function(fz_context *ctx, pdf_function *func, float *in_, int inlen, float *out_, int outlen)
 {
-	memset(out, 0, sizeof(float) * outlen);
+	float fakein[MAXM];
+	float fakeout[MAXN];
+	float *in = in_;
+	float *out = out_;
 
-	if (inlen != func->m)
+	if (inlen < func->m)
 	{
-		fz_warn("tried to evaluate function with wrong number of inputs");
-		return;
+		in = fakein;
+		memset(in, 0, sizeof(float) * func->m);
+		memcpy(in, in_, sizeof(float) * inlen);
 	}
-	if (func->n != outlen)
+
+	if (outlen < func->n)
 	{
-		fz_warn("tried to evaluate function with wrong number of outputs");
-		return;
+		out = fakeout;
+		memset(out, 0, sizeof(float) * func->n);
 	}
+	else
+		memset(out, 0, sizeof(float) * outlen);
 
 	switch(func->type)
 	{
-	case SAMPLE: eval_sample_func(func, in, out); break;
-	case EXPONENTIAL: eval_exponential_func(func, *in, out); break;
-	case STITCHING: eval_stitching_func(func, *in, out); break;
-	case POSTSCRIPT: eval_postscript_func(func, in, out); break;
+	case SAMPLE: eval_sample_func(ctx, func, in, out); break;
+	case EXPONENTIAL: eval_exponential_func(ctx, func, *in, out); break;
+	case STITCHING: eval_stitching_func(ctx, func, *in, out); break;
+	case POSTSCRIPT: eval_postscript_func(ctx, func, in, out); break;
 	}
+
+	if (outlen < func->n)
+		memcpy(out_, out, sizeof(float) * outlen);
 }
 
 /*
  * Debugging prints
  */
 
+#ifndef NDEBUG
 static void
 pdf_debug_indent(char *prefix, int level, char *suffix)
 {
@@ -1692,3 +1757,4 @@ pdf_debug_function(pdf_function *func)
 {
 	pdf_debug_function_imp(func, 0);
 }
+#endif

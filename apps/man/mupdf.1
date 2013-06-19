@@ -1,4 +1,4 @@
-.TH MUPDF 1 "March 15, 2010"
+.TH MUPDF 1 "June 12, 2012"
 .\" Please adjust this date whenever revising the manpage.
 .SH NAME
 mupdf \- MuPDF is a lightweight PDF viewer written in portable C
@@ -37,6 +37,9 @@ Scroll page left, down, up, or right.
 .B \+, \-
 Zoom in or out.
 .TP
+.B W, H
+Zoom so page exactly fits width or height of window.
+.TP
 .B w
 Shrinkwrap window to fit the page.
 .TP
@@ -46,7 +49,7 @@ Reload file.
 .B . pgdn right space
 Go to the next page
 .TP
-.B , pgup left b
+.B , pgup left b backspace
 Go to the previous page
 .TP
 .B <, >
@@ -75,12 +78,15 @@ Find the next/previous search result.
 .TP
 .B c
 Toggle between color and grayscale rendering.
+.TP
+.B i
+Toggle between normal and inverted color rendering.
+.P
+Sending a \fBSIGHUP\fR signal to the mupdf process will also cause the viewed
+file to be reloaded automatically, for use in e.g. build scripts.
 .SH SEE ALSO
-.BR pdfclean (1),
-.BR pdfdraw (1),
-.BR pdfshow (1).
+.BR mupdfclean (1),
+.BR mupdfdraw (1),
+.BR mupdfshow (1).
 .SH AUTHOR
-MuPDF was written by Tor Andersson <tor@ghostscript.com>.
-MuPDF is Copyright 2006-2010 Artifex Software, Inc.
-.PP
-This manual page was written by Sebastian Rasmussen <sebras@hotmail.com>.
+MuPDF is Copyright 2006-2012 Artifex Software, Inc.

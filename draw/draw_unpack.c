@@ -1,4 +1,4 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
 /* Unpack image samples and optionally pad pixels with opaque alpha */
 
@@ -70,8 +70,8 @@ fz_unpack_tile(fz_pixmap *dst, unsigned char * restrict src, int n, int depth, i
 
 	for (y = 0; y < dst->h; y++)
 	{
-		unsigned char *sp = src + y * stride;
-		unsigned char *dp = dst->samples + y * (dst->w * dst->n);
+		unsigned char *sp = src + (unsigned int)(y * stride);
+		unsigned char *dp = dst->samples + (unsigned int)(y * dst->w * dst->n);
 
 		/* Specialized loops */
 
@@ -197,7 +197,10 @@ fz_decode_indexed_tile(fz_pixmap *pix, float *decode, int maxval)
 	while (len--)
 	{
 		for (k = 0; k < n; k++)
-			p[k] = (add[k] + (((p[k] << 8) * mul[k]) >> 8)) >> 8;
+		{
+			int value = (add[k] + (((p[k] << 8) * mul[k]) >> 8)) >> 8;
+			p[k] = fz_clampi(value, 0, 255);
+		}
 		p += n + 1;
 	}
 }
@@ -209,7 +212,7 @@ fz_decode_tile(fz_pixmap *pix, float *decode)
 	int mul[FZ_MAX_COLORS];
 	unsigned char *p = pix->samples;
 	int len = pix->w * pix->h;
-	int n = MAX(1, pix->n - 1);
+	int n = fz_maxi(1, pix->n - 1);
 	int needed;
 	int k;
 
@@ -229,7 +232,10 @@ fz_decode_tile(fz_pixmap *pix, float *decode)
 	while (len--)
 	{
 		for (k = 0; k < n; k++)
-			p[k] = add[k] + fz_mul255(p[k], mul[k]);
+		{
+			int value = add[k] + fz_mul255(p[k], mul[k]);
+			p[k] = fz_clampi(value, 0, 255);
+		}
 		p += pix->n;
 	}
 }

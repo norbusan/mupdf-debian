@@ -4,8 +4,8 @@ Upstream-Contact: http://mupdf.com/
 Source: http://mupdf.com/download/
 
 Files: *
-Copyright: 2006-2010, Artifex Software, Inc.
-License: GPL-3+
+Copyright: 2006-2013, Artifex Software, Inc.
+License: AGPL-3+
 
 Files: cmaps/*
 Copyright: 1990-2009, Adobe Systems Incorporated.

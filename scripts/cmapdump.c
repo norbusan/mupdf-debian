@@ -3,9 +3,13 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "fitz.h"
-#include "mupdf.h"
+/* We never want to build memento versions of the cmapdump util */
+#undef MEMENTO
 
+#include "fitz-internal.h"
+#include "mupdf-internal.h"
+
+#include "../fitz/base_context.c"
 #include "../fitz/base_error.c"
 #include "../fitz/base_memory.c"
 #include "../fitz/base_string.c"
@@ -32,16 +36,23 @@ int
 main(int argc, char **argv)
 {
 	pdf_cmap *cmap;
-	fz_error error;
 	fz_stream *fi;
 	FILE *fo;
 	char name[256];
 	char *realname;
 	int i, k;
+	fz_context *ctx;
 
 	if (argc < 3)
 	{
 		fprintf(stderr, "usage: cmapdump output.c lots of cmap files\n");
+		return 1;
+	}
+
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx)
+	{
+		fprintf(stderr, "cannot initialise context\n");
 		return 1;
 	}
 
@@ -67,22 +78,20 @@ main(int argc, char **argv)
 		if (strlen(realname) > (sizeof name - 1))
 		{
 			fprintf(stderr, "cmapdump: file name too long\n");
+			if (fclose(fo))
+			{
+				fprintf(stderr, "cmapdump: could not close output file '%s'\n", argv[1]);
+				return 1;
+			}
 			return 1;
 		}
 
 		strcpy(name, realname);
 		clean(name);
 
-		fi = fz_open_file(argv[i]);
-		if (!fi)
-			fz_throw("cmapdump: could not open input file '%s'\n", argv[i]);
-
-		error = pdf_parse_cmap(&cmap, fi);
-		if (error)
-		{
-			fz_catch(error, "cmapdump: could not parse input cmap '%s'\n", argv[i]);
-			return 1;
-		}
+		fi = fz_open_file(ctx, argv[i]);
+		cmap = pdf_load_cmap(ctx, fi);
+		fz_close(fi);
 
 		fprintf(fo, "\n/* %s */\n\n", cmap->cmap_name);
 
@@ -118,7 +127,7 @@ main(int argc, char **argv)
 		}
 
 		fprintf(fo, "static pdf_cmap cmap_%s = {\n", name);
-		fprintf(fo, "\t-1, ");
+		fprintf(fo, "\t{-1, pdf_free_cmap_imp}, ");
 		fprintf(fo, "\"%s\", ", cmap->cmap_name);
 		fprintf(fo, "\"%s\", 0, ", cmap->usecmap_name);
 		fprintf(fo, "%d, ", cmap->wmode);
@@ -142,9 +151,8 @@ main(int argc, char **argv)
 
 		fprintf(fo, "};\n");
 
-		printf("\t{\"%s\",&cmap_%s},\n", cmap->cmap_name, name);
-
-		fz_close(fi);
+		if (getenv("verbose"))
+			printf("\t{\"%s\",&cmap_%s},\n", cmap->cmap_name, name);
 	}
 
 	if (fclose(fo))
@@ -153,5 +161,71 @@ main(int argc, char **argv)
 		return 1;
 	}
 
+	fz_free_context(ctx);
 	return 0;
+}
+
+void fz_new_font_context(fz_context *ctx)
+{
+}
+
+void fz_drop_font_context(fz_context *ctx)
+{
+}
+
+fz_font_context *fz_keep_font_context(fz_context *ctx)
+{
+	return NULL;
+}
+
+void fz_new_aa_context(fz_context *ctx)
+{
+}
+
+void fz_free_aa_context(fz_context *ctx)
+{
+}
+
+void fz_copy_aa_context(fz_context *dst, fz_context *src)
+{
+}
+
+void *fz_keep_storable(fz_context *ctx, fz_storable *s)
+{
+	return s;
+}
+
+void fz_drop_storable(fz_context *ctx, fz_storable *s)
+{
+}
+
+void fz_new_store_context(fz_context *ctx, unsigned int max)
+{
+}
+
+void fz_drop_store_context(fz_context *ctx)
+{
+}
+
+fz_store *fz_keep_store_context(fz_context *ctx)
+{
+	return NULL;
+}
+
+int fz_store_scavenge(fz_context *ctx, unsigned int size, int *phase)
+{
+	return 0;
+}
+
+void fz_new_glyph_cache_context(fz_context *ctx)
+{
+}
+
+void fz_drop_glyph_cache_context(fz_context *ctx)
+{
+}
+
+fz_glyph_cache *fz_keep_glyph_cache(fz_context *ctx)
+{
+	return NULL;
 }

@@ -1,72 +1,84 @@
-#include "fitz.h"
-#include "mupdf.h"
+#include "fitz-internal.h"
+#include "mupdf-internal.h"
 
-fz_error
-pdf_load_pattern(pdf_pattern **patp, pdf_xref *xref, fz_obj *dict)
+pdf_pattern *
+pdf_keep_pattern(fz_context *ctx, pdf_pattern *pat)
 {
-	fz_error error;
-	pdf_pattern *pat;
-	fz_obj *obj;
+	return (pdf_pattern *)fz_keep_storable(ctx, &pat->storable);
+}
 
-	if ((*patp = pdf_find_item(xref->store, pdf_drop_pattern, dict)))
+void
+pdf_drop_pattern(fz_context *ctx, pdf_pattern *pat)
+{
+	fz_drop_storable(ctx, &pat->storable);
+}
+
+static void
+pdf_free_pattern_imp(fz_context *ctx, fz_storable *pat_)
+{
+	pdf_pattern *pat = (pdf_pattern *)pat_;
+
+	if (pat->resources)
+		pdf_drop_obj(pat->resources);
+	if (pat->contents)
+		pdf_drop_obj(pat->contents);
+	fz_free(ctx, pat);
+}
+
+static unsigned int
+pdf_pattern_size(pdf_pattern *pat)
+{
+	if (pat == NULL)
+		return 0;
+	return sizeof(*pat);
+}
+
+pdf_pattern *
+pdf_load_pattern(pdf_document *xref, pdf_obj *dict)
+{
+	pdf_pattern *pat;
+	pdf_obj *obj;
+	fz_context *ctx = xref->ctx;
+
+	if ((pat = pdf_find_item(ctx, pdf_free_pattern_imp, dict)))
 	{
-		pdf_keep_pattern(*patp);
-		return fz_okay;
+		return pat;
 	}
 
-	pat = fz_malloc(sizeof(pdf_pattern));
-	pat->refs = 1;
+	pat = fz_malloc_struct(ctx, pdf_pattern);
+	FZ_INIT_STORABLE(pat, 1, pdf_free_pattern_imp);
 	pat->resources = NULL;
 	pat->contents = NULL;
 
 	/* Store pattern now, to avoid possible recursion if objects refer back to this one */
-	pdf_store_item(xref->store, pdf_keep_pattern, pdf_drop_pattern, dict, pat);
+	pdf_store_item(ctx, dict, pat, pdf_pattern_size(pat));
 
-	pat->ismask = fz_to_int(fz_dict_gets(dict, "PaintType")) == 2;
-	pat->xstep = fz_to_real(fz_dict_gets(dict, "XStep"));
-	pat->ystep = fz_to_real(fz_dict_gets(dict, "YStep"));
+	pat->ismask = pdf_to_int(pdf_dict_gets(dict, "PaintType")) == 2;
+	pat->xstep = pdf_to_real(pdf_dict_gets(dict, "XStep"));
+	pat->ystep = pdf_to_real(pdf_dict_gets(dict, "YStep"));
 
-	obj = fz_dict_gets(dict, "BBox");
-	pat->bbox = pdf_to_rect(obj);
+	obj = pdf_dict_gets(dict, "BBox");
+	pdf_to_rect(ctx, obj, &pat->bbox);
 
-	obj = fz_dict_gets(dict, "Matrix");
+	obj = pdf_dict_gets(dict, "Matrix");
 	if (obj)
-		pat->matrix = pdf_to_matrix(obj);
+		pdf_to_matrix(ctx, obj, &pat->matrix);
 	else
 		pat->matrix = fz_identity;
 
-	pat->resources = fz_dict_gets(dict, "Resources");
+	pat->resources = pdf_dict_gets(dict, "Resources");
 	if (pat->resources)
-		fz_keep_obj(pat->resources);
+		pdf_keep_obj(pat->resources);
 
-	error = pdf_load_stream(&pat->contents, xref, fz_to_num(dict), fz_to_gen(dict));
-	if (error)
+	fz_try(ctx)
 	{
-		pdf_remove_item(xref->store, pdf_drop_pattern, dict);
-		pdf_drop_pattern(pat);
-		return fz_rethrow(error, "cannot load pattern stream (%d %d R)", fz_to_num(dict), fz_to_gen(dict));
+		pat->contents = pdf_keep_obj(dict);
 	}
-
-	*patp = pat;
-	return fz_okay;
-}
-
-pdf_pattern *
-pdf_keep_pattern(pdf_pattern *pat)
-{
-	pat->refs ++;
+	fz_catch(ctx)
+	{
+		pdf_remove_item(ctx, pdf_free_pattern_imp, dict);
+		pdf_drop_pattern(ctx, pat);
+		fz_throw(ctx, "cannot load pattern stream (%d %d R)", pdf_to_num(dict), pdf_to_gen(dict));
+	}
 	return pat;
-}
-
-void
-pdf_drop_pattern(pdf_pattern *pat)
-{
-	if (pat && --pat->refs == 0)
-	{
-		if (pat->resources)
-			fz_drop_obj(pat->resources);
-		if (pat->contents)
-			fz_drop_buffer(pat->contents);
-		fz_free(pat);
-	}
 }

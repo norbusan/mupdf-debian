@@ -1,159 +1,129 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
-enum { LINE_LEN = 160, LINE_COUNT = 25 };
+/* Warning context */
 
-static char warn_message[LINE_LEN] = "";
-static int warn_count = 0;
-
-void fz_flush_warnings(void)
+void fz_var_imp(void *var)
 {
-	if (warn_count > 1)
-		fprintf(stderr, "warning: ... repeated %d times ...\n", warn_count);
-	warn_message[0] = 0;
-	warn_count = 0;
+	UNUSED(var); /* Do nothing */
 }
 
-void fz_warn(char *fmt, ...)
+void fz_flush_warnings(fz_context *ctx)
+{
+	if (ctx->warn->count > 1)
+	{
+		fprintf(stderr, "warning: ... repeated %d times ...\n", ctx->warn->count);
+		LOGE("warning: ... repeated %d times ...\n", ctx->warn->count);
+	}
+	ctx->warn->message[0] = 0;
+	ctx->warn->count = 0;
+}
+
+void fz_warn(fz_context *ctx, const char *fmt, ...)
 {
 	va_list ap;
-	char buf[LINE_LEN];
+	char buf[sizeof ctx->warn->message];
 
 	va_start(ap, fmt);
 	vsnprintf(buf, sizeof buf, fmt, ap);
 	va_end(ap);
 
-	if (!strcmp(buf, warn_message))
+	if (!strcmp(buf, ctx->warn->message))
 	{
-		warn_count++;
+		ctx->warn->count++;
 	}
 	else
 	{
-		fz_flush_warnings();
+		fz_flush_warnings(ctx);
 		fprintf(stderr, "warning: %s\n", buf);
-		fz_strlcpy(warn_message, buf, sizeof warn_message);
-		warn_count = 1;
+		LOGE("warning: %s\n", buf);
+		fz_strlcpy(ctx->warn->message, buf, sizeof ctx->warn->message);
+		ctx->warn->count = 1;
 	}
 }
 
-static char error_message[LINE_COUNT][LINE_LEN];
-static int error_count = 0;
+/* Error context */
 
-static void
-fz_emit_error(char what, char *location, char *message)
+/* When we first setjmp, code is set to 0. Whenever we throw, we add 2 to
+ * this code. Whenever we enter the always block, we add 1.
+ *
+ * fz_push_try sets code to 0.
+ * If (fz_throw called within fz_try)
+ *     fz_throw makes code = 2.
+ *     If (no always block present)
+ *         enter catch region with code = 2. OK.
+ *     else
+ *         fz_always entered as code < 3; Makes code = 3;
+ *         if (fz_throw called within fz_always)
+ *             fz_throw makes code = 5
+ *             fz_always is not reentered.
+ *             catch region entered with code = 5. OK.
+ *         else
+ *             catch region entered with code = 3. OK
+ * else
+ *     if (no always block present)
+ *         catch region not entered as code = 0. OK.
+ *     else
+ *         fz_always entered as code < 3. makes code = 1
+ *         if (fz_throw called within fz_always)
+ *             fz_throw makes code = 3;
+ *             fz_always NOT entered as code >= 3
+ *             catch region entered with code = 3. OK.
+ *         else
+ *             catch region entered with code = 1.
+ */
+
+static void throw(fz_error_context *ex)
 {
-	fz_flush_warnings();
-
-	fprintf(stderr, "%c %s%s\n", what, location, message);
-
-	if (error_count < LINE_COUNT)
-	{
-		fz_strlcpy(error_message[error_count], location, LINE_LEN);
-		fz_strlcat(error_message[error_count], message, LINE_LEN);
-		error_count++;
+	if (ex->top >= 0) {
+		fz_longjmp(ex->stack[ex->top].buffer, ex->stack[ex->top].code + 2);
+	} else {
+		fprintf(stderr, "uncaught exception: %s\n", ex->message);
+		LOGE("uncaught exception: %s\n", ex->message);
+		exit(EXIT_FAILURE);
 	}
 }
 
-int
-fz_get_error_count(void)
+int fz_push_try(fz_error_context *ex)
 {
-	return error_count;
+	assert(ex);
+	ex->top++;
+	/* Normal case, get out of here quick */
+	if (ex->top < nelem(ex->stack)-1)
+		return 1; /* We exit here, and the setjmp sets the code to 0 */
+	/* We reserve the top slot on the exception stack purely to cope with
+	 * the case when we overflow. If we DO hit this, then we 'throw'
+	 * immediately - returning 0 stops the setjmp happening and takes us
+	 * direct to the always/catch clauses. */
+	assert(ex->top == nelem(ex->stack)-1);
+	strcpy(ex->message, "exception stack overflow!");
+	ex->stack[ex->top].code = 2;
+	fprintf(stderr, "error: %s\n", ex->message);
+	LOGE("error: %s\n", ex->message);
+	return 0;
 }
 
-char *
-fz_get_error_line(int n)
+const char *fz_caught(fz_context *ctx)
 {
-	return error_message[n];
+	assert(ctx);
+	assert(ctx->error);
+	return ctx->error->message;
 }
 
-fz_error
-fz_throw_imp(const char *file, int line, const char *func, char *fmt, ...)
+void fz_throw(fz_context *ctx, const char *fmt, ...)
 {
-	va_list ap;
-	char one[LINE_LEN], two[LINE_LEN];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(ctx->error->message, sizeof ctx->error->message, fmt, args);
+	va_end(args);
 
-	error_count = 0;
+	fz_flush_warnings(ctx);
+	fprintf(stderr, "error: %s\n", ctx->error->message);
+	LOGE("error: %s\n", ctx->error->message);
 
-	snprintf(one, sizeof one, "%s:%d: %s(): ", file, line, func);
-	va_start(ap, fmt);
-	vsnprintf(two, sizeof two, fmt, ap);
-	va_end(ap);
-
-	fz_emit_error('+', one, two);
-
-	return -1;
+	throw(ctx->error);
 }
 
-fz_error
-fz_rethrow_imp(const char *file, int line, const char *func, fz_error cause, char *fmt, ...)
+void fz_rethrow(fz_context *ctx)
 {
-	va_list ap;
-	char one[LINE_LEN], two[LINE_LEN];
-
-	snprintf(one, sizeof one, "%s:%d: %s(): ", file, line, func);
-	va_start(ap, fmt);
-	vsnprintf(two, sizeof two, fmt, ap);
-	va_end(ap);
-
-	fz_emit_error('|', one, two);
-
-	return cause;
-}
-
-void
-fz_catch_imp(const char *file, int line, const char *func, fz_error cause, char *fmt, ...)
-{
-	va_list ap;
-	char one[LINE_LEN], two[LINE_LEN];
-
-	snprintf(one, sizeof one, "%s:%d: %s(): ", file, line, func);
-	va_start(ap, fmt);
-	vsnprintf(two, sizeof two, fmt, ap);
-	va_end(ap);
-
-	fz_emit_error('\\', one, two);
-}
-
-fz_error
-fz_throw_impx(char *fmt, ...)
-{
-	va_list ap;
-	char buf[LINE_LEN];
-
-	error_count = 0;
-
-	va_start(ap, fmt);
-	vsnprintf(buf, sizeof buf, fmt, ap);
-	va_end(ap);
-
-	fz_emit_error('+', "", buf);
-
-	return -1;
-}
-
-fz_error
-fz_rethrow_impx(fz_error cause, char *fmt, ...)
-{
-	va_list ap;
-	char buf[LINE_LEN];
-
-	va_start(ap, fmt);
-	vsnprintf(buf, sizeof buf, fmt, ap);
-	va_end(ap);
-
-	fz_emit_error('|', "", buf);
-
-	return cause;
-}
-
-void
-fz_catch_impx(fz_error cause, char *fmt, ...)
-{
-	va_list ap;
-	char buf[LINE_LEN];
-
-	va_start(ap, fmt);
-	vsnprintf(buf, sizeof buf, fmt, ap);
-	va_end(ap);
-
-	fz_emit_error('\\', "", buf);
+	throw(ctx->error);
 }

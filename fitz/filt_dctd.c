@@ -1,4 +1,4 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
 #include <jpeglib.h>
 #include <setjmp.h>
@@ -8,9 +8,11 @@ typedef struct fz_dctd_s fz_dctd;
 struct fz_dctd_s
 {
 	fz_stream *chain;
+	fz_context *ctx;
 	int color_transform;
 	int init;
 	int stride;
+	int l2factor;
 	unsigned char *scanline;
 	unsigned char *rp, *wp;
 	struct jpeg_decompress_struct cinfo;
@@ -42,16 +44,24 @@ static boolean fill_input_buffer(j_decompress_ptr cinfo)
 	struct jpeg_source_mgr *src = cinfo->src;
 	fz_dctd *state = cinfo->client_data;
 	fz_stream *chain = state->chain;
+	fz_context *ctx = chain->ctx;
 
 	chain->rp = chain->wp;
-	fz_fill_buffer(chain);
+	fz_try(ctx)
+	{
+		fz_fill_buffer(chain);
+	}
+	fz_catch(ctx)
+	{
+		return 0;
+	}
 	src->next_input_byte = chain->rp;
 	src->bytes_in_buffer = chain->wp - chain->rp;
 
 	if (src->bytes_in_buffer == 0)
 	{
 		static unsigned char eoi[2] = { 0xFF, JPEG_EOI };
-		fz_warn("premature end of file in jpeg");
+		fz_warn(state->ctx, "premature end of file in jpeg");
 		src->next_input_byte = eoi;
 		src->bytes_in_buffer = 2;
 	}
@@ -86,16 +96,22 @@ read_dctd(fz_stream *stm, unsigned char *buf, int len)
 	{
 		if (cinfo->src)
 			state->chain->rp = state->chain->wp - cinfo->src->bytes_in_buffer;
-		return fz_throw("jpeg error: %s", state->msg);
+		fz_throw(stm->ctx, "jpeg error: %s", state->msg);
 	}
 
 	if (!state->init)
 	{
+		int c;
 		cinfo->client_data = state;
 		cinfo->err = &state->errmgr;
 		jpeg_std_error(cinfo->err);
 		cinfo->err->error_exit = error_exit;
 		jpeg_create_decompress(cinfo);
+		state->init = 1;
+
+		/* Skip over any stray returns at the start of the stream */
+		while ((c = fz_peek_byte(state->chain)) == '\n' || c == '\r')
+			(void)fz_read_byte(state->chain);
 
 		cinfo->src = &state->srcmgr;
 		cinfo->src->init_source = init_source;
@@ -141,14 +157,15 @@ read_dctd(fz_stream *stm, unsigned char *buf, int len)
 			break;
 		}
 
+		cinfo->scale_num = 8/(1<<state->l2factor);
+		cinfo->scale_denom = 8;
+
 		jpeg_start_decompress(cinfo);
 
 		state->stride = cinfo->output_width * cinfo->output_components;
-		state->scanline = fz_malloc(state->stride);
+		state->scanline = fz_malloc(state->ctx, state->stride);
 		state->rp = state->scanline;
 		state->wp = state->scanline;
-
-		state->init = 1;
 	}
 
 	while (state->rp < state->wp && p < ep)
@@ -179,14 +196,13 @@ read_dctd(fz_stream *stm, unsigned char *buf, int len)
 }
 
 static void
-close_dctd(fz_stream *stm)
+close_dctd(fz_context *ctx, void *state_)
 {
-	fz_dctd *state = stm->state;
+	fz_dctd *state = (fz_dctd *)state_;
 
 	if (setjmp(state->jb))
 	{
-		state->chain->rp = state->chain->wp - state->cinfo.src->bytes_in_buffer;
-		fz_warn("jpeg error: %s", state->msg);
+		fz_warn(ctx, "jpeg error: %s", state->msg);
 		goto skip;
 	}
 
@@ -194,28 +210,46 @@ close_dctd(fz_stream *stm)
 		jpeg_finish_decompress(&state->cinfo);
 
 skip:
-	state->chain->rp = state->chain->wp - state->cinfo.src->bytes_in_buffer;
-	jpeg_destroy_decompress(&state->cinfo);
-	fz_free(state->scanline);
+	if (state->cinfo.src)
+		state->chain->rp = state->chain->wp - state->cinfo.src->bytes_in_buffer;
+	if (state->init)
+		jpeg_destroy_decompress(&state->cinfo);
+
+	fz_free(ctx, state->scanline);
 	fz_close(state->chain);
-	fz_free(state);
+	fz_free(ctx, state);
+}
+
+/* Default: color_transform = -1 (unset) */
+fz_stream *
+fz_open_dctd(fz_stream *chain, int color_transform)
+{
+	return fz_open_resized_dctd(chain, color_transform, 0);
 }
 
 fz_stream *
-fz_open_dctd(fz_stream *chain, fz_obj *params)
+fz_open_resized_dctd(fz_stream *chain, int color_transform, int l2factor)
 {
-	fz_dctd *state;
-	fz_obj *obj;
+	fz_context *ctx = chain->ctx;
+	fz_dctd *state = NULL;
 
-	state = fz_malloc(sizeof(fz_dctd));
-	memset(state, 0, sizeof(fz_dctd));
-	state->chain = chain;
-	state->color_transform = -1; /* unset */
-	state->init = 0;
+	fz_var(state);
 
-	obj = fz_dict_gets(params, "ColorTransform");
-	if (obj)
-		state->color_transform = fz_to_int(obj);
+	fz_try(ctx)
+	{
+		state = fz_malloc_struct(chain->ctx, fz_dctd);
+		state->ctx = ctx;
+		state->chain = chain;
+		state->color_transform = color_transform;
+		state->init = 0;
+		state->l2factor = l2factor;
+	}
+	fz_catch(ctx)
+	{
+		fz_free(ctx, state);
+		fz_close(chain);
+		fz_rethrow(ctx);
+	}
 
-	return fz_new_stream(state, read_dctd, close_dctd);
+	return fz_new_stream(ctx, state, read_dctd, close_dctd);
 }

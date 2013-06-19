@@ -1,57 +1,98 @@
-#include "fitz.h"
-#include "muxps.h"
+#include "muxps-internal.h"
 
-static int
-xps_decode_image(fz_pixmap **imagep, byte *buf, int len)
+typedef struct xps_image_s xps_image;
+
+struct xps_image_s
 {
-	int error;
-
-	if (len < 8)
-		return fz_throw("unknown image file format");
-
-	if (buf[0] == 0xff && buf[1] == 0xd8)
-	{
-		error = xps_decode_jpeg(imagep, buf, len);
-		if (error)
-			return fz_rethrow(error, "cannot decode jpeg image");
-	}
-	else if (memcmp(buf, "\211PNG\r\n\032\n", 8) == 0)
-	{
-		error = xps_decode_png(imagep, buf, len);
-		if (error)
-			return fz_rethrow(error, "cannot decode png image");
-	}
-	else if (memcmp(buf, "II", 2) == 0 && buf[2] == 0xBC)
-	{
-		return fz_throw("JPEG-XR codec is not available");
-	}
-	else if (memcmp(buf, "MM", 2) == 0 || memcmp(buf, "II", 2) == 0)
-	{
-		error = xps_decode_tiff(imagep, buf, len);
-		if (error)
-			return fz_rethrow(error, "cannot decode TIFF image");
-	}
-	else
-		return fz_throw("unknown image file format");
-
-	return fz_okay;
-}
+	fz_image base;
+	fz_pixmap *pix;
+	int xres;
+	int yres;
+};
 
 static void
-xps_paint_image_brush(xps_context *ctx, fz_matrix ctm, fz_rect area, char *base_uri, xps_resource *dict,
-	xml_element *root, void *vimage)
+xps_free_image(fz_context *ctx, fz_storable *image_)
 {
-	fz_pixmap *pixmap = vimage;
-	float xs = pixmap->w * 96 / pixmap->xres;
-	float ys = pixmap->h * 96 / pixmap->yres;
-	fz_matrix im = fz_scale(xs, -ys);
-	im.f = ys;
-	ctm = fz_concat(im, ctm);
-	fz_fill_image(ctx->dev, pixmap, ctm, ctx->opacity[ctx->opacity_top]);
+	xps_image *image = (xps_image *)image_;
+
+	if (image == NULL)
+		return;
+
+	fz_drop_colorspace(ctx, image->base.colorspace);
+	fz_drop_pixmap(ctx, image->pix);
+	fz_free(ctx, image);
+}
+
+static fz_pixmap *
+xps_image_to_pixmap(fz_context *ctx, fz_image *image_, int x, int w)
+{
+	xps_image *image = (xps_image *)image_;
+
+	return fz_keep_pixmap(ctx, image->pix);
+}
+
+static fz_image *
+xps_load_image(fz_context *ctx, byte *buf, int len)
+{
+	fz_pixmap *pix;
+	xps_image *image;
+
+	if (len < 8)
+		fz_throw(ctx, "unknown image file format");
+
+	if (buf[0] == 0xff && buf[1] == 0xd8)
+		pix = fz_load_jpeg(ctx, buf, len);
+	else if (memcmp(buf, "\211PNG\r\n\032\n", 8) == 0)
+		pix = fz_load_png(ctx, buf, len);
+	else if (memcmp(buf, "II", 2) == 0 && buf[2] == 0xBC)
+		fz_throw(ctx, "JPEG-XR codec is not available");
+	else if (memcmp(buf, "MM", 2) == 0 || memcmp(buf, "II", 2) == 0)
+		pix = fz_load_tiff(ctx, buf, len);
+	else
+		fz_throw(ctx, "unknown image file format");
+
+	fz_try(ctx)
+	{
+		image = fz_malloc_struct(ctx, xps_image);
+
+		FZ_INIT_STORABLE(&image->base, 1, xps_free_image);
+		image->base.w = pix->w;
+		image->base.h = pix->h;
+		image->base.mask = NULL;
+		image->base.colorspace = pix->colorspace;
+		image->base.get_pixmap = xps_image_to_pixmap;
+		image->xres = pix->xres;
+		image->yres = pix->yres;
+		image->pix = pix;
+	}
+	fz_catch(ctx)
+	{
+		fz_drop_pixmap(ctx, pix);
+		fz_rethrow(ctx);
+	}
+
+	return &image->base;
+}
+
+/* FIXME: area unused! */
+static void
+xps_paint_image_brush(xps_document *doc, const fz_matrix *ctm, const fz_rect *area, char *base_uri, xps_resource *dict,
+	fz_xml *root, void *vimage)
+{
+	xps_image *image = vimage;
+	float xs, ys;
+	fz_matrix local_ctm = *ctm;
+
+	if (image->xres == 0 || image->yres == 0)
+		return;
+	xs = image->base.w * 96 / image->xres;
+	ys = image->base.h * 96 / image->yres;
+	fz_pre_scale(&local_ctm, xs, ys);
+	fz_fill_image(doc->dev, &image->base, &local_ctm, doc->opacity[doc->opacity_top]);
 }
 
 static xps_part *
-xps_find_image_brush_source_part(xps_context *ctx, char *base_uri, xml_element *root)
+xps_find_image_brush_source_part(xps_document *doc, char *base_uri, fz_xml *root)
 {
 	char *image_source_att;
 	char buf[1024];
@@ -60,9 +101,9 @@ xps_find_image_brush_source_part(xps_context *ctx, char *base_uri, xml_element *
 	char *profile_name;
 	char *p;
 
-	image_source_att = xml_att(root, "ImageSource");
+	image_source_att = fz_xml_att(root, "ImageSource");
 	if (!image_source_att)
-		return NULL;
+		fz_throw(doc->ctx, "cannot find image source attribute");
 
 	/* "{ColorConvertedBitmap /Resources/Image.tiff /Resources/Profile.icc}" */
 	if (strstr(image_source_att, "{ColorConvertedBitmap") == image_source_att)
@@ -93,36 +134,45 @@ xps_find_image_brush_source_part(xps_context *ctx, char *base_uri, xml_element *
 	}
 
 	if (!image_name)
-		return NULL;
+		fz_throw(doc->ctx, "cannot find image source");
 
-	xps_absolute_path(partname, base_uri, image_name, sizeof partname);
+	xps_resolve_url(partname, base_uri, image_name, sizeof partname);
 
-	return xps_read_part(ctx, partname);
+	return xps_read_part(doc, partname);
 }
 
 void
-xps_parse_image_brush(xps_context *ctx, fz_matrix ctm, fz_rect area,
-	char *base_uri, xps_resource *dict, xml_element *root)
+xps_parse_image_brush(xps_document *doc, const fz_matrix *ctm, const fz_rect *area,
+	char *base_uri, xps_resource *dict, fz_xml *root)
 {
 	xps_part *part;
-	fz_pixmap *image;
-	int code;
+	fz_image *image;
 
-	part = xps_find_image_brush_source_part(ctx, base_uri, root);
-	if (!part) {
-		fz_warn("cannot find image source");
+	fz_try(doc->ctx)
+	{
+		part = xps_find_image_brush_source_part(doc, base_uri, root);
+	}
+	fz_catch(doc->ctx)
+	{
+		fz_warn(doc->ctx, "cannot find image source");
 		return;
 	}
 
-	code = xps_decode_image(&image, part->data, part->size);
-	if (code < 0) {
-		xps_free_part(ctx, part);
-		fz_catch(-1, "cannot decode image resource");
+	fz_try(doc->ctx)
+	{
+		image = xps_load_image(doc->ctx, part->data, part->size);
+	}
+	fz_always(doc->ctx)
+	{
+		xps_free_part(doc, part);
+	}
+	fz_catch(doc->ctx)
+	{
+		fz_warn(doc->ctx, "cannot decode image resource");
 		return;
 	}
 
-	xps_parse_tiling_brush(ctx, ctm, area, base_uri, dict, root, xps_paint_image_brush, image);
+	xps_parse_tiling_brush(doc, ctm, area, base_uri, dict, root, xps_paint_image_brush, image);
 
-	fz_drop_pixmap(image);
-	xps_free_part(ctx, part);
+	fz_drop_image(doc->ctx, image);
 }

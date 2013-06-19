@@ -1,4 +1,4 @@
-#include "fitz.h"
+#include "fitz-internal.h"
 
 /* PDF 1.4 blend modes. These are slow. */
 
@@ -24,7 +24,7 @@ static const char *fz_blendmode_names[] =
 	"Luminosity",
 };
 
-int fz_find_blendmode(char *name)
+int fz_lookup_blendmode(char *name)
 {
 	int i;
 	for (i = 0; i < nelem(fz_blendmode_names); i++)
@@ -63,12 +63,12 @@ static inline int fz_overlay_byte(int b, int s)
 
 static inline int fz_darken_byte(int b, int s)
 {
-	return MIN(b, s);
+	return fz_mini(b, s);
 }
 
 static inline int fz_lighten_byte(int b, int s)
 {
-	return MAX(b, s);
+	return fz_maxi(b, s);
 }
 
 static inline int fz_color_dodge_byte(int b, int s)
@@ -111,7 +111,7 @@ static inline int fz_soft_light_byte(int b, int s)
 
 static inline int fz_difference_byte(int b, int s)
 {
-	return ABS(b - s);
+	return fz_absi(b - s);
 }
 
 static inline int fz_exclusion_byte(int b, int s)
@@ -122,7 +122,7 @@ static inline int fz_exclusion_byte(int b, int s)
 /* Non-separable blend modes */
 
 static void
-fz_luminosity_rgb(int *rd, int *gd, int *bd, int rb, int gb, int bb, int rs, int gs, int bs)
+fz_luminosity_rgb(unsigned char *rd, unsigned char *gd, unsigned char *bd, int rb, int gb, int bb, int rs, int gs, int bs)
 {
 	int delta, scale;
 	int r, g, b, y;
@@ -139,27 +139,27 @@ fz_luminosity_rgb(int *rd, int *gd, int *bd, int rb, int gb, int bb, int rs, int
 		if (delta > 0)
 		{
 			int max;
-			max = MAX(r, MAX(g, b));
-			scale = ((255 - y) << 16) / (max - y);
+			max = fz_maxi(r, fz_maxi(g, b));
+			scale = (max == y ? 0 : ((255 - y) << 16) / (max - y));
 		}
 		else
 		{
 			int min;
-			min = MIN(r, MIN(g, b));
-			scale = (y << 16) / (y - min);
+			min = fz_mini(r, fz_mini(g, b));
+			scale = (y == min ? 0 : (y << 16) / (y - min));
 		}
 		r = y + (((r - y) * scale + 0x8000) >> 16);
 		g = y + (((g - y) * scale + 0x8000) >> 16);
 		b = y + (((b - y) * scale + 0x8000) >> 16);
 	}
 
-	*rd = r;
-	*gd = g;
-	*bd = b;
+	*rd = fz_clampi(r, 0, 255);
+	*gd = fz_clampi(g, 0, 255);
+	*bd = fz_clampi(b, 0, 255);
 }
 
 static void
-fz_saturation_rgb(int *rd, int *gd, int *bd, int rb, int gb, int bb, int rs, int gs, int bs)
+fz_saturation_rgb(unsigned char *rd, unsigned char *gd, unsigned char *bd, int rb, int gb, int bb, int rs, int gs, int bs)
 {
 	int minb, maxb;
 	int mins, maxs;
@@ -167,19 +167,20 @@ fz_saturation_rgb(int *rd, int *gd, int *bd, int rb, int gb, int bb, int rs, int
 	int scale;
 	int r, g, b;
 
-	minb = MIN(rb, MIN(gb, bb));
-	maxb = MAX(rb, MAX(gb, bb));
+	minb = fz_mini(rb, fz_mini(gb, bb));
+	maxb = fz_maxi(rb, fz_maxi(gb, bb));
 	if (minb == maxb)
 	{
 		/* backdrop has zero saturation, avoid divide by 0 */
+		gb = fz_clampi(gb, 0, 255);
 		*rd = gb;
 		*gd = gb;
 		*bd = gb;
 		return;
 	}
 
-	mins = MIN(rs, MIN(gs, bs));
-	maxs = MAX(rs, MAX(gs, bs));
+	mins = fz_mini(rs, fz_mini(gs, bs));
+	maxs = fz_maxi(rs, fz_maxi(gs, bs));
 
 	scale = ((maxs - mins) << 16) / (maxb - minb);
 	y = (rb * 77 + gb * 151 + bb * 28 + 0x80) >> 8;
@@ -192,8 +193,8 @@ fz_saturation_rgb(int *rd, int *gd, int *bd, int rb, int gb, int bb, int rs, int
 		int scalemin, scalemax;
 		int min, max;
 
-		min = MIN(r, MIN(g, b));
-		max = MAX(r, MAX(g, b));
+		min = fz_mini(r, fz_mini(g, b));
+		max = fz_maxi(r, fz_maxi(g, b));
 
 		if (min < 0)
 			scalemin = (y << 16) / (y - min);
@@ -205,29 +206,63 @@ fz_saturation_rgb(int *rd, int *gd, int *bd, int rb, int gb, int bb, int rs, int
 		else
 			scalemax = 0x10000;
 
-		scale = MIN(scalemin, scalemax);
+		scale = fz_mini(scalemin, scalemax);
 		r = y + (((r - y) * scale + 0x8000) >> 16);
 		g = y + (((g - y) * scale + 0x8000) >> 16);
 		b = y + (((b - y) * scale + 0x8000) >> 16);
 	}
 
-	*rd = r;
-	*gd = g;
-	*bd = b;
+	*rd = fz_clampi(r, 0, 255);
+	*gd = fz_clampi(g, 0, 255);
+	*bd = fz_clampi(b, 0, 255);
 }
 
 static void
-fz_color_rgb(int *rr, int *rg, int *rb, int br, int bg, int bb, int sr, int sg, int sb)
+fz_color_rgb(unsigned char *rr, unsigned char *rg, unsigned char *rb, int br, int bg, int bb, int sr, int sg, int sb)
 {
 	fz_luminosity_rgb(rr, rg, rb, sr, sg, sb, br, bg, bb);
 }
 
 static void
-fz_hue_rgb(int *rr, int *rg, int *rb, int br, int bg, int bb, int sr, int sg, int sb)
+fz_hue_rgb(unsigned char *rr, unsigned char *rg, unsigned char *rb, int br, int bg, int bb, int sr, int sg, int sb)
 {
-	int tr, tg, tb;
+	unsigned char tr, tg, tb;
 	fz_luminosity_rgb(&tr, &tg, &tb, sr, sg, sb, br, bg, bb);
 	fz_saturation_rgb(rr, rg, rb, tr, tg, tb, br, bg, bb);
+}
+
+void
+fz_blend_pixel(unsigned char dp[3], unsigned char bp[3], unsigned char sp[3], int blendmode)
+{
+	int k;
+	/* non-separable blend modes */
+	switch (blendmode)
+	{
+	case FZ_BLEND_HUE: fz_hue_rgb(&dp[0], &dp[1], &dp[2], bp[0], bp[1], bp[2], sp[0], sp[1], sp[2]); return;
+	case FZ_BLEND_SATURATION: fz_saturation_rgb(&dp[0], &dp[1], &dp[2], bp[0], bp[1], bp[2], sp[0], sp[1], sp[2]); return;
+	case FZ_BLEND_COLOR: fz_color_rgb(&dp[0], &dp[1], &dp[2], bp[0], bp[1], bp[2], sp[0], sp[1], sp[2]); return;
+	case FZ_BLEND_LUMINOSITY: fz_luminosity_rgb(&dp[0], &dp[1], &dp[2], bp[0], bp[1], bp[2], sp[0], sp[1], sp[2]); return;
+	}
+	/* separable blend modes */
+	for (k = 0; k < 3; k++)
+	{
+		switch (blendmode)
+		{
+		default:
+		case FZ_BLEND_NORMAL: dp[k] = sp[k]; break;
+		case FZ_BLEND_MULTIPLY: dp[k] = fz_mul255(bp[k], sp[k]); break;
+		case FZ_BLEND_SCREEN: dp[k] = fz_screen_byte(bp[k], sp[k]); break;
+		case FZ_BLEND_OVERLAY: dp[k] = fz_overlay_byte(bp[k], sp[k]); break;
+		case FZ_BLEND_DARKEN: dp[k] = fz_darken_byte(bp[k], sp[k]); break;
+		case FZ_BLEND_LIGHTEN: dp[k] = fz_lighten_byte(bp[k], sp[k]); break;
+		case FZ_BLEND_COLOR_DODGE: dp[k] = fz_color_dodge_byte(bp[k], sp[k]); break;
+		case FZ_BLEND_COLOR_BURN: dp[k] = fz_color_burn_byte(bp[k], sp[k]); break;
+		case FZ_BLEND_HARD_LIGHT: dp[k] = fz_hard_light_byte(bp[k], sp[k]); break;
+		case FZ_BLEND_SOFT_LIGHT: dp[k] = fz_soft_light_byte(bp[k], sp[k]); break;
+		case FZ_BLEND_DIFFERENCE: dp[k] = fz_difference_byte(bp[k], sp[k]); break;
+		case FZ_BLEND_EXCLUSION: dp[k] = fz_exclusion_byte(bp[k], sp[k]); break;
+		}
+	}
 }
 
 /* Blending loops */
@@ -285,7 +320,7 @@ fz_blend_nonseparable(byte * restrict bp, byte * restrict sp, int w, int blendmo
 {
 	while (w--)
 	{
-		int rr, rg, rb;
+		unsigned char rr, rg, rb;
 
 		int sa = sp[3];
 		int ba = bp[3];
@@ -364,37 +399,64 @@ fz_blend_separable_nonisolated(byte * restrict bp, byte * restrict sp, int n, in
 		int ha = *hp++;
 		int haa = fz_mul255(ha, alpha); /* ha = shape_alpha */
 		/* If haa == 0 then leave everything unchanged */
-		if (haa != 0)
+		while (haa != 0) /* Use while, so we can break out */
 		{
-			int sa = sp[n1];
-			int ba = bp[n1];
-			int baha = fz_mul255(ba, haa);
+			int sa, ba, bahaa, ra, invsa, invba, invha, invra;
+			sa = sp[n1];
+			if (sa == 0)
+				break; /* No change! */
+			invsa = sa ? 255 * 256 / sa : 0;
+			ba = bp[n1];
+			if (ba == 0)
+			{
+				/* Just copy pixels (allowing for change in
+				 * premultiplied alphas) */
+				for (k = 0; k < n1; k++)
+				{
+					bp[k] = fz_mul255((sp[k] * invsa) >> 8, haa);
+				}
+				bp[n1] = haa;
+				break;
+			}
+			bahaa = fz_mul255(ba, haa);
 
 			/* ugh, division to get non-premul components */
-			int invsa = sa ? 255 * 256 / sa : 0;
-			int invba = ba ? 255 * 256 / ba : 0;
+			invba = ba ? 255 * 256 / ba : 0;
 
-			/* Calculate result_alpha */
-			int ra = bp[n1] = ba - baha + haa;
-
+			/* Calculate result_alpha - a combination of the
+			 * background alpha, and 'shape' */
+			ra = bp[n1] = ba - bahaa + haa;
+			if (ra == 0)
+				break;
 			/* Because we are a non-isolated group, we need to
 			 * 'uncomposite' before we blend (recomposite).
 			 * We assume that normal blending has been done inside
-			 * the group, so:   ra.rc = (1-ha).bc + ha.sc
+			 * the group, so: rc = (1-ha).bc + ha.sc
 			 * A bit of rearrangement, and that gives us that:
-			 *  sc = (ra.rc - bc)/ha + bc
-			 * Now, the result of the blend was stored in src, so:
+			 * sc = (rc - bc)/ha + bc
+			 * Now, the result of the blend (rc) was stored in src, so
+			 * we actually want to calculate:
+			 * sc = (sc-bc)/ha + bc
 			 */
-			int invha = ha ? 255 * 256 / ha : 0;
+			invha = ha ? 255 * 256 / ha : 0;
+			invra = ra ? 255 * 256 / ra : 0;
 
-			if (ra != 0) for (k = 0; k < n1; k++)
+			/* sa = the final alpha to blend with - this
+			 * is calculated from the shape + alpha,
+			 * divided by ra. */
+			sa = (haa*invra + 128)>>8;
+			if (sa < 0) sa = 0;
+			if (sa > 255) sa = 255;
+
+			for (k = 0; k < n1; k++)
 			{
-				int sc = (sp[k] * invsa) >> 8;
-				int bc = (bp[k] * invba) >> 8;
+				/* Read pixels (and convert to non-premultiplied form) */
+				int sc = (sp[k] * invsa + 128) >> 8;
+				int bc = (bp[k] * invba + 128) >> 8;
 				int rc;
 
-				/* Uncomposite */
-				sc = (((sc-bc)*invha)>>8) + bc;
+				/* Uncomposite (see above) */
+				sc = (((sc-bc) * invha + 128)>>8) + bc;
 				if (sc < 0) sc = 0;
 				if (sc > 255) sc = 255;
 
@@ -414,11 +476,15 @@ fz_blend_separable_nonisolated(byte * restrict bp, byte * restrict sp, int n, in
 				case FZ_BLEND_DIFFERENCE: rc = fz_difference_byte(bc, sc); break;
 				case FZ_BLEND_EXCLUSION: rc = fz_exclusion_byte(bc, sc); break;
 				}
-				rc = fz_mul255(255 - haa, bc) + fz_mul255(fz_mul255(255 - ba, sc), haa) + fz_mul255(baha, rc);
+				/* Composition formula, as given in pdf_reference17.pdf:
+				 * rc = ( 1 - (ha/ra)) * bc + (ha/ra) * ((1-ba)*sc + ba * rc)
+				 */
+				rc = bc + fz_mul255(sa, fz_mul255(255 - ba, sc) + fz_mul255(ba, rc) - bc);
 				if (rc < 0) rc = 0;
 				if (rc > 255) rc = 255;
 				bp[k] = fz_mul255(rc, ra);
 			}
+			break;
 		}
 
 		sp += n;
@@ -447,14 +513,14 @@ fz_blend_nonseparable_nonisolated(byte * restrict bp, byte * restrict sp, int w,
 				 * need to 'uncomposite' before we blend
 				 * (recomposite). We assume that normal
 				 * blending has been done inside the group,
-				 * so:     ra.rc = (1-ha).bc + ha.sc
+				 * so: ra.rc = (1-ha).bc + ha.sc
 				 * A bit of rearrangement, and that gives us
-				 * that:   sc = (ra.rc - bc)/ha + bc
+				 * that: sc = (ra.rc - bc)/ha + bc
 				 * Now, the result of the blend was stored in
 				 * src, so: */
 				int invha = ha ? 255 * 256 / ha : 0;
 
-				int rr, rg, rb;
+				unsigned char rr, rg, rb;
 
 				/* ugh, division to get non-premul components */
 				int invsa = sa ? 255 * 256 / sa : 0;
@@ -508,7 +574,8 @@ void
 fz_blend_pixmap(fz_pixmap *dst, fz_pixmap *src, int alpha, int blendmode, int isolated, fz_pixmap *shape)
 {
 	unsigned char *sp, *dp;
-	fz_bbox bbox;
+	fz_irect bbox;
+	fz_irect bbox2;
 	int x, y, w, h, n;
 
 	/* TODO: fix this hack! */
@@ -523,8 +590,9 @@ fz_blend_pixmap(fz_pixmap *dst, fz_pixmap *src, int alpha, int blendmode, int is
 		}
 	}
 
-	bbox = fz_bound_pixmap(dst);
-	bbox = fz_intersect_bbox(bbox, fz_bound_pixmap(src));
+	fz_pixmap_bbox_no_ctx(dst, &bbox);
+	fz_pixmap_bbox_no_ctx(src, &bbox2);
+	fz_intersect_irect(&bbox, &bbox2);
 
 	x = bbox.x0;
 	y = bbox.y0;
@@ -532,14 +600,14 @@ fz_blend_pixmap(fz_pixmap *dst, fz_pixmap *src, int alpha, int blendmode, int is
 	h = bbox.y1 - bbox.y0;
 
 	n = src->n;
-	sp = src->samples + ((y - src->y) * src->w + (x - src->x)) * n;
-	dp = dst->samples + ((y - dst->y) * dst->w + (x - dst->x)) * n;
+	sp = src->samples + (unsigned int)(((y - src->y) * src->w + (x - src->x)) * n);
+	dp = dst->samples + (unsigned int)(((y - dst->y) * dst->w + (x - dst->x)) * n);
 
 	assert(src->n == dst->n);
 
 	if (!isolated)
 	{
-		unsigned char *hp = shape->samples + (y - shape->y) * shape->w + (x - shape->x);
+		unsigned char *hp = shape->samples + (unsigned int)((y - shape->y) * shape->w + (x - shape->x));
 
 		while (h--)
 		{
