@@ -1,3 +1,10 @@
+mupdf (1.2-2) unstable; urgency=low
+
+  * Upload to unstable
+  * Fix build with openjpeg 1.3.
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Thu, 20 Jun 2013 22:54:51 +0800
+
 mupdf (1.2-1) experimental; urgency=low
 
   [ Quoc-Viet Nguyen ]

@@ -1,7 +1,8 @@
 ---
- Makefile  |    2 +-
- Makerules |    2 +-
- 2 files changed, 2 insertions(+), 2 deletions(-)
+ Makefile         |    2 +-
+ Makerules        |    2 +-
+ fitz/image_jpx.c |    3 +++
+ 3 files changed, 5 insertions(+), 2 deletions(-)
 
 --- a/Makefile
 +++ b/Makefile
@@ -21,7 +22,21 @@
  ifeq "$(OS)" "Linux"
  SYS_FREETYPE_INC := `pkg-config --cflags freetype2`
 -SYS_OPENJPEG_INC := `pkg-config --cflags libopenjpeg`
-+SYS_OPENJPEG_INC := `pkg-config --cflags libopenjpeg1`
++SYS_OPENJPEG_INC := `if pkg-config --exists libopenjpeg1; then pkg-config --cflags libopenjpeg1; else echo "-L/usr/include"; fi`
  X11_LIBS := -lX11 -lXext
  endif
  
+--- a/fitz/image_jpx.c
++++ b/fitz/image_jpx.c
+@@ -50,8 +50,11 @@
+ 	evtmgr.info_handler = fz_opj_info_callback;
+ 
+ 	opj_set_default_decoder_parameters(&params);
++#ifdef OPJ_DPARAMETERS_IGNORE_PCLR_CMAP_CDEF_FLAG
++	/* Only openjpeg 1.5 support this */
+ 	if (indexed)
+ 		params.flags |= OPJ_DPARAMETERS_IGNORE_PCLR_CMAP_CDEF_FLAG;
++#endif
+ 
+ 	info = opj_create_decompress(format);
+ 	opj_set_event_mgr((opj_common_ptr)info, &evtmgr, ctx);
