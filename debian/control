@@ -40,9 +40,5 @@ Description: commmand line tools for the MuPDF viewer
  MuPDF is a lightweight PDF viewer and toolkit written in portable C.
  .
  This package contains command line tools using the MuPDF library:
- .
- pdfdraw to render pages to image files.
- .
- pdfshow to examine objects in a PDF file.
- .
- pdfclean to decompress and pretty print streams and objects in PDF files.
+  - mutool - tool for clean, extract, inspect PDF documents.
+  - mudraw - render PDF/XPS/CBZ documents.
