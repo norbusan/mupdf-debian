@@ -1,3 +1,10 @@
+mupdf (1.3-1) unstable; urgency=low
+
+  * New upstream release.
+  * Remove fix_compiling_1.2.patch
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Mon, 25 Nov 2013 01:38:45 +0800
+
 mupdf (1.2-2) unstable; urgency=low
 
   * Upload to unstable
@@ -14,7 +21,7 @@ mupdf (1.2-1) experimental; urgency=low
     - Increased openjpeg version dependency to 1.5.
     - New binary `mutool' now includes most mupdf tools. (Closes: #656267).
   * Use debian/watch from Bart Martens.
-  
+
   [ Kan-Ru Chen (陳侃如) ]
   * Add Quoc-Viet Nguyen as co-maintainer. Congratulations!
   * Bump Standards-Version to 3.9.4, no changes needed
