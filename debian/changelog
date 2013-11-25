@@ -1,3 +1,9 @@
+mupdf (0.9-2+deb7u2) wheezy-security; urgency=high
+
+  * Fix header mismatch with libjpeg-dev.
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Wed, 04 Jun 2014 22:46:25 +0800
+
 mupdf (0.9-2+deb7u1) wheezy-security; urgency=high
 
   * Backport fix of CVE-2014-2013: Stack-based Buffer Overflow in
