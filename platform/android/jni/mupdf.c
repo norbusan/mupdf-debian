@@ -42,7 +42,8 @@ enum
 	NONE,
 	TEXT,
 	LISTBOX,
-	COMBOBOX
+	COMBOBOX,
+	SIGNATURE
 };
 
 typedef struct rect_node_s rect_node;
@@ -198,6 +199,9 @@ static void alerts_init(globals *glo)
 	if (!idoc || glo->alerts_initialised)
 		return;
 
+	if (idoc)
+		pdf_enable_js(idoc);
+
 	glo->alerts_active = 0;
 	glo->alert_request = 0;
 	glo->alert_reply = 0;
@@ -295,6 +299,8 @@ JNI_FN(MuPDFCore_openFile)(JNIEnv * env, jobject thiz, jstring jfilename)
 		return 0;
 	}
 
+	fz_register_document_handlers(ctx);
+
 	glo->doc = NULL;
 	fz_try(ctx)
 	{
@@ -329,12 +335,21 @@ JNI_FN(MuPDFCore_openFile)(JNIEnv * env, jobject thiz, jstring jfilename)
 	return (jlong)(void *)glo;
 }
 
-static int bufferStreamRead(fz_stream *stream, unsigned char *buf, int len)
+typedef struct buffer_state_s
 {
-	globals *glo = (globals *)stream->state;
+	globals *globals;
+	char buffer[4096];
+}
+buffer_state;
+
+static int bufferStreamNext(fz_stream *stream, int max)
+{
+	buffer_state *bs = (buffer_state *)stream->state;
+	globals *glo = bs->globals;
 	JNIEnv *env = glo->env;
 	jbyteArray array = (jbyteArray)(void *)((*env)->GetObjectField(env, glo->thiz, buffer_fid));
 	int arrayLength = (*env)->GetArrayLength(env, array);
+	int len = sizeof(bs->buffer);
 
 	if (stream->pos > arrayLength)
 		stream->pos = arrayLength;
@@ -343,19 +358,25 @@ static int bufferStreamRead(fz_stream *stream, unsigned char *buf, int len)
 	if (len + stream->pos > arrayLength)
 		len = arrayLength - stream->pos;
 
-	(*env)->GetByteArrayRegion(env, array, stream->pos, len, buf);
+	(*env)->GetByteArrayRegion(env, array, stream->pos, len, bs->buffer);
 	(*env)->DeleteLocalRef(env, array);
-	return len;
+
+	stream->rp = bs->buffer;
+	stream->wp = stream->rp + len;
+	if (len == 0)
+		return EOF;
+	return *stream->rp++;
 }
 
 static void bufferStreamClose(fz_context *ctx, void *state)
 {
-	/* Nothing to do */
+	fz_free(ctx, state);
 }
 
 static void bufferStreamSeek(fz_stream *stream, int offset, int whence)
 {
-	globals *glo = (globals *)stream->state;
+	buffer_state *bs = (buffer_state *)stream->state;
+	globals *glo = bs->globals;
 	JNIEnv *env = glo->env;
 	jbyteArray array = (jbyteArray)(void *)((*env)->GetObjectField(env, glo->thiz, buffer_fid));
 	int arrayLength = (*env)->GetArrayLength(env, array);
@@ -374,8 +395,7 @@ static void bufferStreamSeek(fz_stream *stream, int offset, int whence)
 	if (stream->pos < 0)
 		stream->pos = 0;
 
-	stream->rp = stream->bp;
-	stream->wp = stream->bp;
+	stream->wp = stream->rp;
 }
 
 JNIEXPORT jlong JNICALL
@@ -384,7 +404,8 @@ JNI_FN(MuPDFCore_openBuffer)(JNIEnv * env, jobject thiz)
 	globals *glo;
 	fz_context *ctx;
 	jclass clazz;
-	fz_stream *stream;
+	fz_stream *stream = NULL;
+	buffer_state *bs;
 
 #ifdef NDK_PROFILER
 	monstartup("libmupdf.so");
@@ -411,10 +432,14 @@ JNI_FN(MuPDFCore_openBuffer)(JNIEnv * env, jobject thiz)
 		return 0;
 	}
 
+	fz_var(stream);
+
 	glo->doc = NULL;
 	fz_try(ctx)
 	{
-		stream = fz_new_stream(ctx, glo, bufferStreamRead, bufferStreamClose);
+		bs = fz_malloc_struct(ctx, buffer_state);
+		bs->globals = glo;
+		stream = fz_new_stream(ctx, bs, bufferStreamNext, bufferStreamClose, NULL);
 		stream->seek = bufferStreamSeek;
 
 		glo->colorspace = fz_device_rgb(ctx);
@@ -569,7 +594,9 @@ JNI_FN(MuPDFCore_getPageHeight)(JNIEnv *env, jobject thiz)
 JNIEXPORT jboolean JNICALL
 JNI_FN(MuPDFCore_javascriptSupported)(JNIEnv *env, jobject thiz)
 {
-	return fz_javascript_supported();
+	globals *glo = get_globals(env, thiz);
+	pdf_document *idoc = pdf_specifics(glo->doc);
+	return pdf_js_supported(idoc);
 }
 
 static void update_changed_rects(globals *glo, page_cache *pc, pdf_document *idoc)
@@ -643,6 +670,7 @@ JNI_FN(MuPDFCore_drawPage)(JNIEnv *env, jobject thiz, jobject bitmap,
 
 	fz_try(ctx)
 	{
+		fz_irect pixbbox;
 		pdf_document *idoc = pdf_specifics(doc);
 
 		if (idoc)
@@ -678,7 +706,11 @@ JNI_FN(MuPDFCore_drawPage)(JNIEnv *env, jobject thiz, jobject bitmap,
 		bbox.y0 = patchY;
 		bbox.x1 = patchX + patchW;
 		bbox.y1 = patchY + patchH;
-		pix = fz_new_pixmap_with_bbox_and_data(ctx, glo->colorspace, &bbox, pixels);
+		pixbbox = bbox;
+		pixbbox.x1 = pixbbox.x0 + info.width;
+		/* pixmaps cannot handle right-edge padding, so the bbox must be expanded to
+		 * match the pixels data */
+		pix = fz_new_pixmap_with_bbox_and_data(ctx, glo->colorspace, &pixbbox, pixels);
 		if (pc->page_list == NULL && pc->annot_list == NULL)
 		{
 			fz_clear_pixmap_with_value(ctx, pix, 0xd0);
@@ -747,6 +779,7 @@ static char *widget_type_string(int t)
 	case PDF_WIDGET_TYPE_TEXT: return "text";
 	case PDF_WIDGET_TYPE_LISTBOX: return "listbox";
 	case PDF_WIDGET_TYPE_COMBOBOX: return "combobox";
+	case PDF_WIDGET_TYPE_SIGNATURE: return "signature";
 	default: return "non-widget";
 	}
 }
@@ -821,6 +854,7 @@ JNI_FN(MuPDFCore_updatePageInternal)(JNIEnv *env, jobject thiz, jobject bitmap, 
 	fz_try(ctx)
 	{
 		fz_annot *annot;
+		fz_irect pixbbox;
 
 		if (idoc)
 		{
@@ -851,7 +885,11 @@ JNI_FN(MuPDFCore_updatePageInternal)(JNIEnv *env, jobject thiz, jobject bitmap, 
 		bbox.y0 = patchY;
 		bbox.x1 = patchX + patchW;
 		bbox.y1 = patchY + patchH;
-		pix = fz_new_pixmap_with_bbox_and_data(ctx, glo->colorspace, &bbox, pixels);
+		pixbbox = bbox;
+		pixbbox.x1 = pixbbox.x0 + info.width;
+		/* pixmaps cannot handle right-edge padding, so the bbox must be expanded to
+		 * match the pixels data */
+		pix = fz_new_pixmap_with_bbox_and_data(ctx, glo->colorspace, &pixbbox, pixels);
 
 		zoom = glo->resolution / 72;
 		fz_scale(&ctm, zoom, zoom);
@@ -1297,6 +1335,8 @@ JNI_FN(MuPDFCore_textAsHtml)(JNIEnv * env, jobject thiz)
 	fz_var(sheet);
 	fz_var(text);
 	fz_var(dev);
+	fz_var(buf);
+	fz_var(out);
 
 	fz_try(ctx)
 	{
@@ -1526,9 +1566,11 @@ JNI_FN(MuPDFCore_addInkAnnotationInternal)(JNIEnv * env, jobject thiz, jobjectAr
 
 				pts[k].x = pt ? (*env)->GetFloatField(env, pt, x_fid) : 0.0f;
 				pts[k].y = pt ? (*env)->GetFloatField(env, pt, y_fid) : 0.0f;
+				(*env)->DeleteLocalRef(env, pt);
 				fz_transform_point(&pts[k], &ctm);
 				k++;
 			}
+			(*env)->DeleteLocalRef(env, arc);
 		}
 
 		annot = (fz_annot *)pdf_create_annot(idoc, (pdf_page *)pc->page, FZ_ANNOT_INK);
@@ -2169,9 +2211,103 @@ JNI_FN(MuPDFCore_getFocusedWidgetTypeInternal)(JNIEnv * env, jobject thiz)
 	case PDF_WIDGET_TYPE_TEXT: return TEXT;
 	case PDF_WIDGET_TYPE_LISTBOX: return LISTBOX;
 	case PDF_WIDGET_TYPE_COMBOBOX: return COMBOBOX;
+	case PDF_WIDGET_TYPE_SIGNATURE: return SIGNATURE;
 	}
 
 	return NONE;
+}
+
+/* This enum should be kept in line with SignatureState in MuPDFPageView.java */
+enum
+{
+	Signature_NoSupport,
+	Signature_Unsigned,
+	Signature_Signed
+};
+
+JNIEXPORT int JNICALL
+JNI_FN(MuPDFCore_getFocusedWidgetSignatureState)(JNIEnv * env, jobject thiz)
+{
+	globals *glo = get_globals(env, thiz);
+	pdf_document *idoc = pdf_specifics(glo->doc);
+	pdf_widget *focus;
+
+	if (idoc == NULL)
+		return Signature_NoSupport;
+
+	focus = pdf_focused_widget(idoc);
+
+	if (focus == NULL)
+		return Signature_NoSupport;
+
+	if (!pdf_signatures_supported())
+		return Signature_NoSupport;
+
+	return pdf_dict_gets(((pdf_annot *)focus)->obj, "V") ? Signature_Signed : Signature_Unsigned;
+}
+
+JNIEXPORT jstring JNICALL
+JNI_FN(MuPDFCore_checkFocusedSignatureInternal)(JNIEnv * env, jobject thiz)
+{
+	globals *glo = get_globals(env, thiz);
+	pdf_document *idoc = pdf_specifics(glo->doc);
+	pdf_widget *focus;
+	char ebuf[256] = "Failed";
+
+	if (idoc == NULL)
+		goto exit;
+
+	focus = pdf_focused_widget(idoc);
+
+	if (focus == NULL)
+		goto exit;
+
+	if (pdf_check_signature(idoc, focus, glo->current_path, ebuf, sizeof(ebuf)))
+	{
+		strcpy(ebuf, "Signature is valid");
+	}
+
+exit:
+	return (*env)->NewStringUTF(env, ebuf);
+}
+
+JNIEXPORT jboolean JNICALL
+JNI_FN(MuPDFCore_signFocusedSignatureInternal)(JNIEnv * env, jobject thiz, jstring jkeyfile, jstring jpassword)
+{
+	globals *glo = get_globals(env, thiz);
+	fz_context *ctx = glo->ctx;
+	pdf_document *idoc = pdf_specifics(glo->doc);
+	pdf_widget *focus;
+	const char *keyfile;
+	const char *password;
+	jboolean res;
+
+	if (idoc == NULL)
+		return JNI_FALSE;
+
+	focus = pdf_focused_widget(idoc);
+
+	if (focus == NULL)
+		return JNI_FALSE;
+
+	keyfile = (*env)->GetStringUTFChars(env, jkeyfile, NULL);
+	password = (*env)->GetStringUTFChars(env, jpassword, NULL);
+	if (keyfile == NULL || password == NULL)
+		return JNI_FALSE;
+
+	fz_var(res);
+	fz_try(ctx)
+	{
+		pdf_sign_signature(idoc, focus, keyfile, password);
+		dump_annotation_display_lists(glo);
+		res = JNI_TRUE;
+	}
+	fz_catch(ctx)
+	{
+		res = JNI_FALSE;
+	}
+
+	return res;
 }
 
 JNIEXPORT jobject JNICALL

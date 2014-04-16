@@ -19,6 +19,9 @@ struct tiff
 	/* byte order */
 	unsigned order;
 
+	/* offset of first ifd */
+	unsigned ifd_offset;
+
 	/* where we can find the strips of image data */
 	unsigned rowsperstrip;
 	unsigned *stripoffsets;
@@ -186,7 +189,14 @@ fz_decode_tiff_fax(struct tiff *tiff, int comp, fz_stream *chain, unsigned char 
 static void
 fz_decode_tiff_jpeg(struct tiff *tiff, fz_stream *chain, unsigned char *wp, int wlen)
 {
-	fz_stream *stm = fz_open_dctd(chain, -1);
+	fz_stream *stm;
+	fz_stream *jpegtables = NULL;
+	int color_transform = -1; /* unset */
+	if (tiff->jpegtables && (int)tiff->jpegtableslen > 0)
+		jpegtables = fz_open_memory(tiff->ctx, tiff->jpegtables, (int)tiff->jpegtableslen);
+	if (tiff->photometric == 2 /* RGB */ || tiff->photometric == 3 /* RGBPal */)
+		color_transform = 0;
+	stm = fz_open_dctd(chain, color_transform, 0, jpegtables);
 	fz_read(stm, wp, wlen);
 	fz_close(stm);
 }
@@ -446,8 +456,8 @@ fz_decode_tiff_strips(struct tiff *tiff)
 			fz_decode_tiff_lzw(tiff, stm, wp, wlen);
 			break;
 		case 6:
-			fz_throw(tiff->ctx, FZ_ERROR_GENERIC, "deprecated JPEG in TIFF compression not supported");
-			break;
+			fz_warn(tiff->ctx, "deprecated JPEG in TIFF compression not fully supported");
+			/* fall through */
 		case 7:
 			fz_decode_tiff_jpeg(tiff, stm, wp, wlen);
 			break;
@@ -660,7 +670,6 @@ fz_read_tiff_tag(struct tiff *tiff, unsigned offset)
 		break;
 
 	case JPEGTables:
-		fz_warn(tiff->ctx, "jpeg tables in tiff not implemented");
 		tiff->jpegtables = tiff->bp + value;
 		tiff->jpegtableslen = count;
 		break;
@@ -690,7 +699,7 @@ fz_read_tiff_tag(struct tiff *tiff, unsigned offset)
 		fz_throw(tiff->ctx, FZ_ERROR_GENERIC, "tiled tiffs not supported");
 
 	default:
-		/* printf("unknown tag: %d t=%d n=%d\n", tag, type, count); */
+		/* fz_warn(tiff->ctx, "unknown tag: %d t=%d n=%d", tag, type, count); */
 		break;
 	}
 }
@@ -711,9 +720,6 @@ static void
 fz_decode_tiff_header(fz_context *ctx, struct tiff *tiff, unsigned char *buf, int len)
 {
 	unsigned version;
-	unsigned offset;
-	unsigned count;
-	unsigned i;
 
 	memset(tiff, 0, sizeof(struct tiff));
 	tiff->ctx = ctx;
@@ -750,16 +756,57 @@ fz_decode_tiff_header(fz_context *ctx, struct tiff *tiff, unsigned char *buf, in
 		fz_throw(tiff->ctx, FZ_ERROR_GENERIC, "not a TIFF file, wrong version marker");
 
 	/* get offset of IFD */
+	tiff->ifd_offset = readlong(tiff);
+}
+
+static unsigned
+fz_next_ifd(fz_context *ctx, struct tiff *tiff, unsigned offset)
+{
+	unsigned count;
+
+	tiff->rp = tiff->bp + offset;
+
+	if (tiff->rp <= tiff->bp || tiff->rp > tiff->ep)
+		fz_throw(tiff->ctx, FZ_ERROR_GENERIC, "invalid IFD offset %u", offset);
+
+	count = readshort(tiff);
+
+	if (count * 12 > (unsigned)(tiff->ep - tiff->rp))
+		fz_throw(tiff->ctx, FZ_ERROR_GENERIC, "overlarge IFD entry count %u", count);
+
+	tiff->rp += count * 12;
 	offset = readlong(tiff);
 
-	/*
-	 * Read IFD
-	 */
+	return offset;
+}
+
+static void
+fz_seek_ifd(fz_context *ctx, struct tiff *tiff, int subimage)
+{
+	unsigned offset = tiff->ifd_offset;
+
+	while (subimage--)
+	{
+		offset = fz_next_ifd(ctx, tiff, offset);
+
+		if (offset == 0)
+			fz_throw(tiff->ctx, FZ_ERROR_GENERIC, "subimage index %i out of range", subimage);
+	}
 
 	tiff->rp = tiff->bp + offset;
 
 	if (tiff->rp < tiff->bp || tiff->rp > tiff->ep)
-		fz_throw(tiff->ctx, FZ_ERROR_GENERIC, "invalid IFD offset %u", offset);
+		fz_throw(tiff->ctx, FZ_ERROR_GENERIC, "invalid IFD offset %u", tiff->ifd_offset);
+}
+
+static void
+fz_decode_tiff_ifd(fz_context *ctx, struct tiff *tiff)
+{
+	unsigned offset;
+	unsigned count;
+	unsigned i;
+
+	offset = tiff->rp - tiff->bp;
 
 	count = readshort(tiff);
 
@@ -775,14 +822,16 @@ fz_decode_tiff_header(fz_context *ctx, struct tiff *tiff, unsigned char *buf, in
 }
 
 fz_pixmap *
-fz_load_tiff(fz_context *ctx, unsigned char *buf, int len)
+fz_load_tiff_subimage(fz_context *ctx, unsigned char *buf, int len, int subimage)
 {
 	fz_pixmap *image;
-	struct tiff tiff;
+	struct tiff tiff = { 0 };
 
 	fz_try(ctx)
 	{
 		fz_decode_tiff_header(ctx, &tiff, buf, len);
+		fz_seek_ifd(ctx, &tiff, subimage);
+		fz_decode_tiff_ifd(ctx, &tiff);
 
 		/* Decode the image strips */
 
@@ -836,14 +885,22 @@ fz_load_tiff(fz_context *ctx, unsigned char *buf, int len)
 	return image;
 }
 
-void
-fz_load_tiff_info(fz_context *ctx, unsigned char *buf, int len, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
+fz_pixmap *
+fz_load_tiff(fz_context *ctx, unsigned char *buf, int len)
 {
-	struct tiff tiff;
+	return fz_load_tiff_subimage(ctx, buf, len, 0);
+}
+
+void
+fz_load_tiff_info_subimage(fz_context *ctx, unsigned char *buf, int len, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep, int subimage)
+{
+	struct tiff tiff = { 0 };
 
 	fz_try(ctx)
 	{
 		fz_decode_tiff_header(ctx, &tiff, buf, len);
+		fz_seek_ifd(ctx, &tiff, subimage);
+		fz_decode_tiff_ifd(ctx, &tiff);
 
 		*wp = tiff.imagewidth;
 		*hp = tiff.imagelength;
@@ -864,4 +921,36 @@ fz_load_tiff_info(fz_context *ctx, unsigned char *buf, int len, int *wp, int *hp
 	{
 		fz_rethrow_message(ctx, "out of memory loading tiff");
 	}
+}
+
+void
+fz_load_tiff_info(fz_context *ctx, unsigned char *buf, int len, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
+{
+	fz_load_tiff_info_subimage(ctx, buf, len, wp, hp, xresp, yresp, cspacep, 0);
+}
+
+int
+fz_load_tiff_subimage_count(fz_context *ctx, unsigned char *buf, int len)
+{
+	unsigned offset;
+	unsigned subimage_count = 0;
+	struct tiff tiff = { 0 };
+
+	fz_try(ctx)
+	{
+		fz_decode_tiff_header(ctx, &tiff, buf, len);
+
+		offset = tiff.ifd_offset;
+
+		do {
+			subimage_count++;
+			offset = fz_next_ifd(ctx, &tiff, offset);
+		} while (offset != 0);
+	}
+	fz_catch(ctx)
+	{
+		fz_rethrow_message(ctx, "error while counting subimages in tiff");
+	}
+
+	return subimage_count;
 }

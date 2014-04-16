@@ -18,13 +18,16 @@ pdf_load_image_imp(pdf_document *doc, pdf_obj *rdb, pdf_obj *dict, fz_stream *cs
 	fz_colorspace *colorspace = NULL;
 	float decode[FZ_MAX_COLORS * 2];
 	int colorkey[FZ_MAX_COLORS * 2];
+	int stride;
 
 	int i;
 	fz_context *ctx = doc->ctx;
+	fz_compressed_buffer *buffer;
 
 	fz_var(stm);
 	fz_var(mask);
 	fz_var(image);
+	fz_var(colorspace);
 
 	fz_try(ctx)
 	{
@@ -55,7 +58,6 @@ pdf_load_image_imp(pdf_document *doc, pdf_obj *rdb, pdf_obj *dict, fz_stream *cs
 
 		indexed = 0;
 		usecolorkey = 0;
-		mask = NULL;
 
 		if (imagemask)
 			bpc = 1;
@@ -85,9 +87,7 @@ pdf_load_image_imp(pdf_document *doc, pdf_obj *rdb, pdf_obj *dict, fz_stream *cs
 			}
 
 			colorspace = pdf_load_colorspace(doc, obj);
-
-			if (!strcmp(colorspace->name, "Indexed"))
-				indexed = 1;
+			indexed = fz_colorspace_is_indexed(colorspace);
 
 			n = colorspace->n;
 		}
@@ -118,7 +118,7 @@ pdf_load_image_imp(pdf_document *doc, pdf_obj *rdb, pdf_obj *dict, fz_stream *cs
 			else if (forcemask)
 				fz_warn(ctx, "Ignoring recursive image soft mask");
 			else
-				mask = (fz_image *)pdf_load_image_imp(doc, rdb, obj, NULL, 1);
+				mask = pdf_load_image_imp(doc, rdb, obj, NULL, 1);
 		}
 		else if (pdf_is_array(obj))
 		{
@@ -134,34 +134,29 @@ pdf_load_image_imp(pdf_document *doc, pdf_obj *rdb, pdf_obj *dict, fz_stream *cs
 			}
 		}
 
-		/* Now, do we load a ref, or do we load the actual thing? */
-		if (!cstm)
+		/* Do we load from a ref, or do we load an inline stream? */
+		if (cstm == NULL)
 		{
 			/* Just load the compressed image data now and we can
 			 * decode it on demand. */
 			int num = pdf_to_num(dict);
 			int gen = pdf_to_gen(dict);
-			fz_compressed_buffer *buffer = pdf_load_compressed_stream(doc, num, gen);
+			buffer = pdf_load_compressed_stream(doc, num, gen);
 			image = fz_new_image(ctx, w, h, bpc, colorspace, 96, 96, interpolate, imagemask, decode, usecolorkey ? colorkey : NULL, buffer, mask);
-			break; /* Out of fz_try */
-		}
-
-		/* We need to decompress the image now */
-		if (cstm)
-		{
-			int stride = (w * n * bpc + 7) / 8;
-			stm = pdf_open_inline_stream(doc, dict, stride * h, cstm, NULL);
 		}
 		else
 		{
-			stm = pdf_open_stream(doc, pdf_to_num(dict), pdf_to_gen(dict));
+			/* Inline stream */
+			stride = (w * n * bpc + 7) / 8;
+			image = fz_new_image(ctx, w, h, bpc, colorspace, 96, 96, interpolate, imagemask, decode, usecolorkey ? colorkey : NULL, NULL, mask);
+			pdf_load_compressed_inline_image(doc, dict, stride * h, cstm, indexed, image);
 		}
 
-		image = fz_new_image(ctx, w, h, bpc, colorspace, 96, 96, interpolate, imagemask, decode, usecolorkey ? colorkey : NULL, NULL, mask);
-		image->tile = fz_decomp_image_from_stream(ctx, stm, image, cstm != NULL, indexed, 0, 0);
 	}
 	fz_catch(ctx)
 	{
+		fz_drop_colorspace(ctx, colorspace);
+		fz_drop_image(ctx, mask);
 		fz_drop_image(ctx, image);
 		fz_rethrow(ctx);
 	}
@@ -171,7 +166,7 @@ pdf_load_image_imp(pdf_document *doc, pdf_obj *rdb, pdf_obj *dict, fz_stream *cs
 fz_image *
 pdf_load_inline_image(pdf_document *doc, pdf_obj *rdb, pdf_obj *dict, fz_stream *file)
 {
-	return (fz_image *)pdf_load_image_imp(doc, rdb, dict, file, 0);
+	return pdf_load_image_imp(doc, rdb, dict, file, 0);
 }
 
 int
@@ -215,16 +210,10 @@ pdf_load_jpx(pdf_document *doc, pdf_obj *dict, int forcemask)
 		if (obj)
 		{
 			colorspace = pdf_load_colorspace(doc, obj);
-			indexed = !strcmp(colorspace->name, "Indexed");
+			indexed = fz_colorspace_is_indexed(colorspace);
 		}
 
 		img = fz_load_jpx(ctx, buf->data, buf->len, colorspace, indexed);
-
-		if (img && colorspace == NULL)
-			colorspace = fz_keep_colorspace(ctx, img->colorspace);
-
-		fz_drop_buffer(ctx, buf);
-		buf = NULL;
 
 		obj = pdf_dict_getsa(dict, "SMask", "Mask");
 		if (pdf_is_dict(obj))
@@ -232,7 +221,7 @@ pdf_load_jpx(pdf_document *doc, pdf_obj *dict, int forcemask)
 			if (forcemask)
 				fz_warn(ctx, "Ignoring recursive JPX soft mask");
 			else
-				mask = (fz_image *)pdf_load_image_imp(doc, NULL, obj, NULL, 1);
+				mask = pdf_load_image_imp(doc, NULL, obj, NULL, 1);
 		}
 
 		obj = pdf_dict_getsa(dict, "Decode", "D");
@@ -247,14 +236,17 @@ pdf_load_jpx(pdf_document *doc, pdf_obj *dict, int forcemask)
 			fz_decode_tile(img, decode);
 		}
 	}
+	fz_always(ctx)
+	{
+		fz_drop_colorspace(ctx, colorspace);
+		fz_drop_buffer(ctx, buf);
+	}
 	fz_catch(ctx)
 	{
-		if (colorspace)
-			fz_drop_colorspace(ctx, colorspace);
-		fz_drop_buffer(ctx, buf);
 		fz_drop_pixmap(ctx, img);
 		fz_rethrow(ctx);
 	}
+
 	return fz_new_image_from_pixmap(ctx, img, mask);
 }
 
@@ -272,7 +264,7 @@ pdf_load_image(pdf_document *doc, pdf_obj *dict)
 	fz_context *ctx = doc->ctx;
 	fz_image *image;
 
-	if ((image = pdf_find_item(ctx, fz_free_image, dict)))
+	if ((image = pdf_find_item(ctx, fz_free_image, dict)) != NULL)
 	{
 		return (fz_image *)image;
 	}

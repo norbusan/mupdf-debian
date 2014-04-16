@@ -136,13 +136,49 @@ image_meta(image_document *doc, int key, void *ptr, int size)
 }
 
 static void
+image_rebind(image_document *doc, fz_context *ctx)
+{
+	doc->ctx = ctx;
+	fz_rebind_stream(doc->file, ctx);
+}
+
+static void
 image_init_document(image_document *doc)
 {
-	doc->super.close = (void*)image_close_document;
-	doc->super.count_pages = (void*)image_count_pages;
-	doc->super.load_page = (void*)image_load_page;
-	doc->super.bound_page = (void*)image_bound_page;
-	doc->super.run_page_contents = (void*)image_run_page;
-	doc->super.free_page = (void*)image_free_page;
-	doc->super.meta = (void*)image_meta;
+	doc->super.close = (fz_document_close_fn *)image_close_document;
+	doc->super.count_pages = (fz_document_count_pages_fn *)image_count_pages;
+	doc->super.load_page = (fz_document_load_page_fn *)image_load_page;
+	doc->super.bound_page = (fz_document_bound_page_fn *)image_bound_page;
+	doc->super.run_page_contents = (fz_document_run_page_contents_fn *)image_run_page;
+	doc->super.free_page = (fz_document_free_page_fn *)image_free_page;
+	doc->super.meta = (fz_document_meta_fn *)image_meta;
+	doc->super.rebind = (fz_document_rebind_fn *)image_rebind;
 }
+
+static int
+image_recognize(fz_context *doc, const char *magic)
+{
+	char *ext = strrchr(magic, '.');
+
+	if (ext)
+	{
+		if (!fz_strcasecmp(ext, ".png") || !fz_strcasecmp(ext, ".jpg") ||
+			!fz_strcasecmp(ext, ".jpeg") || !fz_strcasecmp(ext, ".jfif") ||
+			!fz_strcasecmp(ext, ".jfif-tbnl") || !fz_strcasecmp(ext, ".jpe"))
+			return 100;
+	}
+	if (!strcmp(magic, "png") || !strcmp(magic, "image/png") ||
+		!strcmp(magic, "jpg") || !strcmp(magic, "image/jpeg") ||
+		!strcmp(magic, "jpeg") || !strcmp(magic, "image/pjpeg") ||
+		!strcmp(magic, "jpe") || !strcmp(magic, "jfif"))
+		return 100;
+
+	return 0;
+}
+
+fz_document_handler img_document_handler =
+{
+	(fz_document_recognize_fn *)&image_recognize,
+	(fz_document_open_fn *)&image_open_document,
+	(fz_document_open_with_stream_fn *)&image_open_document_with_stream
+};

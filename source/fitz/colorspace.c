@@ -41,14 +41,14 @@ fz_drop_colorspace(fz_context *ctx, fz_colorspace *cs)
 
 /* Device colorspace definitions */
 
-static void gray_to_rgb(fz_context *ctx, fz_colorspace *cs, float *gray, float *rgb)
+static void gray_to_rgb(fz_context *ctx, fz_colorspace *cs, const float *gray, float *rgb)
 {
 	rgb[0] = gray[0];
 	rgb[1] = gray[0];
 	rgb[2] = gray[0];
 }
 
-static void rgb_to_gray(fz_context *ctx, fz_colorspace *cs, float *rgb, float *gray)
+static void rgb_to_gray(fz_context *ctx, fz_colorspace *cs, const float *rgb, float *gray)
 {
 	float r = rgb[0];
 	float g = rgb[1];
@@ -56,28 +56,28 @@ static void rgb_to_gray(fz_context *ctx, fz_colorspace *cs, float *rgb, float *g
 	gray[0] = r * 0.3f + g * 0.59f + b * 0.11f;
 }
 
-static void rgb_to_rgb(fz_context *ctx, fz_colorspace *cs, float *rgb, float *xyz)
+static void rgb_to_rgb(fz_context *ctx, fz_colorspace *cs, const float *rgb, float *xyz)
 {
 	xyz[0] = rgb[0];
 	xyz[1] = rgb[1];
 	xyz[2] = rgb[2];
 }
 
-static void bgr_to_rgb(fz_context *ctx, fz_colorspace *cs, float *bgr, float *rgb)
+static void bgr_to_rgb(fz_context *ctx, fz_colorspace *cs, const float *bgr, float *rgb)
 {
 	rgb[0] = bgr[2];
 	rgb[1] = bgr[1];
 	rgb[2] = bgr[0];
 }
 
-static void rgb_to_bgr(fz_context *ctx, fz_colorspace *cs, float *rgb, float *bgr)
+static void rgb_to_bgr(fz_context *ctx, fz_colorspace *cs, const float *rgb, float *bgr)
 {
 	bgr[0] = rgb[2];
 	bgr[1] = rgb[1];
 	bgr[2] = rgb[0];
 }
 
-static void cmyk_to_rgb(fz_context *ctx, fz_colorspace *cs, float *cmyk, float *rgb)
+static void cmyk_to_rgb(fz_context *ctx, fz_colorspace *cs, const float *cmyk, float *rgb)
 {
 #ifdef SLOWCMYK /* from poppler */
 	float c = cmyk[0], m = cmyk[1], y = cmyk[2], k = cmyk[3];
@@ -156,7 +156,7 @@ static void cmyk_to_rgb(fz_context *ctx, fz_colorspace *cs, float *cmyk, float *
 #endif
 }
 
-static void rgb_to_cmyk(fz_context *ctx, fz_colorspace *cs, float *rgb, float *cmyk)
+static void rgb_to_cmyk(fz_context *ctx, fz_colorspace *cs, const float *rgb, float *cmyk)
 {
 	float c, m, y, k;
 	c = 1 - rgb[0];
@@ -171,7 +171,7 @@ static void rgb_to_cmyk(fz_context *ctx, fz_colorspace *cs, float *rgb, float *c
 
 static fz_colorspace k_default_gray = { {-1, fz_free_colorspace_imp}, 0, "DeviceGray", 1, gray_to_rgb, rgb_to_gray };
 static fz_colorspace k_default_rgb = { {-1, fz_free_colorspace_imp}, 0, "DeviceRGB", 3, rgb_to_rgb, rgb_to_rgb };
-static fz_colorspace k_default_bgr = { {-1, fz_free_colorspace_imp}, 0, "DeviceRGB", 3, bgr_to_rgb, rgb_to_bgr };
+static fz_colorspace k_default_bgr = { {-1, fz_free_colorspace_imp}, 0, "DeviceBGR", 3, bgr_to_rgb, rgb_to_bgr };
 static fz_colorspace k_default_cmyk = { {-1, fz_free_colorspace_imp}, 0, "DeviceCMYK", 4, cmyk_to_rgb, rgb_to_cmyk };
 
 static fz_colorspace *fz_default_gray = &k_default_gray;
@@ -319,7 +319,7 @@ static void fast_gray_to_cmyk(fz_pixmap *dst, fz_pixmap *src)
 		d[0] = 0;
 		d[1] = 0;
 		d[2] = 0;
-		d[3] = s[0];
+		d[3] = 255 - s[0];
 		d[4] = s[1];
 		s += 2;
 		d += 5;
@@ -990,7 +990,7 @@ fz_convert_pixmap(fz_context *ctx, fz_pixmap *dp, fz_pixmap *sp)
 /* Convert a single color */
 
 static void
-std_conv_color(fz_color_converter *cc, float *dstv, float *srcv)
+std_conv_color(fz_color_converter *cc, float *dstv, const float *srcv)
 {
 	float rgb[3];
 	int i;
@@ -1014,7 +1014,7 @@ std_conv_color(fz_color_converter *cc, float *dstv, float *srcv)
 }
 
 static void
-g2rgb(fz_color_converter *cc, float *dv, float *sv)
+g2rgb(fz_color_converter *cc, float *dv, const float *sv)
 {
 	dv[0] = sv[0];
 	dv[1] = sv[0];
@@ -1022,22 +1022,22 @@ g2rgb(fz_color_converter *cc, float *dv, float *sv)
 }
 
 static void
-g2cmyk(fz_color_converter *cc, float *dv, float *sv)
+g2cmyk(fz_color_converter *cc, float *dv, const float *sv)
 {
 	dv[0] = 0;
 	dv[1] = 0;
 	dv[2] = 0;
-	dv[3] = sv[0];
+	dv[3] = 1 - sv[0];
 }
 
 static void
-rgb2g(fz_color_converter *cc, float *dv, float *sv)
+rgb2g(fz_color_converter *cc, float *dv, const float *sv)
 {
 	dv[0] = sv[0] * 0.3f + sv[1] * 0.59f + sv[2] * 0.11f;
 }
 
 static void
-rgb2bgr(fz_color_converter *cc, float *dv, float *sv)
+rgb2bgr(fz_color_converter *cc, float *dv, const float *sv)
 {
 	dv[0] = sv[2];
 	dv[1] = sv[1];
@@ -1045,7 +1045,7 @@ rgb2bgr(fz_color_converter *cc, float *dv, float *sv)
 }
 
 static void
-rgb2cmyk(fz_color_converter *cc, float *dv, float *sv)
+rgb2cmyk(fz_color_converter *cc, float *dv, const float *sv)
 {
 	float c = 1 - sv[0];
 	float m = 1 - sv[1];
@@ -1058,13 +1058,13 @@ rgb2cmyk(fz_color_converter *cc, float *dv, float *sv)
 }
 
 static void
-bgr2g(fz_color_converter *cc, float *dv, float *sv)
+bgr2g(fz_color_converter *cc, float *dv, const float *sv)
 {
 	dv[0] = sv[0] * 0.11f + sv[1] * 0.59f + sv[2] * 0.3f;
 }
 
 static void
-bgr2cmyk(fz_color_converter *cc, float *dv, float *sv)
+bgr2cmyk(fz_color_converter *cc, float *dv, const float *sv)
 {
 	float c = 1 - sv[2];
 	float m = 1 - sv[1];
@@ -1077,7 +1077,7 @@ bgr2cmyk(fz_color_converter *cc, float *dv, float *sv)
 }
 
 static void
-cmyk2g(fz_color_converter *cc, float *dv, float *sv)
+cmyk2g(fz_color_converter *cc, float *dv, const float *sv)
 {
 	float c = sv[0] * 0.3f;
 	float m = sv[1] * 0.59f;
@@ -1086,7 +1086,7 @@ cmyk2g(fz_color_converter *cc, float *dv, float *sv)
 }
 
 static void
-cmyk2rgb(fz_color_converter *cc, float *dv, float *sv)
+cmyk2rgb(fz_color_converter *cc, float *dv, const float *sv)
 {
 #ifdef SLOWCMYK
 	cmyk_to_rgb(cc->ctx, NULL, sv, dv);
@@ -1098,7 +1098,7 @@ cmyk2rgb(fz_color_converter *cc, float *dv, float *sv)
 }
 
 static void
-cmyk2bgr(fz_color_converter *cc, float *dv, float *sv)
+cmyk2bgr(fz_color_converter *cc, float *dv, const float *sv)
 {
 #ifdef SLOWCMYK
 	float rgb[3];
@@ -1169,10 +1169,9 @@ void fz_lookup_color_converter(fz_color_converter *cc, fz_context *ctx, fz_color
 }
 
 void
-fz_convert_color(fz_context *ctx, fz_colorspace *ds, float *dv, fz_colorspace *ss, float *sv)
+fz_convert_color(fz_context *ctx, fz_colorspace *ds, float *dv, fz_colorspace *ss, const float *sv)
 {
 	fz_color_converter cc;
-
 	fz_lookup_color_converter(&cc, ctx, ds, ss);
 	cc.convert(&cc, dv, sv);
 }
@@ -1187,7 +1186,7 @@ struct indexed
 };
 
 static void
-indexed_to_rgb(fz_context *ctx, fz_colorspace *cs, float *color, float *rgb)
+indexed_to_rgb(fz_context *ctx, fz_colorspace *cs, const float *color, float *rgb)
 {
 	struct indexed *idx = cs->data;
 	float alt[FZ_MAX_COLORS];
@@ -1274,4 +1273,86 @@ fz_expand_indexed_pixmap(fz_context *ctx, fz_pixmap *src)
 	dst->interpolate = src->interpolate;
 
 	return dst;
+}
+
+typedef struct fz_cached_color_converter
+{
+	fz_color_converter base;
+	fz_hash_table *hash;
+
+}
+fz_cached_color_converter;
+
+static void fz_cached_color_convert(fz_color_converter *cc_, float *ds, const float *ss)
+{
+	fz_cached_color_converter *cc = cc_->opaque;
+	fz_context *ctx = cc->base.ctx;
+	void *val = fz_hash_find(ctx, cc->hash, ss);
+	int n = cc->base.ds->n * sizeof(float);
+	fz_color_converter *base_cc = &cc->base;
+
+	if (val)
+	{
+		memcpy(ds, val, n);
+		return;
+	}
+
+	base_cc->convert(base_cc, ds, ss);
+	val = fz_malloc(ctx, n);
+	memcpy(val, ds, n);
+	fz_try(ctx)
+	{
+		fz_hash_insert(ctx, cc->hash, ss, val);
+	}
+	fz_catch(ctx)
+	{
+		fz_free(ctx, val);
+	}
+}
+
+void fz_init_cached_color_converter(fz_context *ctx, fz_color_converter *cc, fz_colorspace *ds, fz_colorspace *ss)
+{
+	int n = ss->n;
+	fz_cached_color_converter *cached = fz_malloc_struct(ctx, fz_cached_color_converter);
+
+	fz_try(ctx)
+	{
+		fz_lookup_color_converter(&cached->base, ctx, ds, ss);
+		cached->hash = fz_new_hash_table(ctx, 256, n * sizeof(float), -1);
+		cc->convert = fz_cached_color_convert;
+		cc->ctx = ctx;
+		cc->ds = ds;
+		cc->ss = ss;
+		cc->opaque = cached;
+	}
+	fz_catch(ctx)
+	{
+		fz_free_hash(ctx, cached->hash);
+		fz_rethrow(ctx);
+	}
+}
+
+void fz_fin_cached_color_converter(fz_color_converter *cc_)
+{
+	fz_cached_color_converter *cc;
+	fz_context *ctx;
+	int i, n;
+
+	if (cc_ == NULL)
+		return;
+	cc = cc_->opaque;
+	if (cc == NULL)
+		return;
+	cc_->opaque = NULL;
+	ctx = cc_->ctx;
+
+	n = fz_hash_len(ctx, cc->hash);
+	for (i = 0; i < n; i++)
+	{
+		void *v = fz_hash_get_val(ctx, cc->hash, i);
+		if (v)
+			fz_free(ctx, v);
+	}
+	fz_free_hash(ctx, cc->hash);
+	fz_free(ctx, cc);
 }

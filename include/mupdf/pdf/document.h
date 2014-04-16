@@ -170,15 +170,31 @@ int pdf_has_unsaved_changes(pdf_document *doc);
 
 typedef struct pdf_obj_read_state_s pdf_obj_read_state;
 
-struct
+struct pdf_obj_read_state_s
 {
 	int offset;
 	int num;
 	int numofs;
 	int gen;
 	int genofs;
-}
-pdf_obj_read_state_s;
+};
+
+typedef struct pdf_signer_s pdf_signer;
+
+/* Unsaved signature fields */
+typedef struct pdf_unsaved_sig_s pdf_unsaved_sig;
+
+struct pdf_unsaved_sig_s
+{
+	pdf_obj *field;
+	int byte_range_start;
+	int byte_range_end;
+	int contents_start;
+	int contents_end;
+	pdf_signer *signer;
+	pdf_unsaved_sig *next;
+};
+
 
 struct pdf_document_s
 {
@@ -198,8 +214,11 @@ struct pdf_document_s
 	pdf_xref *xref_sections;
 	int xref_altered;
 	int freeze_updates;
+	int has_xref_streams;
 
 	int page_count;
+
+	int repair_attempted;
 
 	/* State indicating which file parsing method we are using */
 	int file_reading_linearly;
@@ -254,8 +273,11 @@ struct pdf_document_s
 	pdf_obj *focus_obj;
 
 	pdf_js *js;
+	void (*drop_js)(pdf_js *js);
 	int recalculating;
 	int dirty;
+	pdf_unsaved_sig *unsaved_sigs;
+
 	void (*update_appearance)(pdf_document *doc, pdf_annot *annot);
 
 	pdf_doc_event_cb *event_cb;
@@ -286,5 +308,7 @@ void pdf_delete_page_range(pdf_document *doc, int start, int end);
 fz_device *pdf_page_write(pdf_document *doc, pdf_page *page);
 
 void pdf_finish_edit(pdf_document *doc);
+
+int pdf_recognize(fz_context *doc, const char *magic);
 
 #endif

@@ -160,15 +160,6 @@ cbz_read_zip_entry(cbz_document *doc, int offset, int *sizep)
 	}
 
 	fz_throw(ctx, FZ_ERROR_GENERIC, "unknown zip method: %d", method);
-	return NULL; /* not reached */
-}
-
-static int
-cbz_compare_entries(const void *a_, const void *b_)
-{
-	const cbz_entry *a = a_;
-	const cbz_entry *b = b_;
-	return strcmp(a->name, b->name);
 }
 
 static void
@@ -230,8 +221,6 @@ cbz_read_zip_dir_imp(cbz_document *doc, int startoffset)
 		fz_seek(file, metasize, 1);
 		fz_seek(file, commentsize, 1);
 	}
-
-	qsort(doc->entry, count, sizeof(cbz_entry), cbz_compare_entries);
 
 	doc->page_count = 0;
 	doc->page = fz_malloc_array(ctx, count, sizeof(int));
@@ -423,13 +412,44 @@ cbz_meta(cbz_document *doc, int key, void *ptr, int size)
 }
 
 static void
+cbz_rebind(cbz_document *doc, fz_context *ctx)
+{
+	doc->ctx = ctx;
+	fz_rebind_stream(doc->file, ctx);
+}
+
+static void
 cbz_init_document(cbz_document *doc)
 {
-	doc->super.close = (void*)cbz_close_document;
-	doc->super.count_pages = (void*)cbz_count_pages;
-	doc->super.load_page = (void*)cbz_load_page;
-	doc->super.bound_page = (void*)cbz_bound_page;
-	doc->super.run_page_contents = (void*)cbz_run_page;
-	doc->super.free_page = (void*)cbz_free_page;
-	doc->super.meta = (void*)cbz_meta;
+	doc->super.close = (fz_document_close_fn *)cbz_close_document;
+	doc->super.count_pages = (fz_document_count_pages_fn *)cbz_count_pages;
+	doc->super.load_page = (fz_document_load_page_fn *)cbz_load_page;
+	doc->super.bound_page = (fz_document_bound_page_fn *)cbz_bound_page;
+	doc->super.run_page_contents = (fz_document_run_page_contents_fn *)cbz_run_page;
+	doc->super.free_page = (fz_document_free_page_fn *)cbz_free_page;
+	doc->super.meta = (fz_document_meta_fn *)cbz_meta;
+	doc->super.rebind = (fz_document_rebind_fn *)cbz_rebind;
 }
+
+static int
+cbz_recognize(fz_context *doc, const char *magic)
+{
+	char *ext = strrchr(magic, '.');
+
+	if (ext)
+	{
+		if (!fz_strcasecmp(ext, ".cbz") || !fz_strcasecmp(ext, ".zip"))
+			return 100;
+	}
+	if (!strcmp(magic, "cbz") || !strcmp(magic, "application/x-cbz"))
+		return 100;
+
+	return 0;
+}
+
+fz_document_handler cbz_document_handler =
+{
+	(fz_document_recognize_fn *)&cbz_recognize,
+	(fz_document_open_fn *)&cbz_open_document,
+	(fz_document_open_with_stream_fn *)&cbz_open_document_with_stream
+};

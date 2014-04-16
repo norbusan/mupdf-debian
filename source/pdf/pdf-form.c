@@ -1,21 +1,5 @@
 #include "mupdf/pdf.h"
 
-#define SMALL_FLOAT (0.00001)
-
-enum
-{
-	F_Invisible = 1 << (1-1),
-	F_Hidden = 1 << (2-1),
-	F_Print = 1 << (3-1),
-	F_NoZoom = 1 << (4-1),
-	F_NoRotate = 1 << (5-1),
-	F_NoView = 1 << (6-1),
-	F_ReadOnly = 1 << (7-1),
-	F_Locked = 1 << (8-1),
-	F_ToggleNoView = 1 << (9-1),
-	F_LockedContents = 1 << (10-1)
-};
-
 /* Must be kept in sync with definitions in pdf_util.js */
 enum
 {
@@ -25,47 +9,18 @@ enum
 	Display_NoView
 };
 
-static char *get_string_or_stream(pdf_document *doc, pdf_obj *obj)
+enum
 {
-	fz_context *ctx = doc->ctx;
-	int len = 0;
-	char *buf = NULL;
-	fz_buffer *strmbuf = NULL;
-	char *text = NULL;
+	SigFlag_SignaturesExist = 1,
+	SigFlag_AppendOnly = 2
+};
 
-	fz_var(strmbuf);
-	fz_var(text);
-	fz_try(ctx)
-	{
-		if (pdf_is_string(obj))
-		{
-			len = pdf_to_str_len(obj);
-			buf = pdf_to_str_buf(obj);
-		}
-		else if (pdf_is_stream(doc, pdf_to_num(obj), pdf_to_gen(obj)))
-		{
-			strmbuf = pdf_load_stream(doc, pdf_to_num(obj), pdf_to_gen(obj));
-			len = fz_buffer_storage(ctx, strmbuf, (unsigned char **)&buf);
-		}
-
-		if (buf)
-		{
-			text = fz_malloc(ctx, len+1);
-			memcpy(text, buf, len);
-			text[len] = 0;
-		}
-	}
-	fz_always(ctx)
-	{
-		fz_drop_buffer(ctx, strmbuf);
-	}
-	fz_catch(ctx)
-	{
-		fz_free(ctx, text);
-		fz_rethrow(ctx);
-	}
-
-	return text;
+static int pdf_field_dirties_document(pdf_document *doc, pdf_obj *field)
+{
+	int ff = pdf_get_field_flags(doc, field);
+	if (ff & Ff_NoExport) return 0;
+	if (ff & Ff_ReadOnly) return 0;
+	return 1;
 }
 
 /* Find the point in a field hierarchy where all descendents
@@ -139,7 +94,7 @@ static pdf_obj *find_field(pdf_obj *dict, char *name, int len)
 
 		field = pdf_array_get(dict, i);
 		part = pdf_to_str_buf(pdf_dict_gets(field, "T"));
-		if (strlen(part) == len && !memcmp(part, name, len))
+		if (strlen(part) == (size_t)len && !memcmp(part, name, len))
 			return field;
 	}
 
@@ -231,7 +186,8 @@ static void reset_field(pdf_document *doc, pdf_obj *field)
 		}
 	}
 
-	doc->dirty = 1;
+	if (pdf_field_dirties_document(doc, field))
+		doc->dirty = 1;
 }
 
 void pdf_field_reset(pdf_document *doc, pdf_obj *field)
@@ -415,78 +371,6 @@ static void execute_action(pdf_document *doc, pdf_obj *obj, pdf_obj *a)
 			if (!strcmp(name, "Print"))
 				pdf_event_issue_print(doc);
 		}
-	}
-}
-
-void pdf_update_appearance(pdf_document *doc, pdf_annot *annot)
-{
-	pdf_obj *obj = annot->obj;
-	if (!pdf_dict_gets(obj, "AP") || pdf_obj_is_dirty(obj))
-	{
-		fz_annot_type type = pdf_annot_obj_type(obj);
-		switch (type)
-		{
-		case FZ_ANNOT_WIDGET:
-			switch (pdf_field_type(doc, obj))
-			{
-			case PDF_WIDGET_TYPE_TEXT:
-				{
-					pdf_obj *formatting = pdf_dict_getp(obj, "AA/F");
-					if (formatting && doc->js)
-					{
-						/* Apply formatting */
-						pdf_js_event e;
-						fz_context *ctx = doc->ctx;
-
-						e.target = obj;
-						e.value = pdf_field_value(doc, obj);
-						fz_try(ctx)
-						{
-							pdf_js_setup_event(doc->js, &e);
-						}
-						fz_always(ctx)
-						{
-							fz_free(ctx, e.value);
-						}
-						fz_catch(ctx)
-						{
-							fz_rethrow(ctx);
-						}
-						execute_action(doc, obj, formatting);
-						/* Update appearance from JS event.value */
-						pdf_update_text_appearance(doc, obj, pdf_js_get_event(doc->js)->value);
-					}
-					else
-					{
-						/* Update appearance from field value */
-						pdf_update_text_appearance(doc, obj, NULL);
-					}
-				}
-				break;
-			case PDF_WIDGET_TYPE_PUSHBUTTON:
-				pdf_update_pushbutton_appearance(doc, obj);
-				break;
-			case PDF_WIDGET_TYPE_LISTBOX:
-			case PDF_WIDGET_TYPE_COMBOBOX:
-				/* Treating listbox and combobox identically for now,
-				 * and the behaviour is most appropriate for a combobox */
-				pdf_update_combobox_appearance(doc, obj);
-				break;
-			}
-			break;
-		case FZ_ANNOT_STRIKEOUT:
-		case FZ_ANNOT_UNDERLINE:
-		case FZ_ANNOT_HIGHLIGHT:
-			pdf_update_text_markup_appearance(doc, annot, type);
-			break;
-		case FZ_ANNOT_INK:
-			pdf_set_ink_appearance(doc, annot);
-			break;
-		default:
-			break;
-		}
-
-		pdf_clean_obj(obj);
 	}
 }
 
@@ -739,6 +623,9 @@ int pdf_pass_event(pdf_document *doc, pdf_page *page, pdf_ui_event *ui_event)
 	fz_point *pt = &(ui_event->event.pointer.pt);
 	int changed = 0;
 
+	if (page == NULL)
+		return 0;
+
 	for (annot = page->annots; annot; annot = annot->next)
 	{
 		if (pt->x >= annot->pagerect.x0 && pt->x <= annot->pagerect.x1)
@@ -920,15 +807,57 @@ pdf_widget *pdf_next_widget(pdf_widget *previous)
 	return (pdf_widget *)annot;
 }
 
+pdf_widget *pdf_create_widget(pdf_document *doc, pdf_page *page, int type, char *fieldname)
+{
+	fz_context *ctx = doc->ctx;
+	pdf_obj *form = NULL;
+	int old_sigflags = pdf_to_int(pdf_dict_getp(pdf_trailer(doc), "Root/AcroForm/SigFlags"));
+	pdf_annot *annot = pdf_create_annot(doc, page, FZ_ANNOT_WIDGET);
+
+	fz_try(ctx)
+	{
+		pdf_set_field_type(doc, annot->obj, type);
+		pdf_dict_puts_drop(annot->obj, "T", pdf_new_string(doc, fieldname, strlen(fieldname)));
+		annot->widget_type = type;
+
+		if (type == PDF_WIDGET_TYPE_SIGNATURE)
+		{
+			int sigflags = (old_sigflags | (SigFlag_SignaturesExist|SigFlag_AppendOnly));
+			pdf_dict_putp_drop(pdf_trailer(doc), "Root/AcroForm/SigFlags", pdf_new_int(doc, sigflags));
+		}
+
+		/*
+		pdf_create_annot will have linked the new widget into the page's
+		annot array. We also need it linked into the document's form
+		*/
+		form = pdf_dict_getp(pdf_trailer(doc), "Root/AcroForm/Fields");
+		if (!form)
+		{
+			form = pdf_new_array(doc, 1);
+			pdf_dict_putp_drop(pdf_trailer(doc), "Root/AcroForm/Fields", form);
+		}
+
+		pdf_array_push(form, annot->obj); /* Cleanup relies on this statement being last */
+	}
+	fz_catch(ctx)
+	{
+		pdf_delete_annot(doc, page, annot);
+
+		/* An empty Fields array may have been created, but that is harmless */
+
+		if (type == PDF_WIDGET_TYPE_SIGNATURE)
+			pdf_dict_putp_drop(pdf_trailer(doc), "Root/AcroForm/SigFlags", pdf_new_int(doc, old_sigflags));
+
+		fz_rethrow(ctx);
+	}
+
+	return (pdf_widget *)annot;
+}
+
 int pdf_widget_get_type(pdf_widget *widget)
 {
 	pdf_annot *annot = (pdf_annot *)widget;
 	return annot->widget_type;
-}
-
-char *pdf_field_value(pdf_document *doc, pdf_obj *field)
-{
-	return get_string_or_stream(doc, pdf_get_inheritable(doc, field, "V"));
 }
 
 static int set_text_field_value(pdf_document *doc, pdf_obj *field, char *text)
@@ -950,7 +879,8 @@ static int set_text_field_value(pdf_document *doc, pdf_obj *field, char *text)
 		text = pdf_js_get_event(doc->js)->value;
 	}
 
-	doc->dirty = 1;
+	if (pdf_field_dirties_document(doc, field))
+		doc->dirty = 1;
 	update_field_value(doc, field, text);
 
 	return 1;
@@ -1329,7 +1259,7 @@ int pdf_text_widget_content_type(pdf_document *doc, pdf_widget *tw)
 	fz_var(code);
 	fz_try(ctx)
 	{
-		code = get_string_or_stream(doc, pdf_dict_getp(annot->obj, "AA/F/JS"));
+		code = pdf_get_string_or_stream(doc, pdf_dict_getp(annot->obj, "AA/F/JS"));
 		if (code)
 		{
 			if (strstr(code, "AFNumber_Format"))
@@ -1514,7 +1444,8 @@ void pdf_choice_widget_set_value(pdf_document *doc, pdf_widget *tw, int n, char 
 		pdf_dict_dels(annot->obj, "I");
 
 		pdf_field_mark_dirty(doc, annot->obj);
-		doc->dirty = 1;
+		if (pdf_field_dirties_document(doc, annot->obj))
+			doc->dirty = 1;
 	}
 	fz_catch(ctx)
 	{
@@ -1549,4 +1480,55 @@ int pdf_signature_widget_contents(pdf_document *doc, pdf_widget *widget, char **
 	if (contents)
 		*contents = pdf_to_str_buf(c);
 	return pdf_to_str_len(c);
+}
+
+void pdf_signature_set_value(pdf_document *doc, pdf_obj *field, pdf_signer *signer)
+{
+	fz_context *ctx = doc->ctx;
+	pdf_obj *v;
+	pdf_obj *indv;
+	int vnum;
+	pdf_obj *byte_range;
+	pdf_obj *contents;
+	char buf[2048];
+	pdf_unsaved_sig *unsaved_sig;
+
+	memset(buf, 0, sizeof(buf));
+
+	vnum = pdf_create_object(doc);
+	indv = pdf_new_indirect(doc, vnum, 0);
+	pdf_dict_puts_drop(field, "V", indv);
+
+	fz_var(v);
+	fz_try(ctx)
+	{
+		v = pdf_new_dict(doc, 4);
+		pdf_update_object(doc, vnum, v);
+	}
+	fz_always(ctx)
+	{
+		pdf_drop_obj(v);
+	}
+	fz_catch(ctx)
+	{
+		fz_rethrow(ctx);
+	}
+
+	byte_range = pdf_new_array(doc, 4);
+	pdf_dict_puts_drop(v, "ByteRange", byte_range);
+
+	contents = pdf_new_string(doc, buf, sizeof(buf));
+	pdf_dict_puts_drop(v, "Contents", contents);
+
+	pdf_dict_puts_drop(v, "Filter", pdf_new_name(doc, "Adobe.PPKLite"));
+	pdf_dict_puts_drop(v, "SubFilter", pdf_new_name(doc, "adbe.pkcs7.detached"));
+
+	/* Record details within the document structure so that contents
+	 * and byte_range can be updated with their correct values at
+	 * saving time */
+	unsaved_sig = fz_malloc_struct(doc->ctx, pdf_unsaved_sig);
+	unsaved_sig->field = pdf_keep_obj(field);
+	unsaved_sig->signer = pdf_keep_signer(signer);
+	unsaved_sig->next = doc->unsaved_sigs;
+	doc->unsaved_sigs = unsaved_sig;
 }

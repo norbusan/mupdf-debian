@@ -77,6 +77,20 @@ fz_stream *fz_open_memory(fz_context *ctx, unsigned char *data, int len);
 fz_stream *fz_open_buffer(fz_context *ctx, fz_buffer *buf);
 
 /*
+	fz_open_leecher: Attach a filter to a stream that will store any
+	characters read from the stream into the supplied buffer.
+
+	chain: The underlying stream to leech from.
+
+	buf: The buffer into which the read data should be appended.
+	The buffer will be resized as required.
+
+	Returns pointer to newly created stream. May throw exceptions on
+	failure to allocate.
+*/
+fz_stream *fz_open_leecher(fz_stream *chain, fz_buffer *buf);
+
+/*
 	fz_close: Close an open stream.
 
 	Drops a reference for the stream. Once no references remain
@@ -136,6 +150,14 @@ enum
 
 int fz_stream_meta(fz_stream *stm, int key, int size, void *ptr);
 
+void fz_rebind_stream(fz_stream *stm, fz_context *ctx);
+
+typedef int (fz_stream_next_fn)(fz_stream *stm, int max);
+typedef void (fz_stream_close_fn)(fz_context *ctx, void *state);
+typedef void (fz_stream_seek_fn)(fz_stream *stm, int offset, int whence);
+typedef int (fz_stream_meta_fn)(fz_stream *stm, int key, int size, void *ptr);
+typedef fz_stream *(fz_stream_rebind_fn)(fz_stream *stm);
+
 struct fz_stream_s
 {
 	fz_context *ctx;
@@ -145,18 +167,21 @@ struct fz_stream_s
 	int pos;
 	int avail;
 	int bits;
-	unsigned char *bp, *rp, *wp, *ep;
+	unsigned char *rp, *wp;
 	void *state;
-	int (*read)(fz_stream *stm, unsigned char *buf, int len);
-	void (*close)(fz_context *ctx, void *state);
-	void (*seek)(fz_stream *stm, int offset, int whence);
-	int (*meta)(fz_stream *stm, int key, int size, void *ptr);
-	unsigned char buf[4096];
+	fz_stream_next_fn *next;
+	fz_stream_close_fn *close;
+	fz_stream_seek_fn *seek;
+	fz_stream_meta_fn *meta;
+	fz_stream_rebind_fn *rebind;
 };
 
-fz_stream *fz_new_stream(fz_context *ctx, void*, int(*)(fz_stream*, unsigned char*, int), void(*)(fz_context *, void *));
+fz_stream *fz_new_stream(fz_context *ctx,
+			 void *state,
+			 fz_stream_next_fn *next,
+			 fz_stream_close_fn *close,
+			 fz_stream_rebind_fn *rebind);
 fz_stream *fz_keep_stream(fz_stream *stm);
-void fz_fill_buffer(fz_stream *stm);
 
 /*
 	fz_read_best: Attempt to read a stream into a buffer. If truncated
@@ -175,30 +200,86 @@ fz_buffer *fz_read_best(fz_stream *stm, int initial, int *truncated);
 
 void fz_read_line(fz_stream *stm, char *buf, int max);
 
+/*
+	fz_available: Ask how many bytes are available immediately from
+	a given stream.
+
+	stm: The stream to read from.
+
+	max: A hint for the underlying stream; the maximum number of
+	bytes that we are sure we will want to read. If you do not know
+	this number, give 1.
+
+	Returns the number of bytes immediately available between the
+	read and write pointers. This number is guaranteed only to be 0
+	if we have hit EOF. The number of bytes returned here need have
+	no relation to max (could be larger, could be smaller).
+*/
+static inline int fz_available(fz_stream *stm, int max)
+{
+	int len = stm->wp - stm->rp;
+	int c;
+
+	if (len)
+		return len;
+	fz_try(stm->ctx)
+	{
+		c = stm->next(stm, max);
+	}
+	fz_catch(stm->ctx)
+	{
+		fz_rethrow_if(stm->ctx, FZ_ERROR_TRYLATER);
+		fz_warn(stm->ctx, "read error; treating as end of file");
+		stm->error = 1;
+		c = EOF;
+	}
+	if (c == EOF)
+	{
+		stm->eof = 1;
+		return 0;
+	}
+	stm->rp--;
+	return stm->wp - stm->rp;
+}
+
 static inline int fz_read_byte(fz_stream *stm)
 {
-	if (stm->rp == stm->wp)
+	int c;
+
+	if (stm->rp != stm->wp)
+		return *stm->rp++;
+	fz_try(stm->ctx)
 	{
-		fz_fill_buffer(stm);
-		return stm->rp < stm->wp ? *stm->rp++ : EOF;
+		c = stm->next(stm, 1);
 	}
-	return *stm->rp++;
+	fz_catch(stm->ctx)
+	{
+		fz_rethrow_if(stm->ctx, FZ_ERROR_TRYLATER);
+		fz_warn(stm->ctx, "read error; treating as end of file");
+		stm->error = 1;
+		c = EOF;
+	}
+	if (c == EOF)
+		stm->eof = 1;
+	return c;
 }
 
 static inline int fz_peek_byte(fz_stream *stm)
 {
-	if (stm->rp == stm->wp)
-	{
-		fz_fill_buffer(stm);
-		return stm->rp < stm->wp ? *stm->rp : EOF;
-	}
-	return *stm->rp;
+	int c;
+
+	if (stm->rp != stm->wp)
+		return *stm->rp;
+
+	c = stm->next(stm, 1);
+	if (c != EOF)
+		stm->rp--;
+	return c;
 }
 
 static inline void fz_unread_byte(fz_stream *stm)
 {
-	if (stm->rp > stm->bp)
-		stm->rp--;
+	stm->rp--;
 }
 
 static inline int fz_is_eof(fz_stream *stm)

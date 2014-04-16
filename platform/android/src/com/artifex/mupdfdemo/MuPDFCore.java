@@ -49,6 +49,9 @@ public class MuPDFCore
 	private native void setFocusedWidgetChoiceSelectedInternal(String [] selected);
 	private native String [] getFocusedWidgetChoiceSelected();
 	private native String [] getFocusedWidgetChoiceOptions();
+	private native int getFocusedWidgetSignatureState();
+	private native String checkFocusedSignatureInternal();
+	private native boolean signFocusedSignatureInternal(String keyFile, String password);
 	private native int setFocusedWidgetTextInternal(String text);
 	private native String getFocusedWidgetTextInternal();
 	private native int getFocusedWidgetTypeInternal();
@@ -67,7 +70,7 @@ public class MuPDFCore
 	private native boolean hasChangesInternal();
 	private native void saveInternal();
 
-	public static native boolean javascriptSupported();
+	public native boolean javascriptSupported();
 
 	public MuPDFCore(Context context, String filename) throws Exception
 	{
@@ -146,31 +149,19 @@ public class MuPDFCore
 		globals = 0;
 	}
 
-	public synchronized Bitmap drawPage(int page,
+	public synchronized void drawPage(Bitmap bm, int page,
 			int pageW, int pageH,
 			int patchX, int patchY,
 			int patchW, int patchH) {
 		gotoPage(page);
-		Bitmap bm = Bitmap.createBitmap(patchW, patchH, Config.ARGB_8888);
 		drawPage(bm, pageW, pageH, patchX, patchY, patchW, patchH);
-		return bm;
 	}
 
-	public synchronized Bitmap updatePage(BitmapHolder h, int page,
+	public synchronized void updatePage(Bitmap bm, int page,
 			int pageW, int pageH,
 			int patchX, int patchY,
 			int patchW, int patchH) {
-		Bitmap bm = null;
-		Bitmap old_bm = h.getBm();
-
-		if (old_bm == null)
-			return null;
-
-		bm = old_bm.copy(Bitmap.Config.ARGB_8888, false);
-		old_bm = null;
-
 		updatePageInternal(bm, page, pageW, pageH, patchX, patchY, patchW, patchH);
-		return bm;
 	}
 
 	public synchronized PassClickResult passClickEvent(int page, float x, float y) {
@@ -183,6 +174,8 @@ public class MuPDFCore
 		case LISTBOX:
 		case COMBOBOX:
 			return new PassClickResultChoice(changed, getFocusedWidgetChoiceOptions(), getFocusedWidgetChoiceSelected());
+		case SIGNATURE:
+			return new PassClickResultSignature(changed, getFocusedWidgetSignatureState());
 		default:
 			return new PassClickResult(changed);
 		}
@@ -199,6 +192,14 @@ public class MuPDFCore
 
 	public synchronized void setFocusedWidgetChoiceSelected(String [] selected) {
 		setFocusedWidgetChoiceSelectedInternal(selected);
+	}
+
+	public synchronized String checkFocusedSignature() {
+		return checkFocusedSignatureInternal();
+	}
+
+	public synchronized boolean signFocusedSignature(String keyFile, String password) {
+		return signFocusedSignatureInternal(keyFile, password);
 	}
 
 	public synchronized LinkInfo [] getPageLinks(int page) {
@@ -233,6 +234,8 @@ public class MuPDFCore
 		ArrayList<TextWord[]> lns = new ArrayList<TextWord[]>();
 
 		for (TextChar[][][] bl: chars) {
+			if (bl == null)
+				continue;
 			for (TextChar[][] ln: bl) {
 				ArrayList<TextWord> wds = new ArrayList<TextWord>();
 				TextWord wd = new TextWord();

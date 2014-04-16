@@ -118,7 +118,7 @@ fz_mask_color_key(fz_pixmap *pix, int n, int *colorkey)
 }
 
 fz_pixmap *
-fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, int in_line, int indexed, int l2factor, int native_l2factor)
+fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, int indexed, int l2factor, int native_l2factor)
 {
 	fz_pixmap *tile = NULL;
 	int stride, len, i;
@@ -140,27 +140,6 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, in
 		samples = fz_malloc_array(ctx, h, stride);
 
 		len = fz_read(stm, samples, h * stride);
-		if (len < 0)
-		{
-			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot read image data");
-		}
-
-		/* Make sure we read the EOF marker (for inline images only) */
-		if (in_line)
-		{
-			unsigned char tbuf[512];
-			fz_try(ctx)
-			{
-				int tlen = fz_read(stm, tbuf, sizeof tbuf);
-				if (tlen > 0)
-					fz_warn(ctx, "ignoring garbage at end of image");
-			}
-			fz_catch(ctx)
-			{
-				fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
-				fz_warn(ctx, "ignoring error at end of image");
-			}
-		}
 
 		/* Pad truncated images */
 		if (len < stride * h)
@@ -259,16 +238,19 @@ fz_image_get_pixmap(fz_context *ctx, fz_image *image, int w, int h)
 	}
 
 	/* Ensure our expectations for tile size are reasonable */
-	if (w > image->w)
+	if (w < 0 || w > image->w)
 		w = image->w;
-	if (h > image->h)
+	if (h < 0 || h > image->h)
 		h = image->h;
 
-	/* What is our ideal factor? */
+	/* What is our ideal factor? We search for the largest factor where
+	 * we can subdivide and stay larger than the required size. We add
+	 * a fudge factor of +2 here to allow for the possibility of
+	 * expansion due to grid fitting. */
 	if (w == 0 || h == 0)
 		l2factor = 0;
 	else
-		for (l2factor=0; image->w>>(l2factor+1) >= w && image->h>>(l2factor+1) >= h && l2factor < 8; l2factor++);
+		for (l2factor=0; image->w>>(l2factor+1) >= w+2 && image->h>>(l2factor+1) >= h+2 && l2factor < 8; l2factor++);
 
 	/* Can we find any suitable tiles in the cache? */
 	key.refs = 1;
@@ -293,12 +275,25 @@ fz_image_get_pixmap(fz_context *ctx, fz_image *image, int w, int h)
 	case FZ_IMAGE_TIFF:
 		tile = fz_load_tiff(ctx, image->buffer->buffer->data, image->buffer->buffer->len);
 		break;
+	case FZ_IMAGE_JXR:
+		tile = fz_load_jxr(ctx, image->buffer->buffer->data, image->buffer->buffer->len);
+		break;
 	default:
 		native_l2factor = l2factor;
-		stm = fz_open_image_decomp_stream(ctx, image->buffer, &native_l2factor);
+		stm = fz_open_image_decomp_stream_from_buffer(ctx, image->buffer, &native_l2factor);
 
 		indexed = fz_colorspace_is_indexed(image->colorspace);
-		tile = fz_decomp_image_from_stream(ctx, stm, image, 0, indexed, l2factor, native_l2factor);
+		tile = fz_decomp_image_from_stream(ctx, stm, image, indexed, l2factor, native_l2factor);
+
+		/* CMYK JPEGs in XPS documents have to be inverted */
+		if (image->invert_cmyk_jpeg &&
+			image->buffer->params.type == FZ_IMAGE_JPEG &&
+			image->colorspace == fz_device_cmyk(ctx) &&
+			image->buffer->params.u.jpeg.color_transform)
+		{
+			fz_invert_pixmap(ctx, tile);
+		}
+
 		break;
 	}
 
@@ -348,7 +343,7 @@ fz_new_image_from_pixmap(fz_context *ctx, fz_pixmap *pixmap, fz_image *mask)
 		image->w = pixmap->w;
 		image->h = pixmap->h;
 		image->n = pixmap->n;
-		image->colorspace = pixmap->colorspace;
+		image->colorspace = fz_keep_colorspace(ctx, pixmap->colorspace);
 		image->bpc = 8;
 		image->buffer = NULL;
 		image->get_pixmap = fz_image_get_pixmap;
@@ -359,6 +354,7 @@ fz_new_image_from_pixmap(fz_context *ctx, fz_pixmap *pixmap, fz_image *mask)
 	}
 	fz_catch(ctx)
 	{
+		fz_drop_pixmap(ctx, pixmap);
 		fz_drop_image(ctx, mask);
 		fz_rethrow(ctx);
 	}
@@ -474,7 +470,10 @@ fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer)
 			fz_load_png_info(ctx, buf, len, &w, &h, &xres, &yres, &cspace);
 		}
 		else if (memcmp(buf, "II", 2) == 0 && buf[2] == 0xBC)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "JPEG-XR codec is not available");
+		{
+			bc->params.type = FZ_IMAGE_JXR;
+			fz_load_jxr_info(ctx, buf, len, &w, &h, &xres, &yres, &cspace);
+		}
 		else if (memcmp(buf, "MM", 2) == 0 || memcmp(buf, "II", 2) == 0)
 		{
 			bc->params.type = FZ_IMAGE_TIFF;

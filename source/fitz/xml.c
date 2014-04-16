@@ -28,26 +28,31 @@ static inline void indent(int n)
 
 void fz_debug_xml(fz_xml *item, int level)
 {
-	while (item) {
-		if (item->text) {
-			printf("%s\n", item->text);
-		} else {
-			struct attribute *att;
+	if (item->text)
+	{
+		printf("%s\n", item->text);
+	}
+	else
+	{
+		fz_xml *child;
+		struct attribute *att;
+
+		indent(level);
+		printf("<%s", item->name);
+		for (att = item->atts; att; att = att->next)
+			printf(" %s=\"%s\"", att->name, att->value);
+		if (item->down)
+		{
+			printf(">\n");
+			for (child = item->down; child; child = child->next)
+				fz_debug_xml(child, level + 1);
 			indent(level);
-			printf("<%s", item->name);
-			for (att = item->atts; att; att = att->next)
-				printf(" %s=\"%s\"", att->name, att->value);
-			if (item->down) {
-				printf(">\n");
-				fz_debug_xml(item->down, level + 1);
-				indent(level);
-				printf("</%s>\n", item->name);
-			}
-			else {
-				printf("/>\n");
-			}
+			printf("</%s>\n", item->name);
 		}
-		item = item->next;
+		else
+		{
+			printf("/>\n");
+		}
 	}
 }
 
@@ -144,7 +149,7 @@ static int xml_parse_entity(int *c, char *a)
 		*c = '"';
 		return 6;
 	}
-	*c = *a++;
+	*c = *a;
 	return 1;
 }
 
@@ -288,9 +293,10 @@ parse_element:
 
 parse_comment:
 	if (*p == '[') goto parse_cdata;
+	if (*p == 'D' && !memcmp(p, "DOCTYPE", 7)) goto parse_declaration;
 	if (*p++ != '-') return "syntax error in comment (<! not followed by --)";
 	if (*p++ != '-') return "syntax error in comment (<!- not followed by -)";
-	mark = p;
+	/* mark = p; */
 	while (*p) {
 		if (p[0] == '-' && p[1] == '-' && p[2] == '>') {
 			p += 3;
@@ -300,11 +306,15 @@ parse_comment:
 	}
 	return "end of data in comment";
 
+parse_declaration:
+	while (*p) if (*p++ == '>') goto parse_text;
+	return "end of data in declaration";
+
 parse_cdata:
 	if (p[1] != 'C' || p[2] != 'D' || p[3] != 'A' || p[4] != 'T' || p[5] != 'A' || p[6] != '[')
 		return "syntax error in CDATA section";
 	p += 7;
-	mark = p;
+	/* mark = p; */
 	while (*p) {
 		if (p[0] == ']' && p[1] == ']' && p[2] == '>') {
 			p += 3;
@@ -326,7 +336,7 @@ parse_processing_instruction:
 
 parse_closing_element:
 	while (iswhite(*p)) ++p;
-	mark = p;
+	/* mark = p; */
 	while (isname(*p)) ++p;
 	while (iswhite(*p)) ++p;
 	if (*p != '>')

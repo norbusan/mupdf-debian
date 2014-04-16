@@ -1,6 +1,7 @@
 #ifndef MUPDF_FITZ_CONTEXT_H
 #define MUPDF_FITZ_CONTEXT_H
 
+#include "mupdf/fitz/version.h"
 #include "mupdf/fitz/system.h"
 
 /*
@@ -17,6 +18,7 @@ typedef struct fz_aa_context_s fz_aa_context;
 typedef struct fz_locks_context_s fz_locks_context;
 typedef struct fz_store_s fz_store;
 typedef struct fz_glyph_cache_s fz_glyph_cache;
+typedef struct fz_document_handler_context_s fz_document_handler_context;
 typedef struct fz_context_s fz_context;
 
 struct fz_alloc_context_s
@@ -106,6 +108,7 @@ struct fz_context_s
 	fz_aa_context *aa;
 	fz_store *store;
 	fz_glyph_cache *glyph_cache;
+	fz_document_handler_context *handler;
 };
 
 /*
@@ -150,7 +153,9 @@ enum {
 
 	Does not throw exceptions, but may return NULL.
 */
-fz_context *fz_new_context(fz_alloc_context *alloc, fz_locks_context *locks, unsigned int max_store);
+fz_context *fz_new_context_imp(fz_alloc_context *alloc, fz_locks_context *locks, unsigned int max_store, const char *version);
+
+#define fz_new_context(alloc, locks, max_store) fz_new_context_imp(alloc, locks, max_store, FZ_VERSION)
 
 /*
 	fz_clone_context: Make a clone of an existing context.
@@ -224,7 +229,7 @@ struct fz_locks_context_s
 
 enum {
 	FZ_LOCK_ALLOC = 0,
-	FZ_LOCK_FILE,
+	FZ_LOCK_FILE, /* Unused now */
 	FZ_LOCK_FREETYPE,
 	FZ_LOCK_GLYPHCACHE,
 	FZ_LOCK_MAX
@@ -395,12 +400,6 @@ char *fz_strdup_no_throw(fz_context *ctx, const char *s);
 */
 int fz_gen_id(fz_context *ctx);
 
-/*
-	fz_javascript_supported: test whether a version of mupdf with
-	a javascript engine is in use.
-*/
-int fz_javascript_supported(void);
-
 struct fz_warn_context_s
 {
 	char message[256];
@@ -412,6 +411,10 @@ fz_context *fz_clone_context_internal(fz_context *ctx);
 void fz_new_aa_context(fz_context *ctx);
 void fz_free_aa_context(fz_context *ctx);
 void fz_copy_aa_context(fz_context *dst, fz_context *src);
+
+void fz_new_document_handler_context(fz_context *ctx);
+void fz_drop_document_handler_context(fz_context *ctx);
+fz_document_handler_context *fz_keep_document_handler_context(fz_context *ctx);
 
 /* Default allocator */
 extern fz_alloc_context fz_alloc_default;

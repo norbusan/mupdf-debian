@@ -6,18 +6,42 @@ static fz_colorspace *
 load_icc_based(pdf_document *doc, pdf_obj *dict)
 {
 	int n;
+	pdf_obj *obj;
+	fz_context *ctx = doc->ctx;
 
 	n = pdf_to_int(pdf_dict_gets(dict, "N"));
+	obj = pdf_dict_gets(dict, "Alternate");
+
+	if (obj)
+	{
+		fz_colorspace *cs_alt = NULL;
+
+		fz_try(ctx)
+		{
+			cs_alt = pdf_load_colorspace(doc, obj);
+			if (cs_alt->n != n)
+			{
+				fz_drop_colorspace(ctx, cs_alt);
+				fz_throw(ctx, FZ_ERROR_GENERIC, "ICCBased /Alternate colorspace must have %d components", n);
+			}
+		}
+		fz_catch(ctx)
+		{
+			cs_alt = NULL;
+		}
+
+		if (cs_alt)
+			return cs_alt;
+	}
 
 	switch (n)
 	{
-	case 1: return fz_device_gray(doc->ctx);
-	case 3: return fz_device_rgb(doc->ctx);
-	case 4: return fz_device_cmyk(doc->ctx);
+	case 1: return fz_device_gray(ctx);
+	case 3: return fz_device_rgb(ctx);
+	case 4: return fz_device_cmyk(ctx);
 	}
 
-	fz_throw(doc->ctx, FZ_ERROR_GENERIC, "syntaxerror: ICCBased must have 1, 3 or 4 components");
-	return NULL; /* Stupid MSVC */
+	fz_throw(ctx, FZ_ERROR_GENERIC, "syntaxerror: ICCBased must have 1, 3 or 4 components");
 }
 
 /* Lab */
@@ -30,7 +54,7 @@ static inline float fung(float x)
 }
 
 static void
-lab_to_rgb(fz_context *ctx, fz_colorspace *cs, float *lab, float *rgb)
+lab_to_rgb(fz_context *ctx, fz_colorspace *cs, const float *lab, float *rgb)
 {
 	/* input is in range (0..100, -128..127, -128..127) not (0..1, 0..1, 0..1) */
 	float lstar, astar, bstar, l, m, n, x, y, z, r, g, b;
@@ -52,7 +76,7 @@ lab_to_rgb(fz_context *ctx, fz_colorspace *cs, float *lab, float *rgb)
 }
 
 static void
-rgb_to_lab(fz_context *ctx, fz_colorspace *cs, float *rgb, float *lab)
+rgb_to_lab(fz_context *ctx, fz_colorspace *cs, const float *rgb, float *lab)
 {
 	fz_warn(ctx, "cannot convert into L*a*b colorspace");
 	lab[0] = rgb[0];
@@ -72,7 +96,7 @@ struct separation
 };
 
 static void
-separation_to_rgb(fz_context *ctx, fz_colorspace *cs, float *color, float *rgb)
+separation_to_rgb(fz_context *ctx, fz_colorspace *cs, const float *color, float *rgb)
 {
 	struct separation *sep = cs->data;
 	float alt[FZ_MAX_COLORS];
@@ -142,6 +166,14 @@ load_separation(pdf_document *doc, pdf_obj *array)
 	return cs;
 }
 
+int
+pdf_is_tint_colorspace(fz_colorspace *cs)
+{
+	return cs && cs->to_rgb == separation_to_rgb;
+}
+
+/* Indexed */
+
 static fz_colorspace *
 load_indexed(pdf_document *doc, pdf_obj *array)
 {
@@ -155,6 +187,7 @@ load_indexed(pdf_document *doc, pdf_obj *array)
 	unsigned char *lookup = NULL;
 
 	fz_var(base);
+	fz_var(lookup);
 
 	fz_try(ctx)
 	{
@@ -165,7 +198,7 @@ load_indexed(pdf_document *doc, pdf_obj *array)
 		n = base->n * (high + 1);
 		lookup = fz_malloc_array(ctx, 1, n);
 
-		if (pdf_is_string(lookupobj) && pdf_to_str_len(lookupobj) == n)
+		if (pdf_is_string(lookupobj) && pdf_to_str_len(lookupobj) >= n)
 		{
 			unsigned char *buf = (unsigned char *) pdf_to_str_buf(lookupobj);
 			for (i = 0; i < n; i++)
@@ -181,6 +214,8 @@ load_indexed(pdf_document *doc, pdf_obj *array)
 			{
 				file = pdf_open_stream(doc, pdf_to_num(lookupobj), pdf_to_gen(lookupobj));
 				i = fz_read(file, lookup, n);
+				if (i < n)
+					memset(lookup+i, 0, n-i);
 			}
 			fz_always(ctx)
 			{
@@ -316,7 +351,6 @@ pdf_load_colorspace_imp(pdf_document *doc, pdf_obj *obj)
 	}
 
 	fz_throw(doc->ctx, FZ_ERROR_GENERIC, "syntaxerror: could not parse color space (%d %d R)", pdf_to_num(obj), pdf_to_gen(obj));
-	return NULL; /* Stupid MSVC */
 }
 
 fz_colorspace *
@@ -325,7 +359,7 @@ pdf_load_colorspace(pdf_document *doc, pdf_obj *obj)
 	fz_context *ctx = doc->ctx;
 	fz_colorspace *cs;
 
-	if ((cs = pdf_find_item(ctx, fz_free_colorspace_imp, obj)))
+	if ((cs = pdf_find_item(ctx, fz_free_colorspace_imp, obj)) != NULL)
 	{
 		return cs;
 	}

@@ -92,18 +92,45 @@ static char copylatin1[1024 * 16] = "";
 static char copyutf8[1024 * 48] = "";
 static Time copytime;
 static char *filename;
+static char message[1024] = "";
 
 static pdfapp_t gapp;
 static int closing = 0;
 static int reloading = 0;
 static int showingpage = 0;
+static int showingmessage = 0;
 
 static int advance_scheduled = 0;
+static struct timeval tmo;
 static struct timeval tmo_advance;
+static struct timeval tmo_at;
 
 /*
  * Dialog boxes
  */
+static void showmessage(pdfapp_t *app, int timeout, char *msg)
+{
+	struct timeval now;
+
+	showingmessage = 1;
+	showingpage = 0;
+
+	fz_strlcpy(message, msg, sizeof message);
+
+	if (!tmo_at.tv_sec && !tmo_at.tv_usec)
+	{
+		tmo.tv_sec = timeout;
+		gettimeofday(&now, NULL);
+		timeradd(&now, &tmo, &tmo_at);
+	}
+	else if (tmo.tv_sec < timeout)
+	{
+		tmo.tv_sec = timeout;
+		tmo.tv_usec = 0;
+		gettimeofday(&now, NULL);
+		timeradd(&now, &tmo, &tmo_at);
+	}
+}
 
 void winerror(pdfapp_t *app, char *msg)
 {
@@ -114,12 +141,17 @@ void winerror(pdfapp_t *app, char *msg)
 
 void winwarn(pdfapp_t *app, char *msg)
 {
-	fprintf(stderr, "mupdf: warning: %s\n", msg);
+	char buf[1024];
+	snprintf(buf, sizeof buf, "warning: %s", msg);
+	showmessage(app, 10, buf);
+	fprintf(stderr, "mupdf: %s\n", buf);
 }
 
 void winalert(pdfapp_t *app, pdf_alert_event *alert)
 {
-	fprintf(stderr, "Alert %s: %s\n", alert->title, alert->message);
+	char buf[1024];
+	snprintf(buf, sizeof buf, "Alert %s: %s", alert->title, alert->message);
+	fprintf(stderr, "%s\n", buf);
 	switch (alert->button_group_type)
 	{
 	case PDF_ALERT_BUTTON_GROUP_OK:
@@ -263,11 +295,15 @@ static void winopen(void)
 
 void winclose(pdfapp_t *app)
 {
-	closing = 1;
+	if (pdfapp_preclose(app))
+	{
+		closing = 1;
+	}
 }
 
 int winsavequery(pdfapp_t *app)
 {
+	fprintf(stderr, "mupdf: discarded changes to document\n");
 	/* FIXME: temporary dummy implementation */
 	return DISCARD;
 }
@@ -285,7 +321,7 @@ void winreplacefile(char *source, char *target)
 
 void wincopyfile(char *source, char *target)
 {
-	char *buf = malloc(strlen(source)+strlen(target)+4);
+	char *buf = malloc(strlen(source)+strlen(target)+5);
 	if (buf)
 	{
 		sprintf(buf, "cp %s %s", source, target);
@@ -425,15 +461,27 @@ static void fillrect(int x, int y, int w, int h)
 		XFillRectangle(xdpy, xwin, xgc, x, y, w, h);
 }
 
-static void winblitsearch(pdfapp_t *app)
+static void winblitstatusbar(pdfapp_t *app)
 {
-	if (gapp.isediting)
+	if (gapp.issearching)
 	{
 		char buf[sizeof(gapp.search) + 50];
 		sprintf(buf, "Search: %s", gapp.search);
 		XSetForeground(xdpy, xgc, WhitePixel(xdpy, xscr));
 		fillrect(0, 0, gapp.winw, 30);
 		windrawstring(&gapp, 10, 20, buf);
+	}
+	else if (showingmessage)
+	{
+		XSetForeground(xdpy, xgc, WhitePixel(xdpy, xscr));
+		fillrect(0, 0, gapp.winw, 30);
+		windrawstring(&gapp, 10, 20, message);
+	}
+	else if (showingpage)
+	{
+		char buf[42];
+		snprintf(buf, sizeof buf, "Page %d/%d", gapp.pageno, gapp.pagecount);
+		windrawstringxor(&gapp, 10, 20, buf);
 	}
 }
 
@@ -507,14 +555,7 @@ static void winblit(pdfapp_t *app)
 		justcopied = 1;
 	}
 
-	winblitsearch(app);
-
-	if (showingpage)
-	{
-		char buf[42];
-		snprintf(buf, sizeof buf, "Page %d/%d", gapp.pageno, gapp.pagecount);
-		windrawstringxor(&gapp, 10, 20, buf);
-	}
+	winblitstatusbar(app);
 }
 
 void winrepaint(pdfapp_t *app)
@@ -707,14 +748,26 @@ static void onkey(int c)
 		winrepaint(&gapp);
 	}
 
-	if (!gapp.isediting && c == 'P')
+	if (!gapp.issearching && c == 'P')
 	{
+		struct timeval now;
+		struct timeval tmo;
+		tmo.tv_sec = 2;
+		tmo.tv_usec = 0;
+		gettimeofday(&now, NULL);
+		timeradd(&now, &tmo, &tmo_at);
 		showingpage = 1;
 		winrepaint(&gapp);
 		return;
 	}
 
 	pdfapp_onkey(&gapp, c);
+
+	if (gapp.issearching)
+	{
+		showingpage = 0;
+		showingmessage = 0;
+	}
 }
 
 static void onmouse(int x, int y, int btn, int modifiers, int state)
@@ -760,9 +813,7 @@ int main(int argc, char **argv)
 	int width = -1;
 	int height = -1;
 	fz_context *ctx;
-	struct timeval tmo_at;
 	struct timeval now;
-	struct timeval tmo;
 	struct timeval *timeout;
 	struct timeval tmo_advance_delay;
 
@@ -817,6 +868,7 @@ int main(int argc, char **argv)
 
 	tmo_at.tv_sec = 0;
 	tmo_at.tv_usec = 0;
+	timeout = NULL;
 
 	while (!closing)
 	{
@@ -845,7 +897,7 @@ int main(int argc, char **argv)
 			case KeyPress:
 				len = XLookupString(&xevt.xkey, buf, sizeof buf, &keysym, NULL);
 
-				if (!gapp.isediting)
+				if (!gapp.issearching)
 					switch (keysym)
 					{
 					case XK_Escape:
@@ -929,20 +981,18 @@ int main(int argc, char **argv)
 			if (dirty)
 				winblit(&gapp);
 			else if (dirtysearch)
-				winblitsearch(&gapp);
+				winblitstatusbar(&gapp);
 			dirty = 0;
 			transition_dirty = 0;
 			dirtysearch = 0;
 			pdfapp_postblit(&gapp);
 		}
 
-		if (showingpage && !tmo_at.tv_sec && !tmo_at.tv_usec)
+		if (!showingpage && !showingmessage && (tmo_at.tv_sec || tmo_at.tv_usec))
 		{
-			tmo.tv_sec = 2;
-			tmo.tv_usec = 0;
-
-			gettimeofday(&now, NULL);
-			timeradd(&now, &tmo, &tmo_at);
+			tmo_at.tv_sec = 0;
+			tmo_at.tv_usec = 0;
+			timeout = NULL;
 		}
 
 		if (XPending(xdpy) || transition_dirty)
@@ -960,6 +1010,7 @@ int main(int argc, char **argv)
 				tmo_at.tv_usec = 0;
 				timeout = NULL;
 				showingpage = 0;
+				showingmessage = 0;
 				winrepaint(&gapp);
 			}
 			else
@@ -1015,6 +1066,7 @@ int main(int argc, char **argv)
 				tmo_at.tv_usec = 0;
 				timeout = NULL;
 				showingpage = 0;
+				showingmessage = 0;
 				winrepaint(&gapp);
 			}
 		}

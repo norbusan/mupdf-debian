@@ -3,7 +3,7 @@
  */
 
 #include "mupdf/fitz.h"
-#include "mupdf/pdf.h" /* for mujstest */
+#include "mupdf/pdf.h" /* for pdf output */
 
 #ifdef _MSC_VER
 #include <winsock2.h>
@@ -14,9 +14,9 @@
 
 enum { TEXT_PLAIN = 1, TEXT_HTML = 2, TEXT_XML = 3 };
 
-enum { OUT_PNG, OUT_PPM, OUT_PNM, OUT_PAM, OUT_PGM, OUT_PBM, OUT_SVG, OUT_PWG, OUT_PCL, OUT_PDF };
+enum { OUT_PNG, OUT_PPM, OUT_PNM, OUT_PAM, OUT_PGM, OUT_PBM, OUT_SVG, OUT_PWG, OUT_PCL, OUT_PDF, OUT_TGA };
 
-enum { CS_INVALID, CS_UNSET, CS_MONO, CS_GRAY, CS_GRAYALPHA, CS_RGB, CS_RGBA };
+enum { CS_INVALID, CS_UNSET, CS_MONO, CS_GRAY, CS_GRAY_ALPHA, CS_RGB, CS_RGB_ALPHA, CS_CMYK, CS_CMYK_ALPHA };
 
 typedef struct
 {
@@ -36,6 +36,7 @@ static const suffix_t suffix_table[] =
 	{ ".pwg", OUT_PWG },
 	{ ".pcl", OUT_PCL },
 	{ ".pdf", OUT_PDF },
+	{ ".tga", OUT_TGA },
 };
 
 typedef struct
@@ -51,12 +52,15 @@ static const cs_name_t cs_name_table[] =
 	{ "g", CS_GRAY },
 	{ "gray", CS_GRAY },
 	{ "grey", CS_GRAY },
-	{ "ga", CS_GRAYALPHA },
-	{ "grayalpha", CS_GRAYALPHA },
-	{ "greyalpha", CS_GRAYALPHA },
+	{ "ga", CS_GRAY_ALPHA },
+	{ "grayalpha", CS_GRAY_ALPHA },
+	{ "greyalpha", CS_GRAY_ALPHA },
 	{ "rgb", CS_RGB },
-	{ "rgba", CS_RGBA },
-	{ "rgbalpha", CS_RGBA }
+	{ "rgba", CS_RGB_ALPHA },
+	{ "rgbalpha", CS_RGB_ALPHA },
+	{ "cmyk", CS_CMYK },
+	{ "cmyka", CS_CMYK_ALPHA },
+	{ "cmykalpha", CS_CMYK_ALPHA },
 };
 
 typedef struct
@@ -68,16 +72,17 @@ typedef struct
 
 static const format_cs_table_t format_cs_table[] =
 {
-	{ OUT_PNG, CS_RGB, { CS_GRAY, CS_GRAYALPHA, CS_RGB, CS_RGBA } },
+	{ OUT_PNG, CS_RGB, { CS_GRAY, CS_GRAY_ALPHA, CS_RGB, CS_RGB_ALPHA } },
 	{ OUT_PPM, CS_RGB, { CS_GRAY, CS_RGB } },
 	{ OUT_PNM, CS_GRAY, { CS_GRAY, CS_RGB } },
-	{ OUT_PAM, CS_RGBA, { CS_RGBA } },
+	{ OUT_PAM, CS_RGB_ALPHA, { CS_GRAY, CS_GRAY_ALPHA, CS_RGB, CS_RGB_ALPHA, CS_CMYK, CS_CMYK_ALPHA } },
 	{ OUT_PGM, CS_GRAY, { CS_GRAY, CS_RGB } },
 	{ OUT_PBM, CS_MONO, { CS_MONO } },
 	{ OUT_SVG, CS_RGB, { CS_RGB } },
-	{ OUT_PWG, CS_RGB, { CS_MONO, CS_GRAY, CS_RGB } },
+	{ OUT_PWG, CS_RGB, { CS_MONO, CS_GRAY, CS_RGB, CS_CMYK } },
 	{ OUT_PCL, CS_MONO, { CS_MONO } },
-	{ OUT_PDF, CS_RGB, { CS_RGB } }
+	{ OUT_PDF, CS_RGB, { CS_RGB } },
+	{ OUT_TGA, CS_RGB, { CS_GRAY, CS_GRAY_ALPHA, CS_RGB, CS_RGB_ALPHA } },
 };
 
 /*
@@ -88,49 +93,8 @@ static const format_cs_table_t format_cs_table[] =
 	in here, as it causes a warning about a possibly malformed comment.
 */
 
-static char lorem[] =
-"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Vestibulum "
-"vehicula augue id est lobortis mollis. Aenean vestibulum metus sed est "
-"gravida non tempus lacus aliquet. Nulla vehicula lobortis tincidunt. "
-"Donec malesuada nisl et lacus condimentum nec tincidunt urna gravida. "
-"Sed dapibus magna eu velit ultrices non rhoncus risus lacinia. Fusce "
-"vitae nulla volutpat elit dictum ornare at eu libero. Maecenas felis "
-"enim, tempor a tincidunt id, commodo consequat lectus.\n"
-"Morbi tincidunt adipiscing lacus eu dignissim. Pellentesque augue elit, "
-"ultrices vitae fermentum et, faucibus et purus. Nam ante libero, lacinia "
-"id tincidunt at, ultricies a lorem. Donec non neque at purus condimentum "
-"eleifend quis sit amet libero. Sed semper, mi ut tempus tincidunt, lacus "
-"eros pellentesque lacus, id vehicula est diam eu quam. Integer tristique "
-"fringilla rhoncus. Phasellus convallis, justo ut mollis viverra, dui odio "
-"euismod ante, nec fringilla nisl mi ac diam.\n"
-"Maecenas mi urna, ornare commodo feugiat id, cursus in massa. Vivamus "
-"augue augue, aliquam at varius eu, venenatis fermentum felis. Sed varius "
-"turpis a felis ultrices quis aliquet nunc tincidunt. Suspendisse posuere "
-"commodo nunc non viverra. Praesent condimentum varius quam, vel "
-"consectetur odio volutpat in. Sed malesuada augue ut lectus commodo porta. "
-"Vivamus eget mauris sit amet diam ultrices sollicitudin. Cras pharetra leo "
-"non elit lacinia vulputate.\n"
-"Donec ac enim justo, ornare scelerisque diam. Ut vel ante at lorem "
-"placerat bibendum ultricies mattis metus. Phasellus in imperdiet odio. "
-"Proin semper lacinia libero, sed rutrum eros blandit non. Duis tincidunt "
-"ligula est, non pellentesque mauris. Aliquam in erat scelerisque lacus "
-"dictum suscipit eget semper magna. Nullam luctus imperdiet risus a "
-"semper.\n"
-"Curabitur sit amet tempor sapien. Quisque et tortor in lacus dictum "
-"pulvinar. Nunc at nisl ut velit vehicula hendrerit. Mauris elementum "
-"sollicitudin leo ac ullamcorper. Proin vel leo nec justo tempus aliquet "
-"nec ut mi. Pellentesque vel nisl id dui hendrerit fermentum nec quis "
-"tortor. Proin eu sem luctus est consequat euismod. Vestibulum ante ipsum "
-"primis in faucibus orci luctus et ultrices posuere cubilia Curae; Fusce "
-"consectetur ultricies nisl ornare dictum. Cras sagittis consectetur lorem "
-"sed posuere. Mauris accumsan laoreet arcu, id molestie lorem faucibus eu. "
-"Vivamus commodo, neque nec imperdiet pretium, lorem metus viverra turpis, "
-"malesuada vulputate justo eros sit amet neque. Nunc quis justo elit, non "
-"rutrum mauris. Maecenas blandit condimentum nibh, nec vulputate orci "
-"pulvinar at. Proin sed arcu vel odio tempus lobortis sed posuere ipsum. Ut "
-"feugiat pellentesque tortor nec ornare.\n";
-
 static char *output = NULL;
+static char *format = NULL;
 static float resolution = 72;
 static int res_specified = 0;
 static float rotation = 0;
@@ -153,16 +117,16 @@ static int ignore_errors = 0;
 static int output_format;
 static int append = 0;
 static int out_cs = CS_UNSET;
-
+static int bandheight = 0;
+static int memtrace_current = 0;
+static int memtrace_peak = 0;
+static int memtrace_total = 0;
+static int showmemory = 0;
 static fz_text_sheet *sheet = NULL;
 static fz_colorspace *colorspace;
 static char *filename;
 static int files = 0;
 fz_output *out = NULL;
-
-static char *mujstest_filename = NULL;
-static FILE *mujstest_file = NULL;
-static int mujstest_count = 0;
 
 static struct {
 	int count, total;
@@ -177,16 +141,19 @@ static void usage(void)
 	fprintf(stderr,
 		"usage: mudraw [options] input [pages]\n"
 		"\t-o -\toutput filename (%%d for page number)\n"
-		"\t\tsupported formats: pgm, ppm, pam, png, pbm\n"
+		"\t-F -\toutput format (if no -F, -o will be examined)\n"
+		"\t\tsupported formats: png, tga, pnm, pam, pwg, pcl, svg, pdf\n"
 		"\t-p -\tpassword\n"
 		"\t-r -\tresolution in dpi (default: 72)\n"
 		"\t-w -\twidth (in pixels) (maximum width if -r is specified)\n"
 		"\t-h -\theight (in pixels) (maximum height if -r is specified)\n"
 		"\t-f -\tfit width and/or height exactly (ignore aspect)\n"
-		"\t-c -\tcolorspace {mono,gray,grayalpha,rgb,rgba}\n"
+		"\t-c -\tcolorspace {mono,gray,grayalpha,rgb,rgba,cmyk,cmykalpha}\n"
 		"\t-b -\tnumber of bits of antialiasing (0 to 8)\n"
-		"\t-g\trender in grayscale\n"
+		"\t-B -\tmaximum bandheight (pgm, ppm, pam output only)\n"
+		"\t-g\trender in grayscale (equivalent to: -c gray)\n"
 		"\t-m\tshow timing information\n"
+		"\t-M\tshow memory use summary\n"
 		"\t-t\tshow text (-tt for xml, -ttt for more verbose xml)\n"
 		"\t-x\tshow display list\n"
 		"\t-d\tdisable use of display list\n"
@@ -195,7 +162,6 @@ static void usage(void)
 		"\t-G -\tgamma correct output\n"
 		"\t-I\tinvert output\n"
 		"\t-l\tprint outline\n"
-		"\t-j -\tOutput mujstest file\n"
 		"\t-i\tignore errors and continue with the next file\n"
 		"\tpages\tcomma separated list of ranges\n");
 	exit(1);
@@ -226,31 +192,6 @@ static int isrange(char *s)
 	return 1;
 }
 
-static void escape_string(FILE *out, int len, const char *string)
-{
-	while (len-- && *string)
-	{
-		char c = *string++;
-		switch (c)
-		{
-		case '\n':
-			fputc('\\', out);
-			fputc('n', out);
-			break;
-		case '\r':
-			fputc('\\', out);
-			fputc('r', out);
-			break;
-		case '\t':
-			fputc('\\', out);
-			fputc('t', out);
-			break;
-		default:
-			fputc(c, out);
-		}
-	}
-}
-
 static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 {
 	fz_page *page;
@@ -258,7 +199,6 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 	fz_device *dev = NULL;
 	int start;
 	fz_cookie cookie = { 0 };
-	int needshot = 0;
 
 	fz_var(list);
 	fz_var(dev);
@@ -275,111 +215,6 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 	fz_catch(ctx)
 	{
 		fz_rethrow_message(ctx, "cannot load page %d in file '%s'", pagenum, filename);
-	}
-
-	if (mujstest_file)
-	{
-		pdf_document *inter = pdf_specifics(doc);
-		pdf_widget *widget = NULL;
-
-		if (inter)
-			widget = pdf_first_widget(inter, (pdf_page *)page);
-
-		if (widget)
-		{
-			fprintf(mujstest_file, "GOTO %d\n", pagenum);
-			needshot = 1;
-		}
-		for (;widget; widget = pdf_next_widget(widget))
-		{
-			fz_rect rect;
-			int w, h, len;
-			int type = pdf_widget_get_type(widget);
-
-			pdf_bound_widget(widget, &rect);
-			w = (rect.x1 - rect.x0);
-			h = (rect.y1 - rect.y0);
-			++mujstest_count;
-			switch (type)
-			{
-			default:
-				fprintf(mujstest_file, "%% UNKNOWN %0.2f %0.2f %0.2f %0.2f\n", rect.x0, rect.y0, rect.x1, rect.y1);
-				break;
-			case PDF_WIDGET_TYPE_PUSHBUTTON:
-				fprintf(mujstest_file, "%% PUSHBUTTON %0.2f %0.2f %0.2f %0.2f\n", rect.x0, rect.y0, rect.x1, rect.y1);
-				break;
-			case PDF_WIDGET_TYPE_CHECKBOX:
-				fprintf(mujstest_file, "%% CHECKBOX %0.2f %0.2f %0.2f %0.2f\n", rect.x0, rect.y0, rect.x1, rect.y1);
-				break;
-			case PDF_WIDGET_TYPE_RADIOBUTTON:
-				fprintf(mujstest_file, "%% RADIOBUTTON %0.2f %0.2f %0.2f %0.2f\n", rect.x0, rect.y0, rect.x1, rect.y1);
-				break;
-			case PDF_WIDGET_TYPE_TEXT:
-			{
-				int maxlen = pdf_text_widget_max_len(inter, widget);
-				int texttype = pdf_text_widget_content_type(inter, widget);
-
-				/* If height is low, assume a single row, and base
-				 * the width off that. */
-				if (h < 10)
-				{
-					w = (w+h-1) / (h ? h : 1);
-					h = 1;
-				}
-				/* Otherwise, if width is low, work off height */
-				else if (w < 10)
-				{
-					h = (w+h-1) / (w ? w : 1);
-					w = 1;
-				}
-				else
-				{
-					w = (w+9)/10;
-					h = (h+9)/10;
-				}
-				len = w*h;
-				if (len < 2)
-					len = 2;
-				if (len > maxlen)
-					len = maxlen;
-				fprintf(mujstest_file, "%% TEXT %0.2f %0.2f %0.2f %0.2f\n", rect.x0, rect.y0, rect.x1, rect.y1);
-				switch (texttype)
-				{
-				default:
-				case PDF_WIDGET_CONTENT_UNRESTRAINED:
-					fprintf(mujstest_file, "TEXT %d ", mujstest_count);
-					escape_string(mujstest_file, len-3, lorem);
-					fprintf(mujstest_file, "\n");
-					break;
-				case PDF_WIDGET_CONTENT_NUMBER:
-					fprintf(mujstest_file, "TEXT %d\n", mujstest_count);
-					break;
-				case PDF_WIDGET_CONTENT_SPECIAL:
-#ifdef __MINGW32__
-					fprintf(mujstest_file, "TEXT %I64d\n", 46702919800LL + mujstest_count);
-#else
-					fprintf(mujstest_file, "TEXT %lld\n", 46702919800LL + mujstest_count);
-#endif
-					break;
-				case PDF_WIDGET_CONTENT_DATE:
-					fprintf(mujstest_file, "TEXT Jun %d 1979\n", 1 + ((13 + mujstest_count) % 30));
-					break;
-				case PDF_WIDGET_CONTENT_TIME:
-					++mujstest_count;
-					fprintf(mujstest_file, "TEXT %02d:%02d\n", ((mujstest_count/60) % 24), mujstest_count % 60);
-					break;
-				}
-				break;
-			}
-			case PDF_WIDGET_TYPE_LISTBOX:
-				fprintf(mujstest_file, "%% LISTBOX %0.2f %0.2f %0.2f %0.2f\n", rect.x0, rect.y0, rect.x1, rect.y1);
-				break;
-			case PDF_WIDGET_TYPE_COMBOBOX:
-				fprintf(mujstest_file, "%% COMBOBOX %0.2f %0.2f %0.2f %0.2f\n", rect.x0, rect.y0, rect.x1, rect.y1);
-				break;
-			}
-			fprintf(mujstest_file, "CLICK %0.2f %0.2f\n", (rect.x0+rect.x1)/2, (rect.y0+rect.y1)/2);
-		}
 	}
 
 	if (uselist)
@@ -523,10 +358,16 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 		FILE *file;
 		fz_output *out;
 
-		sprintf(buf, output, pagenum);
-		file = fopen(buf, "wb");
-		if (file == NULL)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot open file '%s': %s", buf, strerror(errno));
+		if (!strcmp(output, "-"))
+			file = stdout;
+		else
+		{
+			sprintf(buf, output, pagenum);
+			file = fopen(buf, "wb");
+			if (file == NULL)
+				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot open file '%s': %s", buf, strerror(errno));
+		}
+
 		out = fz_new_output_with_file(ctx, file);
 
 		fz_bound_page(doc, page, &bounds);
@@ -550,7 +391,8 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 			fz_free_device(dev);
 			dev = NULL;
 			fz_close_output(out);
-			fclose(file);
+			if (file != stdout)
+				fclose(file);
 		}
 		fz_catch(ctx)
 		{
@@ -568,8 +410,11 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 		fz_irect ibounds;
 		fz_pixmap *pix = NULL;
 		int w, h;
+		fz_output *output_file = NULL;
+		fz_png_output_context *poc = NULL;
 
 		fz_var(pix);
+		fz_var(poc);
 
 		fz_bound_page(doc, page, &bounds);
 		zoom = resolution / 72;
@@ -631,82 +476,123 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 		fz_rect_from_irect(&tbounds, &ibounds);
 
 		/* TODO: banded rendering and multi-page ppm */
-
 		fz_try(ctx)
 		{
-			int savealpha = (out_cs == CS_RGBA || out_cs == CS_GRAYALPHA);
+			int savealpha = (out_cs == CS_GRAY_ALPHA || out_cs == CS_RGB_ALPHA || out_cs == CS_CMYK_ALPHA);
+			fz_irect band_ibounds = ibounds;
+			int band, bands = 1;
+			char filename_buf[512];
+			int totalheight = ibounds.y1 - ibounds.y0;
+			int drawheight = totalheight;
 
-			pix = fz_new_pixmap_with_bbox(ctx, colorspace, &ibounds);
+			if (bandheight != 0)
+			{
+				/* Banded rendering; we'll only render to a
+				 * given height at a time. */
+				drawheight = bandheight;
+				if (totalheight > bandheight)
+					band_ibounds.y1 = band_ibounds.y0 + bandheight;
+				bands = (totalheight + bandheight-1)/bandheight;
+				tbounds.y1 = tbounds.y0 + bandheight + 2;
+			}
+
+			pix = fz_new_pixmap_with_bbox(ctx, colorspace, &band_ibounds);
 			fz_pixmap_set_resolution(pix, resolution);
-
-			if (savealpha)
-				fz_clear_pixmap(ctx, pix);
-			else
-				fz_clear_pixmap_with_value(ctx, pix, 255);
-
-			dev = fz_new_draw_device(ctx, pix);
-			if (list)
-				fz_run_display_list(list, dev, &ctm, &tbounds, &cookie);
-			else
-				fz_run_page(doc, page, dev, &ctm, &cookie);
-			fz_free_device(dev);
-			dev = NULL;
-
-			if (invert)
-				fz_invert_pixmap(ctx, pix);
-			if (gamma_value != 1)
-				fz_gamma_pixmap(ctx, pix, gamma_value);
-
-			if (savealpha)
-				fz_unmultiply_pixmap(ctx, pix);
 
 			if (output)
 			{
-				char buf[512];
-				sprintf(buf, output, pagenum);
+				if (!strcmp(output, "-"))
+					output_file = fz_new_output_with_file(ctx, stdout);
+				else
+				{
+					sprintf(filename_buf, output, pagenum);
+					output_file = fz_new_output_to_filename(ctx, filename_buf);
+				}
+
 				if (output_format == OUT_PGM || output_format == OUT_PPM || output_format == OUT_PNM)
-					fz_write_pnm(ctx, pix, buf);
+					fz_output_pnm_header(output_file, pix->w, totalheight, pix->n);
 				else if (output_format == OUT_PAM)
-					fz_write_pam(ctx, pix, buf, savealpha);
+					fz_output_pam_header(output_file, pix->w, totalheight, pix->n, savealpha);
 				else if (output_format == OUT_PNG)
-					fz_write_png(ctx, pix, buf, savealpha);
-				else if (output_format == OUT_PWG)
+					poc = fz_output_png_header(output_file, pix->w, totalheight, pix->n, savealpha);
+			}
+
+			for (band = 0; band < bands; band++)
+			{
+				if (savealpha)
+					fz_clear_pixmap(ctx, pix);
+				else
+					fz_clear_pixmap_with_value(ctx, pix, 255);
+
+				dev = fz_new_draw_device(ctx, pix);
+				if (alphabits == 0)
+					fz_enable_device_hints(dev, FZ_DONT_INTERPOLATE_IMAGES);
+				if (list)
+					fz_run_display_list(list, dev, &ctm, &tbounds, &cookie);
+				else
+					fz_run_page(doc, page, dev, &ctm, &cookie);
+				fz_free_device(dev);
+				dev = NULL;
+
+				if (invert)
+					fz_invert_pixmap(ctx, pix);
+				if (gamma_value != 1)
+					fz_gamma_pixmap(ctx, pix, gamma_value);
+
+				if (savealpha)
+					fz_unmultiply_pixmap(ctx, pix);
+
+				if (output)
 				{
-					if (strstr(output, "%d") != NULL)
-						append = 0;
-					if (out_cs == CS_MONO)
+					if (output_format == OUT_PGM || output_format == OUT_PPM || output_format == OUT_PNM)
+						fz_output_pnm_band(output_file, pix->w, totalheight, pix->n, band, drawheight, pix->samples);
+					else if (output_format == OUT_PAM)
+						fz_output_pam_band(output_file, pix->w, totalheight, pix->n, band, drawheight, pix->samples, savealpha);
+					else if (output_format == OUT_PNG)
+						fz_output_png_band(output_file, pix->w, totalheight, pix->n, band, drawheight, pix->samples, savealpha, poc);
+					else if (output_format == OUT_PWG)
 					{
+						if (strstr(output, "%d") != NULL)
+							append = 0;
+						if (out_cs == CS_MONO)
+						{
+							fz_bitmap *bit = fz_halftone_pixmap(ctx, pix, NULL);
+							fz_write_pwg_bitmap(ctx, bit, filename_buf, append, NULL);
+							fz_drop_bitmap(ctx, bit);
+						}
+						else
+							fz_write_pwg(ctx, pix, filename_buf, append, NULL);
+						append = 1;
+					}
+					else if (output_format == OUT_PCL)
+					{
+						fz_pcl_options options;
+
+						fz_pcl_preset(ctx, &options, "ljet4");
+
+						if (strstr(output, "%d") != NULL)
+							append = 0;
+						if (out_cs == CS_MONO)
+						{
+							fz_bitmap *bit = fz_halftone_pixmap(ctx, pix, NULL);
+							fz_write_pcl_bitmap(ctx, bit, filename_buf, append, &options);
+							fz_drop_bitmap(ctx, bit);
+						}
+						else
+							fz_write_pcl(ctx, pix, filename_buf, append, &options);
+						append = 1;
+					}
+					else if (output_format == OUT_PBM) {
 						fz_bitmap *bit = fz_halftone_pixmap(ctx, pix, NULL);
-						fz_write_pwg_bitmap(ctx, bit, buf, append, NULL);
+						fz_write_pbm(ctx, bit, filename_buf);
 						fz_drop_bitmap(ctx, bit);
 					}
-					else
-						fz_write_pwg(ctx, pix, buf, append, NULL);
-					append = 1;
-				}
-				else if (output_format == OUT_PCL)
-				{
-					fz_pcl_options options;
-
-					fz_pcl_preset(ctx, &options, "ljet4");
-
-					if (strstr(output, "%d") != NULL)
-						append = 0;
-					if (out_cs == CS_MONO)
+					else if (output_format == OUT_TGA)
 					{
-						fz_bitmap *bit = fz_halftone_pixmap(ctx, pix, NULL);
-						fz_write_pcl_bitmap(ctx, bit, buf, append, &options);
-						fz_drop_bitmap(ctx, bit);
+						fz_write_tga(ctx, pix, filename_buf, savealpha);
 					}
-					else
-						fz_write_pcl(ctx, pix, buf, append, &options);
-					append = 1;
 				}
-				else if (output_format == OUT_PBM) {
-					fz_bitmap *bit = fz_halftone_pixmap(ctx, pix, NULL);
-					fz_write_pbm(ctx, bit, buf);
-					fz_drop_bitmap(ctx, bit);
-				}
+				ctm.f -= drawheight;
 			}
 
 			if (showmd5)
@@ -722,9 +608,17 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 		}
 		fz_always(ctx)
 		{
+			if (output)
+			{
+				if (output_format == OUT_PNG)
+					fz_output_png_trailer(output_file, poc);
+			}
+
 			fz_free_device(dev);
 			dev = NULL;
 			fz_drop_pixmap(ctx, pix);
+			if (output_file)
+				fz_close_output(output_file);
 		}
 		fz_catch(ctx)
 		{
@@ -765,12 +659,12 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 	if (showmd5 || showtime)
 		printf("\n");
 
-	fz_flush_warnings(ctx);
-
-	if (mujstest_file && needshot)
+	if (showmemory)
 	{
-		fprintf(mujstest_file, "SCREENSHOT\n");
+		fz_dump_glyph_cache_stats(ctx);
 	}
+
+	fz_flush_warnings(ctx);
 
 	if (cookie.errors)
 		errored = 1;
@@ -851,7 +745,60 @@ parse_colorspace(const char *name)
 	}
 	fprintf(stderr, "Unknown colorspace \"%s\"\n", name);
 	exit(1);
-	return -1;
+}
+
+static void *
+trace_malloc(void *arg, unsigned int size)
+{
+	int *p;
+	if (size == 0)
+		return NULL;
+	p = malloc(size + sizeof(unsigned int));
+	if (p == NULL)
+		return NULL;
+	p[0] = size;
+	memtrace_current += size;
+	memtrace_total += size;
+	if (memtrace_current > memtrace_peak)
+		memtrace_peak = memtrace_current;
+	return (void *)&p[1];
+}
+
+static void
+trace_free(void *arg, void *p_)
+{
+	int *p = (int *)p_;
+
+	if (p == NULL)
+		return;
+	memtrace_current -= p[-1];
+	free(&p[-1]);
+}
+
+static void *
+trace_realloc(void *arg, void *p_, unsigned int size)
+{
+	int *p = (int *)p_;
+	unsigned int oldsize;
+
+	if (size == 0)
+	{
+		trace_free(arg, p_);
+		return NULL;
+	}
+	if (p == NULL)
+		return trace_malloc(arg, size);
+	oldsize = p[-1];
+	p = realloc(&p[-1], size + sizeof(unsigned int));
+	if (p == NULL)
+		return NULL;
+	memtrace_current += size - oldsize;
+	if (size > oldsize)
+		memtrace_total += size - oldsize;
+	if (memtrace_current > memtrace_peak)
+		memtrace_peak = memtrace_current;
+	p[0] = size;
+	return &p[1];
 }
 
 int main(int argc, char **argv)
@@ -860,20 +807,24 @@ int main(int argc, char **argv)
 	fz_document *doc = NULL;
 	int c;
 	fz_context *ctx;
+	fz_alloc_context alloc_ctx = { NULL, trace_malloc, trace_realloc, trace_free };
 
 	fz_var(doc);
 
-	while ((c = fz_getopt(argc, argv, "lo:p:r:R:b:c:dgmtx5G:Iw:h:fij:")) != -1)
+	while ((c = fz_getopt(argc, argv, "lo:F:p:r:R:b:c:dgmtx5G:Iw:h:fiMB:")) != -1)
 	{
 		switch (c)
 		{
 		case 'o': output = fz_optarg; break;
+		case 'F': format = fz_optarg; break;
 		case 'p': password = fz_optarg; break;
 		case 'r': resolution = atof(fz_optarg); res_specified = 1; break;
 		case 'R': rotation = atof(fz_optarg); break;
 		case 'b': alphabits = atoi(fz_optarg); break;
+		case 'B': bandheight = atoi(fz_optarg); break;
 		case 'l': showoutline++; break;
 		case 'm': showtime++; break;
+		case 'M': showmemory++; break;
 		case 't': showtext++; break;
 		case 'x': showxml++; break;
 		case '5': showmd5++; break;
@@ -885,7 +836,6 @@ int main(int argc, char **argv)
 		case 'h': height = atof(fz_optarg); break;
 		case 'f': fit = 1; break;
 		case 'I': invert++; break;
-		case 'j': mujstest_filename = fz_optarg; break;
 		case 'i': ignore_errors = 1; break;
 		default: usage(); break;
 		}
@@ -894,21 +844,13 @@ int main(int argc, char **argv)
 	if (fz_optind == argc)
 		usage();
 
-	if (!showtext && !showxml && !showtime && !showmd5 && !showoutline && !output && !mujstest_filename)
+	if (!showtext && !showxml && !showtime && !showmd5 && !showoutline && !output)
 	{
 		printf("nothing to do\n");
 		exit(0);
 	}
 
-	if (mujstest_filename)
-	{
-		if (strcmp(mujstest_filename, "-") == 0)
-			mujstest_file = stdout;
-		else
-			mujstest_file = fopen(mujstest_filename, "wb");
-	}
-
-	ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
+	ctx = fz_new_context((showmemory == 0 ? NULL : &alloc_ctx), NULL, FZ_STORE_DEFAULT);
 	if (!ctx)
 	{
 		fprintf(stderr, "cannot initialise context\n");
@@ -918,8 +860,32 @@ int main(int argc, char **argv)
 	fz_set_aa_level(ctx, alphabits);
 
 	/* Determine output type */
+	if (bandheight < 0)
+	{
+		fprintf(stderr, "Bandheight must be > 0\n");
+		exit(1);
+	}
+
 	output_format = OUT_PNG;
-	if (output)
+	if (format)
+	{
+		int i;
+
+		for (i = 0; i < nelem(suffix_table); i++)
+		{
+			if (!strcmp(format, suffix_table[i].suffix+1))
+			{
+				output_format = suffix_table[i].format;
+				break;
+			}
+		}
+		if (i == nelem(suffix_table))
+		{
+			fprintf(stderr, "Unknown output format '%s'\n", format);
+			exit(1);
+		}
+	}
+	else if (output)
 	{
 		char *suffix = output;
 		int i;
@@ -935,6 +901,21 @@ int main(int argc, char **argv)
 				i = 0;
 			}
 		}
+	}
+
+	if (bandheight)
+	{
+		if (output_format != OUT_PAM && output_format != OUT_PGM && output_format != OUT_PPM && output_format != OUT_PNM && output_format != OUT_PNG)
+		{
+			fprintf(stderr, "Banded operation only possible with PAM, PGM, PPM, PNM and PNG outputs\n");
+			exit(1);
+		}
+		if (showmd5)
+		{
+			fprintf(stderr, "Banded operation not compatible with MD5\n");
+			exit(1);
+		}
+
 	}
 
 	{
@@ -964,12 +945,16 @@ int main(int argc, char **argv)
 	{
 	case CS_MONO:
 	case CS_GRAY:
-	case CS_GRAYALPHA:
+	case CS_GRAY_ALPHA:
 		colorspace = fz_device_gray(ctx);
 		break;
 	case CS_RGB:
-	case CS_RGBA:
+	case CS_RGB_ALPHA:
 		colorspace = fz_device_rgb(ctx);
+		break;
+	case CS_CMYK:
+	case CS_CMYK_ALPHA:
+		colorspace = fz_device_cmyk(ctx);
 		break;
 	default:
 		fprintf(stderr, "Unknown colorspace!\n");
@@ -1016,6 +1001,8 @@ int main(int argc, char **argv)
 
 	fz_try(ctx)
 	{
+		fz_register_document_handlers(ctx);
+
 		while (fz_optind < argc)
 		{
 			fz_try(ctx)
@@ -1036,13 +1023,6 @@ int main(int argc, char **argv)
 				{
 					if (!fz_authenticate_password(doc, password))
 						fz_throw(ctx, FZ_ERROR_GENERIC, "cannot authenticate password: %s", filename);
-					if (mujstest_file)
-						fprintf(mujstest_file, "PASSWORD %s\n", password);
-				}
-
-				if (mujstest_file)
-				{
-					fprintf(mujstest_file, "OPEN %s\n", filename);
 				}
 
 				if (showxml || showtext == TEXT_XML)
@@ -1051,7 +1031,7 @@ int main(int argc, char **argv)
 				if (showoutline)
 					drawoutline(ctx, doc);
 
-				if (showtext || showxml || showtime || showmd5 || output || mujstest_file)
+				if (showtext || showxml || showtime || showmd5 || output)
 				{
 					if (fz_optind == argc || !isrange(argv[fz_optind]))
 						drawrange(ctx, doc, "1-");
@@ -1126,10 +1106,15 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (mujstest_file && mujstest_file != stdout)
-		fclose(mujstest_file);
-
 	fz_free_context(ctx);
+
+	if (showmemory)
+	{
+		printf("Total memory use = %d bytes\n", memtrace_total);
+		printf("Peak memory use = %d bytes\n", memtrace_peak);
+		printf("Current memory use = %d bytes\n", memtrace_current);
+	}
+
 	return (errored != 0);
 }
 

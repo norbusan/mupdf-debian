@@ -14,6 +14,7 @@ typedef enum {
 	THUMBNAIL,
 	DUMMY,
 	OLD_RESOLUTION,
+	PRINT_PREVIEW,
 	NOTSET
 } Page_Content_t;
 
@@ -26,7 +27,9 @@ namespace mupdf_cpp
 	private:
 		int height;
 		int width;
-		double zoom;
+		double page_zoom;
+		int native_height;
+		int native_width;
 		WriteableBitmap^ image;
 		Page_Content_t content;
 		IVector<RectList^>^ textbox;
@@ -113,12 +116,45 @@ namespace mupdf_cpp
 				width = value;
 			}
 		}
+		property int NativeHeight
+		{
+			int get()
+			{
+				return native_height;
+			}
 
-		property double Zoom
+			void set(int value)
+			{
+				if (value < 0)
+				{
+					throw ref new Platform::InvalidArgumentException();
+				}
+				native_height = value;
+			}
+		}
+
+		property int NativeWidth
+		{
+			int get()
+			{
+				return native_width;
+			}
+
+			void set(int value)
+			{
+				if (value < 0)
+				{
+					throw ref new Platform::InvalidArgumentException();
+				}
+				native_width = value;
+			}
+		}
+
+		property double PageZoom
 		{
 			double get()
 			{
-				return zoom;
+				return page_zoom;
 			}
 
 			void set(double value)
@@ -127,7 +163,7 @@ namespace mupdf_cpp
 				{
 					throw ref new Platform::InvalidArgumentException();
 				}
-				zoom = value;
+				page_zoom = value;
 			}
 		}
 

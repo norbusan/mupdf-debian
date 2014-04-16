@@ -12,7 +12,8 @@ typedef struct fz_compressed_buffer_s fz_compressed_buffer;
 unsigned int fz_compressed_buffer_size(fz_compressed_buffer *buffer);
 
 fz_stream *fz_open_compressed_buffer(fz_context *ctx, fz_compressed_buffer *);
-fz_stream *fz_open_image_decomp_stream(fz_context *ctx, fz_compressed_buffer *, int *l2factor);
+fz_stream *fz_open_image_decomp_stream_from_buffer(fz_context *ctx, fz_compressed_buffer *, int *l2factor);
+fz_stream *fz_open_image_decomp_stream(fz_context *ctx, fz_stream *, fz_compression_params *, int *l2factor);
 
 enum
 {
@@ -26,7 +27,8 @@ enum
 	FZ_IMAGE_FLATE = 7,
 	FZ_IMAGE_LZW = 8,
 	FZ_IMAGE_PNG = 9,
-	FZ_IMAGE_TIFF = 10
+	FZ_IMAGE_TIFF = 10,
+	FZ_IMAGE_JXR = 11, /* Placeholder until supported */
 };
 
 struct fz_compression_params_s

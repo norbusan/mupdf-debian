@@ -58,9 +58,7 @@ xps_draw_arc_segment(fz_context *doc, fz_path *path, const fz_matrix *mtx, float
 	{
 		for (t = th0 + d; t < th1 - d/2; t += d)
 		{
-			p.x = cosf(t);
-			p.y = sinf(t);
-			fz_transform_point(&p, mtx);
+			fz_transform_point_xy(&p, mtx, cosf(t), sinf(t));
 			fz_lineto(doc, path, p.x, p.y);
 		}
 	}
@@ -69,9 +67,7 @@ xps_draw_arc_segment(fz_context *doc, fz_path *path, const fz_matrix *mtx, float
 		th0 += (float)M_PI * 2;
 		for (t = th0 - d; t > th1 + d/2; t -= d)
 		{
-			p.x = cosf(t);
-			p.y = sinf(t);
-			fz_transform_point(&p, mtx);
+			fz_transform_point_xy(&p, mtx, cosf(t), sinf(t));
 			fz_lineto(doc, path, p.x, p.y);
 		}
 	}
@@ -826,7 +822,7 @@ xps_parse_path(xps_document *doc, const fz_matrix *ctm, char *base_uri, xps_reso
 
 	fz_stroke_state *stroke = NULL;
 	fz_matrix transform;
-	float samples[32];
+	float samples[FZ_MAX_COLORS];
 	fz_colorspace *colorspace;
 	fz_path *path = NULL;
 	fz_path *stroke_path = NULL;
@@ -922,7 +918,7 @@ xps_parse_path(xps_document *doc, const fz_matrix *ctm, char *base_uri, xps_reso
 					s++;
 			}
 		}
-		stroke = fz_new_stroke_state_with_len(doc->ctx, dash_len);
+		stroke = fz_new_stroke_state_with_dash_len(doc->ctx, dash_len);
 		stroke->start_cap = xps_parse_line_cap(stroke_start_line_cap_att);
 		stroke->dash_cap = xps_parse_line_cap(stroke_dash_cap_att);
 		stroke->end_cap = xps_parse_line_cap(stroke_end_line_cap_att);
@@ -1017,7 +1013,7 @@ xps_parse_path(xps_document *doc, const fz_matrix *ctm, char *base_uri, xps_reso
 
 	if (fill_tag)
 	{
-		fz_clip_path(doc->dev, path, NULL, fill_rule == 0, &local_ctm);
+		fz_clip_path(doc->dev, path, &area, fill_rule == 0, &local_ctm);
 		xps_parse_brush(doc, &local_ctm, &area, fill_uri, dict, fill_tag);
 		fz_pop_clip(doc->dev);
 	}
@@ -1035,7 +1031,7 @@ xps_parse_path(xps_document *doc, const fz_matrix *ctm, char *base_uri, xps_reso
 
 	if (stroke_tag)
 	{
-		fz_clip_stroke_path(doc->dev, stroke_path, NULL, stroke, &local_ctm);
+		fz_clip_stroke_path(doc->dev, stroke_path, &area, stroke, &local_ctm);
 		xps_parse_brush(doc, &local_ctm, &area, stroke_uri, dict, stroke_tag);
 		fz_pop_clip(doc->dev);
 	}

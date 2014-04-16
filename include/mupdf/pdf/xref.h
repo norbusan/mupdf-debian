@@ -35,11 +35,17 @@ typedef struct pdf_xref_entry_s pdf_xref_entry;
 struct pdf_xref_entry_s
 {
 	char type;	/* 0=unset (f)ree i(n)use (o)bjstm */
+	unsigned char flags; /* bit 0 = marked */
+	unsigned short gen;	/* generation / objstm index */
 	int ofs;	/* file offset / objstm object number */
-	int gen;	/* generation / objstm index */
 	int stm_ofs;	/* on-disk stream */
 	fz_buffer *stm_buf; /* in-memory stream (for updated objects) */
 	pdf_obj *obj;	/* stored/cached object */
+};
+
+enum
+{
+	PDF_OBJ_FLAG_MARK = 1,
 };
 
 struct pdf_xref_s
@@ -47,6 +53,7 @@ struct pdf_xref_s
 	int len;
 	pdf_xref_entry *table;
 	pdf_obj *trailer;
+	pdf_obj *pre_repair_trailer;
 };
 
 void pdf_cache_object(pdf_document *doc, int num, int gen);
@@ -62,6 +69,7 @@ fz_stream *pdf_open_stream(pdf_document *doc, int num, int gen);
 
 fz_stream *pdf_open_inline_stream(pdf_document *doc, pdf_obj *stmobj, int length, fz_stream *chain, fz_compression_params *params);
 fz_compressed_buffer *pdf_load_compressed_stream(pdf_document *doc, int num, int gen);
+void pdf_load_compressed_inline_image(pdf_document *doc, pdf_obj *dict, int length, fz_stream *cstm, int indexed, fz_image *image);
 fz_stream *pdf_open_stream_with_offset(pdf_document *doc, int num, int gen, pdf_obj *dict, int stm_ofs);
 fz_stream *pdf_open_compressed_stream(fz_context *ctx, fz_compressed_buffer *);
 fz_stream *pdf_open_contents_stream(pdf_document *doc, pdf_obj *obj);
@@ -81,6 +89,10 @@ int pdf_xref_is_incremental(pdf_document *doc, int num);
 void pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf);
 void pdf_repair_obj_stms(pdf_document *doc);
 pdf_obj *pdf_new_ref(pdf_document *doc, pdf_obj *obj);
+
+void pdf_mark_xref(pdf_document *doc);
+void pdf_clear_xref(pdf_document *doc);
+void pdf_clear_xref_to_mark(pdf_document *doc);
 
 int pdf_repair_obj(pdf_document *doc, pdf_lexbuf *buf, int *stmofsp, int *stmlenp, pdf_obj **encrypt, pdf_obj **id, pdf_obj **page, int *tmpofs);
 

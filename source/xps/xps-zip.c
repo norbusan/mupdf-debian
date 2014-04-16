@@ -169,6 +169,12 @@ xps_read_zip_entry(xps_document *doc, xps_entry *ent, unsigned char *outbuf)
 		}
 
 		fz_free(ctx, inbuf);
+
+		if (stream.avail_out > 0)
+		{
+			fz_warn(ctx, "Truncated zipfile entry found, possibly corrupt data");
+			memset(stream.next_out, 0, stream.avail_out);
+		}
 	}
 	else
 	{
@@ -406,7 +412,6 @@ xps_read_zip_part(xps_document *doc, char *partname)
 	}
 
 	fz_throw(doc->ctx, FZ_ERROR_GENERIC, "cannot find part '%s'", partname);
-	return NULL;
 }
 
 static int
@@ -502,7 +507,6 @@ xps_read_dir_part(xps_document *doc, char *name)
 	}
 
 	fz_throw(doc->ctx, FZ_ERROR_GENERIC, "cannot find part '%s'", name);
-	return NULL;
 }
 
 static int
@@ -683,15 +687,24 @@ xps_meta(xps_document *doc, int key, void *ptr, int size)
 }
 
 static void
+xps_rebind(xps_document *doc, fz_context *ctx)
+{
+	doc->ctx = ctx;
+	fz_rebind_stream(doc->file, ctx);
+	fz_rebind_device(doc->dev, ctx);
+}
+
+static void
 xps_init_document(xps_document *doc)
 {
-	doc->super.close = (void*)xps_close_document;
-	doc->super.load_outline = (void*)xps_load_outline;
-	doc->super.count_pages = (void*)xps_count_pages;
-	doc->super.load_page = (void*)xps_load_page;
-	doc->super.load_links = (void*)xps_load_links;
-	doc->super.bound_page = (void*)xps_bound_page;
-	doc->super.run_page_contents = (void*)xps_run_page;
-	doc->super.free_page = (void*)xps_free_page;
-	doc->super.meta = (void*)xps_meta;
+	doc->super.close = (fz_document_close_fn *)xps_close_document;
+	doc->super.load_outline = (fz_document_load_outline_fn *)xps_load_outline;
+	doc->super.count_pages = (fz_document_count_pages_fn *)xps_count_pages;
+	doc->super.load_page = (fz_document_load_page_fn *)xps_load_page;
+	doc->super.load_links = (fz_document_load_links_fn *)xps_load_links;
+	doc->super.bound_page = (fz_document_bound_page_fn *)xps_bound_page;
+	doc->super.run_page_contents = (fz_document_run_page_contents_fn *)xps_run_page;
+	doc->super.free_page = (fz_document_free_page_fn *)xps_free_page;
+	doc->super.meta = (fz_document_meta_fn *)xps_meta;
+	doc->super.rebind = (fz_document_rebind_fn *)xps_rebind;
 }

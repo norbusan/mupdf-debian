@@ -817,6 +817,10 @@ parse_code(pdf_function *func, fz_stream *stream, int *codeptr, pdf_lexbuf *buf)
 			}
 			if (cmp != 0)
 				fz_throw(ctx, FZ_ERROR_GENERIC, "unknown operator: '%s'", buf->scratch);
+			if (a == PS_OP_IFELSE)
+				fz_throw(ctx, FZ_ERROR_GENERIC, "illegally positioned ifelse operator in function");
+			if (a == PS_OP_IF)
+				fz_throw(ctx, FZ_ERROR_GENERIC, "illegally positioned if operator in function");
 
 			resize_code(ctx, func, *codeptr);
 			func->u.p.code[*codeptr].type = PS_OPERATOR;
@@ -875,7 +879,7 @@ load_postscript_func(pdf_function *func, pdf_document *doc, pdf_obj *dict, int n
 }
 
 static void
-eval_postscript_func(fz_context *ctx, pdf_function *func, float *in, float *out)
+eval_postscript_func(fz_context *ctx, pdf_function *func, const float *in, float *out)
 {
 	ps_stack st;
 	float x;
@@ -1056,7 +1060,7 @@ interpolate_sample(pdf_function *func, int *scale, int *e0, int *e1, float *efra
 }
 
 static void
-eval_sample_func(fz_context *ctx, pdf_function *func, float *in, float *out)
+eval_sample_func(fz_context *ctx, pdf_function *func, const float *in, float *out)
 {
 	int e0[FZ_FN_MAXM], e1[FZ_FN_MAXM], scale[FZ_FN_MAXM];
 	float efrac[FZ_FN_MAXM];
@@ -1077,7 +1081,7 @@ eval_sample_func(fz_context *ctx, pdf_function *func, float *in, float *out)
 
 	scale[0] = func->base.n;
 	for (i = 1; i < func->base.m; i++)
-		scale[i] = scale[i - 1] * func->u.sa.size[i];
+		scale[i] = scale[i - 1] * func->u.sa.size[i-1];
 
 	for (i = 0; i < func->base.n; i++)
 	{
@@ -1379,7 +1383,7 @@ pdf_free_function_imp(fz_context *ctx, fz_storable *func_)
 }
 
 static void
-pdf_eval_function(fz_context *ctx, fz_function *func_, float *in, float *out)
+pdf_eval_function(fz_context *ctx, fz_function *func_, const float *in, float *out)
 {
 	pdf_function *func = (pdf_function *)func_;
 
@@ -1626,7 +1630,7 @@ pdf_load_function(pdf_document *doc, pdf_obj *dict, int in, int out)
 	if (pdf_obj_marked(dict))
 		fz_throw(ctx, FZ_ERROR_GENERIC, "Recursion in function definition");
 
-	if ((func = pdf_find_item(ctx, pdf_free_function_imp, dict)))
+	if ((func = pdf_find_item(ctx, pdf_free_function_imp, dict)) != NULL)
 	{
 		return (fz_function *)func;
 	}
@@ -1695,7 +1699,6 @@ pdf_load_function(pdf_document *doc, pdf_obj *dict, int in, int out)
 			break;
 
 		default:
-			fz_free(ctx, func);
 			fz_throw(ctx, FZ_ERROR_GENERIC, "unknown function type (%d %d R)", pdf_to_num(dict), pdf_to_gen(dict));
 		}
 

@@ -1,6 +1,20 @@
 #ifndef MUPDF_PDF_ANNOT_H
 #define MUPDF_PDF_ANNOT_H
 
+enum
+{
+	F_Invisible = 1 << (1-1),
+	F_Hidden = 1 << (2-1),
+	F_Print = 1 << (3-1),
+	F_NoZoom = 1 << (4-1),
+	F_NoRotate = 1 << (5-1),
+	F_NoView = 1 << (6-1),
+	F_ReadOnly = 1 << (7-1),
+	F_Locked = 1 << (8-1),
+	F_ToggleNoView = 1 << (9-1),
+	F_LockedContents = 1 << (10-1)
+};
+
 /*
 	pdf_first_annot: Return the first annotation on a page.
 
@@ -56,7 +70,7 @@ struct pdf_annot_s
 	int widget_type;
 };
 
-fz_link_dest pdf_parse_link_dest(pdf_document *doc, pdf_obj *dest);
+fz_link_dest pdf_parse_link_dest(pdf_document *doc, fz_link_kind kind, pdf_obj *dest);
 fz_link_dest pdf_parse_action(pdf_document *doc, pdf_obj *action);
 pdf_obj *pdf_lookup_dest(pdf_document *doc, pdf_obj *needle);
 pdf_obj *pdf_lookup_name(pdf_document *doc, char *which, pdf_obj *needle);
@@ -64,7 +78,8 @@ pdf_obj *pdf_load_name_tree(pdf_document *doc, char *which);
 
 fz_link *pdf_load_link_annots(pdf_document *, pdf_obj *annots, const fz_matrix *page_ctm);
 
-pdf_annot *pdf_load_annots(pdf_document *, pdf_obj *annots, pdf_page *page);
+void pdf_transform_annot(pdf_annot *annot);
+void pdf_load_annots(pdf_document *, pdf_page *page, pdf_obj *annots);
 void pdf_update_annot(pdf_document *, pdf_annot *annot);
 void pdf_free_annot(fz_context *ctx, pdf_annot *link);
 
@@ -86,10 +101,31 @@ void pdf_delete_annot(pdf_document *doc, pdf_page *page, pdf_annot *annot);
 void pdf_set_markup_annot_quadpoints(pdf_document *doc, pdf_annot *annot, fz_point *qp, int n);
 
 /*
-	fz_set_ink_annot_list: set the details of an ink annotation. All the points of the multiple arcs
+	pdf_set_ink_annot_list: set the details of an ink annotation. All the points of the multiple arcs
 	are carried in a single array, with the counts for each arc held in a secondary array.
 */
 void pdf_set_ink_annot_list(pdf_document *doc, pdf_annot *annot, fz_point *pts, int *counts, int ncount, float color[3], float thickness);
+
+/*
+	pdf_set_text_annot_position: set the position on page for a text (sticky note) annotation.
+*/
+void pdf_set_text_annot_position(pdf_document *doc, pdf_annot *annot, fz_point pt);
+
+/*
+	pdf_set_annot_contents: set the contents of an annotation.
+*/
+void pdf_set_annot_contents(pdf_document *doc, pdf_annot *annot, char *text);
+
+/*
+	pdf_annot_contents: return the contents of an annotation.
+*/
+char *pdf_annot_contents(pdf_document *doc, pdf_annot *annot);
+
+/*
+	pdf_set_free_text_details: set the position, text, font and color for a free text annotation.
+	Only base 14 fonts are supported and are specified by name.
+*/
+void pdf_set_free_text_details(pdf_document *doc, pdf_annot *annot, fz_point *pos, char *text, char *font_name, float font_size, float color[3]);
 
 fz_annot_type pdf_annot_obj_type(pdf_obj *obj);
 

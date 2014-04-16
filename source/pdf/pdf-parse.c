@@ -235,7 +235,7 @@ pdf_parse_array(pdf_document *doc, fz_stream *file, pdf_lexbuf *buf)
 	int a = 0, b = 0, n = 0;
 	pdf_token tok;
 	fz_context *ctx = file->ctx;
-	pdf_obj *op;
+	pdf_obj *op = NULL;
 
 	fz_var(obj);
 
@@ -490,13 +490,12 @@ pdf_parse_stm_obj(pdf_document *doc, fz_stream *file, pdf_lexbuf *buf)
 	case PDF_TOK_INT: return pdf_new_int(doc, buf->i); break;
 	default: fz_throw(ctx, FZ_ERROR_GENERIC, "unknown token in object stream");
 	}
-	return NULL; /* Stupid MSVC */
 }
 
 pdf_obj *
 pdf_parse_ind_obj(pdf_document *doc,
 	fz_stream *file, pdf_lexbuf *buf,
-	int *onum, int *ogen, int *ostmofs)
+	int *onum, int *ogen, int *ostmofs, int *try_repair)
 {
 	pdf_obj *obj = NULL;
 	int num = 0, gen = 0, stm_ofs;
@@ -508,17 +507,29 @@ pdf_parse_ind_obj(pdf_document *doc,
 
 	tok = pdf_lex(file, buf);
 	if (tok != PDF_TOK_INT)
+	{
+		if (try_repair)
+			*try_repair = 1;
 		fz_throw(ctx, FZ_ERROR_GENERIC, "expected object number");
+	}
 	num = buf->i;
 
 	tok = pdf_lex(file, buf);
 	if (tok != PDF_TOK_INT)
+	{
+		if (try_repair)
+			*try_repair = 1;
 		fz_throw(ctx, FZ_ERROR_GENERIC, "expected generation number (%d ? obj)", num);
+	}
 	gen = buf->i;
 
 	tok = pdf_lex(file, buf);
 	if (tok != PDF_TOK_OBJ)
+	{
+		if (try_repair)
+			*try_repair = 1;
 		fz_throw(ctx, FZ_ERROR_GENERIC, "expected 'obj' keyword (%d %d ?)", num, gen);
+	}
 
 	tok = pdf_lex(file, buf);
 

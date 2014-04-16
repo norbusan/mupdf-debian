@@ -158,6 +158,10 @@ pdf_new_indirect(pdf_document *doc, int num, int gen)
 {
 	pdf_obj *obj;
 	fz_context *ctx = doc->ctx;
+
+	if (num <= 0 || gen < 0)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "Invalid num (%d) or gen (%d) for indirection", num, gen);
+
 	obj = Memento_label(fz_malloc(ctx, sizeof(pdf_obj)), "pdf_obj(indirect)");
 	obj->doc = doc;
 	obj->refs = 1;
@@ -212,6 +216,12 @@ int pdf_is_real(pdf_obj *obj)
 {
 	RESOLVE(obj);
 	return obj ? obj->kind == PDF_REAL : 0;
+}
+
+int pdf_is_number(pdf_obj *obj)
+{
+	RESOLVE(obj);
+	return obj ? (obj->kind == PDF_REAL || obj->kind == PDF_INT) : 0;
 }
 
 int pdf_is_string(pdf_obj *obj)
@@ -651,6 +661,8 @@ pdf_array_insert_drop(pdf_obj *obj, pdf_obj *item, int i)
 void
 pdf_array_delete(pdf_obj *obj, int i)
 {
+	RESOLVE(obj);
+
 	if (!obj)
 		return; /* Can't warn :( */
 	if (obj->kind != PDF_ARRAY)
@@ -838,8 +850,6 @@ pdf_copy_dict(pdf_obj *obj)
 	int i, n;
 	pdf_document *doc;
 
-	if (!obj)
-		return NULL; /* Can't warn :( */
 	RESOLVE(obj);
 	if (!obj)
 		return NULL; /* Can't warn :( */
@@ -1038,8 +1048,9 @@ pdf_dict_put(pdf_obj *obj, pdf_obj *key, pdf_obj *val)
 	{
 		if (obj->u.d.items[i].v != val)
 		{
-			pdf_drop_obj(obj->u.d.items[i].v);
+			pdf_obj *d = obj->u.d.items[i].v;
 			obj->u.d.items[i].v = pdf_keep_obj(val);
+			pdf_drop_obj(d);
 		}
 	}
 	else
@@ -1116,7 +1127,7 @@ pdf_dict_putp(pdf_obj *obj, const char *keys, pdf_obj *val)
 	pdf_obj *cobj = NULL;
 
 	if (strlen(keys)+1 > 256)
-		fz_throw(ctx, FZ_ERROR_GENERIC, "buffer overflow in pdf_dict_getp");
+		fz_throw(ctx, FZ_ERROR_GENERIC, "buffer overflow in pdf_dict_putp");
 
 	strcpy(buf, keys);
 
@@ -1286,6 +1297,7 @@ pdf_obj_memo(pdf_obj *obj, int *memo)
 
 int pdf_obj_is_dirty(pdf_obj *obj)
 {
+	RESOLVE(obj);
 	if (!obj)
 		return 0;
 	return !!(obj->flags & PDF_FLAGS_DIRTY);
@@ -1293,6 +1305,7 @@ int pdf_obj_is_dirty(pdf_obj *obj)
 
 void pdf_dirty_obj(pdf_obj *obj)
 {
+	RESOLVE(obj);
 	if (!obj)
 		return;
 	obj->flags |= PDF_FLAGS_DIRTY;
@@ -1373,6 +1386,11 @@ pdf_set_obj_parent(pdf_obj *obj, int num)
 	}
 }
 
+int pdf_obj_parent_num(pdf_obj *obj)
+{
+	return obj->parent_num;
+}
+
 pdf_obj *pdf_new_obj_from_str(pdf_document *doc, const char *src)
 {
 	pdf_obj *result;
@@ -1392,8 +1410,7 @@ pdf_obj *pdf_new_obj_from_str(pdf_document *doc, const char *src)
 	}
 	fz_catch(ctx)
 	{
-		fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
-		return NULL;
+		fz_rethrow(ctx);
 	}
 
 	return result;
@@ -1679,7 +1696,7 @@ static void fmt_obj(struct fmt *fmt, pdf_obj *obj)
 		fmt_puts(fmt, "<unknown object>");
 }
 
-static int
+int
 pdf_sprint_obj(char *s, int n, pdf_obj *obj, int tight)
 {
 	struct fmt fmt;
@@ -1726,6 +1743,28 @@ pdf_fprint_obj(FILE *fp, pdf_obj *obj, int tight)
 	return n;
 }
 
+int pdf_output_obj(fz_output *out, pdf_obj *obj, int tight)
+{
+	char buf[1024];
+	char *ptr;
+	int n;
+
+	n = pdf_sprint_obj(NULL, 0, obj, tight);
+	if ((n + 1) < sizeof buf)
+	{
+		pdf_sprint_obj(buf, sizeof buf, obj, tight);
+		fz_printf(out, "%s\n", buf);
+	}
+	else
+	{
+		ptr = fz_malloc(obj->doc->ctx, n + 1);
+		pdf_sprint_obj(ptr, n + 1, obj, tight);
+		fz_printf(out, "%s\n", ptr);
+		fz_free(obj->doc->ctx, ptr);
+	}
+	return n;
+}
+
 #ifndef NDEBUG
 void
 pdf_print_obj(pdf_obj *obj)
@@ -1739,3 +1778,8 @@ pdf_print_ref(pdf_obj *ref)
 	pdf_print_obj(pdf_resolve_indirect(ref));
 }
 #endif
+
+int pdf_obj_refs(pdf_obj *ref)
+{
+	return (ref ? ref->refs : 0);
+}

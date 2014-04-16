@@ -1,15 +1,20 @@
 #include "mupdf/pdf.h"
 
 static pdf_obj *
-resolve_dest_rec(pdf_document *doc, pdf_obj *dest, int depth)
+resolve_dest_rec(pdf_document *doc, pdf_obj *dest, fz_link_kind kind, int depth)
 {
 	if (depth > 10) /* Arbitrary to avoid infinite recursion */
 		return NULL;
 
 	if (pdf_is_name(dest) || pdf_is_string(dest))
 	{
-		dest = pdf_lookup_dest(doc, dest);
-		return resolve_dest_rec(doc, dest, depth+1);
+		if (kind == FZ_LINK_GOTO)
+		{
+			dest = pdf_lookup_dest(doc, dest);
+			dest = resolve_dest_rec(doc, dest, kind, depth+1);
+		}
+
+		return dest;
 	}
 
 	else if (pdf_is_array(dest))
@@ -20,7 +25,7 @@ resolve_dest_rec(pdf_document *doc, pdf_obj *dest, int depth)
 	else if (pdf_is_dict(dest))
 	{
 		dest = pdf_dict_gets(dest, "D");
-		return resolve_dest_rec(doc, dest, depth+1);
+		return resolve_dest_rec(doc, dest, kind, depth+1);
 	}
 
 	else if (pdf_is_indirect(dest))
@@ -30,13 +35,13 @@ resolve_dest_rec(pdf_document *doc, pdf_obj *dest, int depth)
 }
 
 static pdf_obj *
-resolve_dest(pdf_document *doc, pdf_obj *dest)
+resolve_dest(pdf_document *doc, pdf_obj *dest, fz_link_kind kind)
 {
-	return resolve_dest_rec(doc, dest, 0);
+	return resolve_dest_rec(doc, dest, kind, 0);
 }
 
 fz_link_dest
-pdf_parse_link_dest(pdf_document *doc, pdf_obj *dest)
+pdf_parse_link_dest(pdf_document *doc, fz_link_kind kind, pdf_obj *dest)
 {
 	fz_link_dest ld;
 	pdf_obj *obj;
@@ -49,10 +54,27 @@ pdf_parse_link_dest(pdf_document *doc, pdf_obj *dest)
 	int t_from_2 = 0;
 	int z_from_4 = 0;
 
-	dest = resolve_dest(doc, dest);
-	if (dest == NULL || !pdf_is_array(dest))
+	ld.kind = kind;
+	ld.ld.gotor.flags = 0;
+	ld.ld.gotor.lt.x = 0;
+	ld.ld.gotor.lt.y = 0;
+	ld.ld.gotor.rb.x = 0;
+	ld.ld.gotor.rb.y = 0;
+	ld.ld.gotor.page = -1;
+	ld.ld.gotor.dest = NULL;
+
+	dest = resolve_dest(doc, dest, kind);
+	if (dest == NULL)
+		fz_throw(doc->ctx, FZ_ERROR_GENERIC, "Undefined link_dest");
+
+	if (pdf_is_name(dest))
 	{
-		ld.kind = FZ_LINK_NONE;
+		ld.ld.gotor.dest = pdf_to_name(dest);
+		return ld;
+	}
+	else if (pdf_is_string(dest))
+	{
+		ld.ld.gotor.dest = pdf_to_str_buf(dest);
 		return ld;
 	}
 
@@ -71,15 +93,6 @@ pdf_parse_link_dest(pdf_document *doc, pdf_obj *dest)
 			return ld;
 		}
 	}
-
-	ld.kind = FZ_LINK_GOTO;
-	ld.ld.gotor.flags = 0;
-	ld.ld.gotor.lt.x = 0;
-	ld.ld.gotor.lt.y = 0;
-	ld.ld.gotor.rb.x = 0;
-	ld.ld.gotor.rb.y = 0;
-	ld.ld.gotor.file_spec = NULL;
-	ld.ld.gotor.new_window = 0;
 
 	obj = pdf_array_get(dest, 1);
 	if (!pdf_is_name(obj))
@@ -232,7 +245,7 @@ fz_link_dest
 pdf_parse_action(pdf_document *doc, pdf_obj *action)
 {
 	fz_link_dest ld;
-	pdf_obj *obj, *dest;
+	pdf_obj *obj, *dest, *file_spec;
 	fz_context *ctx = doc->ctx;
 
 	UNUSED(ctx);
@@ -246,7 +259,7 @@ pdf_parse_action(pdf_document *doc, pdf_obj *action)
 	if (!strcmp(pdf_to_name(obj), "GoTo"))
 	{
 		dest = pdf_dict_gets(action, "D");
-		ld = pdf_parse_link_dest(doc, dest);
+		ld = pdf_parse_link_dest(doc, FZ_LINK_GOTO, dest);
 	}
 	else if (!strcmp(pdf_to_name(obj), "URI"))
 	{
@@ -257,22 +270,22 @@ pdf_parse_action(pdf_document *doc, pdf_obj *action)
 	else if (!strcmp(pdf_to_name(obj), "Launch"))
 	{
 		ld.kind = FZ_LINK_LAUNCH;
-		dest = pdf_dict_gets(action, "F");
-		ld.ld.launch.file_spec = pdf_parse_file_spec(doc, dest);
+		file_spec = pdf_dict_gets(action, "F");
+		ld.ld.launch.file_spec = pdf_parse_file_spec(doc, file_spec);
 		ld.ld.launch.new_window = pdf_to_int(pdf_dict_gets(action, "NewWindow"));
+		ld.ld.launch.is_uri = !strcmp(pdf_to_name(pdf_dict_gets(file_spec, "FS")), "URL");
 	}
 	else if (!strcmp(pdf_to_name(obj), "Named"))
 	{
 		ld.kind = FZ_LINK_NAMED;
-		ld.ld.named.named = pdf_to_utf8(doc, pdf_dict_gets(action, "N"));
+		ld.ld.named.named = fz_strdup(ctx, pdf_to_name(pdf_dict_gets(action, "N")));
 	}
 	else if (!strcmp(pdf_to_name(obj), "GoToR"))
 	{
 		dest = pdf_dict_gets(action, "D");
-		ld = pdf_parse_link_dest(doc, dest);
-		ld.kind = FZ_LINK_GOTOR;
-		dest = pdf_dict_gets(action, "F");
-		ld.ld.gotor.file_spec = pdf_parse_file_spec(doc, dest);
+		file_spec = pdf_dict_gets(action, "F");
+		ld = pdf_parse_link_dest(doc, FZ_LINK_GOTOR, dest);
+		ld.ld.gotor.file_spec = pdf_parse_file_spec(doc, file_spec);
 		ld.ld.gotor.new_window = pdf_to_int(pdf_dict_gets(action, "NewWindow"));
 	}
 	return ld;
@@ -281,7 +294,6 @@ pdf_parse_action(pdf_document *doc, pdf_obj *action)
 static fz_link *
 pdf_load_link(pdf_document *doc, pdf_obj *dict, const fz_matrix *page_ctm)
 {
-	pdf_obj *dest = NULL;
 	pdf_obj *action;
 	pdf_obj *obj;
 	fz_rect bbox;
@@ -298,10 +310,7 @@ pdf_load_link(pdf_document *doc, pdf_obj *dict, const fz_matrix *page_ctm)
 
 	obj = pdf_dict_gets(dict, "Dest");
 	if (obj)
-	{
-		dest = resolve_dest(doc, obj);
-		ld = pdf_parse_link_dest(doc, dest);
-	}
+		ld = pdf_parse_link_dest(doc, FZ_LINK_GOTO, obj);
 	else
 	{
 		action = pdf_dict_gets(dict, "A");
@@ -372,7 +381,7 @@ pdf_free_annot(fz_context *ctx, pdf_annot *annot)
 	}
 }
 
-static void
+void
 pdf_transform_annot(pdf_annot *annot)
 {
 	fz_rect bbox = annot->ap->bbox;
@@ -451,53 +460,19 @@ fz_annot_type pdf_annot_obj_type(pdf_obj *obj)
 		return -1;
 }
 
-static const char *annot_type_str(fz_annot_type type)
+void
+pdf_load_annots(pdf_document *doc, pdf_page *page, pdf_obj *annots)
 {
-	switch (type)
-	{
-	case FZ_ANNOT_TEXT: return "Text";
-	case FZ_ANNOT_LINK: return "Link";
-	case FZ_ANNOT_FREETEXT: return "FreeText";
-	case FZ_ANNOT_LINE: return "Line";
-	case FZ_ANNOT_SQUARE: return "Square";
-	case FZ_ANNOT_CIRCLE: return "Circle";
-	case FZ_ANNOT_POLYGON: return "Polygon";
-	case FZ_ANNOT_POLYLINE: return "PolyLine";
-	case FZ_ANNOT_HIGHLIGHT: return "Highlight";
-	case FZ_ANNOT_UNDERLINE: return "Underline";
-	case FZ_ANNOT_SQUIGGLY: return "Squiggly";
-	case FZ_ANNOT_STRIKEOUT: return "StrikeOut";
-	case FZ_ANNOT_STAMP: return "Stamp";
-	case FZ_ANNOT_CARET: return "Caret";
-	case FZ_ANNOT_INK: return "Ink";
-	case FZ_ANNOT_POPUP: return "Popup";
-	case FZ_ANNOT_FILEATTACHMENT: return "FileAttachment";
-	case FZ_ANNOT_SOUND: return "Sound";
-	case FZ_ANNOT_MOVIE: return "Movie";
-	case FZ_ANNOT_WIDGET: return "Widget";
-	case FZ_ANNOT_SCREEN: return "Screen";
-	case FZ_ANNOT_PRINTERMARK: return "PrinterMark";
-	case FZ_ANNOT_TRAPNET: return "TrapNet";
-	case FZ_ANNOT_WATERMARK: return "Watermark";
-	case FZ_ANNOT_3D: return "3D";
-	default: return "";
-	}
-}
-
-pdf_annot *
-pdf_load_annots(pdf_document *doc, pdf_obj *annots, pdf_page *page)
-{
-	pdf_annot *annot, *head, **itr;
+	pdf_annot *annot, **itr;
 	pdf_obj *obj, *ap, *as, *n, *rect;
 	int i, len, keep_annot;
 	fz_context *ctx = doc->ctx;
 
 	fz_var(annot);
 	fz_var(itr);
-	fz_var(head);
 	fz_var(keep_annot);
 
-	head = NULL;
+	itr = &page->annots;
 
 	len = pdf_array_len(annots);
 	/*
@@ -508,7 +483,6 @@ pdf_load_annots(pdf_document *doc, pdf_obj *annots, pdf_page *page)
 	*/
 	fz_try(ctx)
 	{
-		itr = &head;
 		for (i = 0; i < len; i++)
 		{
 			obj = pdf_array_get(annots, i);
@@ -523,7 +497,8 @@ pdf_load_annots(pdf_document *doc, pdf_obj *annots, pdf_page *page)
 	}
 	fz_catch(ctx)
 	{
-		pdf_free_annot(ctx, head);
+		pdf_free_annot(ctx, page->annots);
+		page->annots = NULL;
 		fz_rethrow(ctx);
 	}
 
@@ -531,7 +506,7 @@ pdf_load_annots(pdf_document *doc, pdf_obj *annots, pdf_page *page)
 	Iterate through the newly created annot linked list, using a double pointer to
 	facilitate deleting broken annotations.
 	*/
-	itr = &head;
+	itr = &page->annots;
 	while (*itr)
 	{
 		annot = *itr;
@@ -595,7 +570,8 @@ pdf_load_annots(pdf_document *doc, pdf_obj *annots, pdf_page *page)
 		{
 			if (fz_caught(ctx) == FZ_ERROR_TRYLATER)
 			{
-				pdf_free_annot(ctx, head);
+				pdf_free_annot(ctx, page->annots);
+				page->annots = NULL;
 				fz_rethrow(ctx);
 			}
 			keep_annot = 0;
@@ -610,61 +586,7 @@ pdf_load_annots(pdf_document *doc, pdf_obj *annots, pdf_page *page)
 		}
 	}
 
-	return head;
-}
-
-void
-pdf_update_annot(pdf_document *doc, pdf_annot *annot)
-{
-	pdf_obj *obj, *ap, *as, *n;
-	fz_context *ctx = doc->ctx;
-
-	if (doc->update_appearance)
-		doc->update_appearance(doc, annot);
-
-	obj = annot->obj;
-
-	ap = pdf_dict_gets(obj, "AP");
-	as = pdf_dict_gets(obj, "AS");
-
-	if (pdf_is_dict(ap))
-	{
-		pdf_hotspot *hp = &doc->hotspot;
-
-		n = NULL;
-
-		if (hp->num == pdf_to_num(obj)
-			&& hp->gen == pdf_to_gen(obj)
-			&& (hp->state & HOTSPOT_POINTER_DOWN))
-		{
-			n = pdf_dict_gets(ap, "D"); /* down state */
-		}
-
-		if (n == NULL)
-			n = pdf_dict_gets(ap, "N"); /* normal state */
-
-		/* lookup current state in sub-dictionary */
-		if (!pdf_is_stream(doc, pdf_to_num(n), pdf_to_gen(n)))
-			n = pdf_dict_get(n, as);
-
-		pdf_drop_xobject(ctx, annot->ap);
-		annot->ap = NULL;
-
-		if (pdf_is_stream(doc, pdf_to_num(n), pdf_to_gen(n)))
-		{
-			fz_try(ctx)
-			{
-				annot->ap = pdf_load_xobject(doc, n);
-				pdf_transform_annot(annot);
-				annot->ap_iteration = annot->ap->iteration;
-			}
-			fz_catch(ctx)
-			{
-				fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
-				fz_warn(ctx, "ignoring broken annotation");
-			}
-		}
-	}
+	page->annot_tailp = itr;
 }
 
 pdf_annot *
@@ -696,233 +618,4 @@ fz_annot_type
 pdf_annot_type(pdf_annot *annot)
 {
 	return annot->annot_type;
-}
-
-pdf_annot *
-pdf_create_annot(pdf_document *doc, pdf_page *page, fz_annot_type type)
-{
-	fz_context *ctx = doc->ctx;
-	pdf_annot *annot = NULL;
-	pdf_obj *annot_obj = pdf_new_dict(doc, 0);
-	pdf_obj *ind_obj = NULL;
-
-	fz_var(annot);
-	fz_var(ind_obj);
-	fz_try(ctx)
-	{
-		int ind_obj_num;
-		fz_rect rect = {0.0, 0.0, 0.0, 0.0};
-		const char *type_str = annot_type_str(type);
-		pdf_obj *annot_arr = pdf_dict_gets(page->me, "Annots");
-		if (annot_arr == NULL)
-		{
-			annot_arr = pdf_new_array(doc, 0);
-			pdf_dict_puts_drop(page->me, "Annots", annot_arr);
-		}
-
-		pdf_dict_puts_drop(annot_obj, "Type", pdf_new_name(doc, "Annot"));
-
-		pdf_dict_puts_drop(annot_obj, "Subtype", pdf_new_name(doc, type_str));
-		pdf_dict_puts_drop(annot_obj, "Rect", pdf_new_rect(doc, &rect));
-
-		annot = fz_malloc_struct(ctx, pdf_annot);
-		annot->page = page;
-		annot->rect = rect;
-		annot->pagerect = rect;
-		annot->ap = NULL;
-		annot->widget_type = PDF_WIDGET_TYPE_NOT_WIDGET;
-		annot->annot_type = type;
-
-		/*
-			Both annotation object and annotation structure are now created.
-			Insert the object in the hierarchy and the structure in the
-			page's array.
-		*/
-		ind_obj_num = pdf_create_object(doc);
-		pdf_update_object(doc, ind_obj_num, annot_obj);
-		ind_obj = pdf_new_indirect(doc, ind_obj_num, 0);
-		pdf_array_push(annot_arr, ind_obj);
-		annot->obj = pdf_keep_obj(ind_obj);
-
-		/*
-			Linking must be done after any call that might throw because
-			pdf_free_annot below actually frees a list
-		*/
-		annot->next = page->annots;
-		page->annots = annot;
-
-		doc->dirty = 1;
-	}
-	fz_always(ctx)
-	{
-		pdf_drop_obj(annot_obj);
-		pdf_drop_obj(ind_obj);
-	}
-	fz_catch(ctx)
-	{
-		pdf_free_annot(ctx, annot);
-		fz_rethrow(ctx);
-	}
-
-	return annot;
-}
-
-void
-pdf_delete_annot(pdf_document *doc, pdf_page *page, pdf_annot *annot)
-{
-	fz_context *ctx = doc->ctx;
-	pdf_annot **annotptr;
-	pdf_obj *old_annot_arr;
-	pdf_obj *annot_arr;
-
-	if (annot == NULL)
-		return;
-
-	/* Remove annot from page's list */
-	for (annotptr = &page->annots; *annotptr; annotptr = &(*annotptr)->next)
-	{
-		if (*annotptr == annot)
-			break;
-	}
-
-	/* Check the passed annotation was of this page */
-	if (*annotptr == NULL)
-		return;
-
-	*annotptr = annot->next;
-
-	/* Stick it in the deleted list */
-	annot->next = page->deleted_annots;
-	page->deleted_annots = annot;
-
-	pdf_drop_xobject(ctx, annot->ap);
-	annot->ap = NULL;
-
-	/* Recreate the "Annots" array with this annot removed */
-	old_annot_arr = pdf_dict_gets(page->me, "Annots");
-
-	if (old_annot_arr)
-	{
-		int i, n = pdf_array_len(old_annot_arr);
-		annot_arr = pdf_new_array(doc, n?(n-1):0);
-
-		fz_try(ctx)
-		{
-			for (i = 0; i < n; i++)
-			{
-				pdf_obj *obj = pdf_array_get(old_annot_arr, i);
-
-				if (obj != annot->obj)
-					pdf_array_push(annot_arr, obj);
-			}
-
-			if (pdf_is_indirect(old_annot_arr))
-				pdf_update_object(doc, pdf_to_num(old_annot_arr), annot_arr);
-			else
-				pdf_dict_puts(page->me, "Annots", annot_arr);
-
-			if (pdf_is_indirect(annot->obj))
-				pdf_delete_object(doc, pdf_to_num(annot->obj));
-		}
-		fz_always(ctx)
-		{
-			pdf_drop_obj(annot_arr);
-		}
-		fz_catch(ctx)
-		{
-			fz_rethrow(ctx);
-		}
-	}
-
-	pdf_drop_obj(annot->obj);
-	annot->obj = NULL;
-	doc->dirty = 1;
-}
-
-void
-pdf_set_markup_annot_quadpoints(pdf_document *doc, pdf_annot *annot, fz_point *qp, int n)
-{
-	fz_matrix ctm;
-	pdf_obj *arr = pdf_new_array(doc, n*2);
-	int i;
-
-	fz_invert_matrix(&ctm, &annot->page->ctm);
-
-	pdf_dict_puts_drop(annot->obj, "QuadPoints", arr);
-
-	for (i = 0; i < n; i++)
-	{
-		fz_point pt = qp[i];
-		pdf_obj *r;
-
-		fz_transform_point(&pt, &ctm);
-		r = pdf_new_real(doc, pt.x);
-		pdf_array_push_drop(arr, r);
-		r = pdf_new_real(doc, pt.y);
-		pdf_array_push_drop(arr, r);
-	}
-}
-
-static void update_rect(fz_context *ctx, pdf_annot *annot)
-{
-	pdf_to_rect(ctx, pdf_dict_gets(annot->obj, "Rect"), &annot->rect);
-	annot->pagerect = annot->rect;
-	fz_transform_rect(&annot->pagerect, &annot->page->ctm);
-}
-
-void
-pdf_set_ink_annot_list(pdf_document *doc, pdf_annot *annot, fz_point *pts, int *counts, int ncount, float color[3], float thickness)
-{
-	fz_context *ctx = doc->ctx;
-	fz_matrix ctm;
-	pdf_obj *list = pdf_new_array(doc, ncount);
-	pdf_obj *bs, *col;
-	fz_rect rect;
-	int i, k = 0;
-
-	fz_invert_matrix(&ctm, &annot->page->ctm);
-
-	pdf_dict_puts_drop(annot->obj, "InkList", list);
-
-	for (i = 0; i < ncount; i++)
-	{
-		int j;
-		pdf_obj *arc = pdf_new_array(doc, counts[i]);
-
-		pdf_array_push_drop(list, arc);
-
-		for (j = 0; j < counts[i]; j++)
-		{
-			fz_point pt = pts[k];
-
-			fz_transform_point(&pt, &ctm);
-
-			if (i == 0 && j == 0)
-			{
-				rect.x0 = rect.x1 = pt.x;
-				rect.y0 = rect.y1 = pt.y;
-			}
-			else
-			{
-				fz_include_point_in_rect(&rect, &pt);
-			}
-
-			pdf_array_push_drop(arc, pdf_new_real(doc, pt.x));
-			pdf_array_push_drop(arc, pdf_new_real(doc, pt.y));
-			k++;
-		}
-	}
-
-	fz_expand_rect(&rect, thickness);
-	pdf_dict_puts_drop(annot->obj, "Rect", pdf_new_rect(doc, &rect));
-	update_rect(ctx, annot);
-
-	bs = pdf_new_dict(doc, 1);
-	pdf_dict_puts_drop(annot->obj, "BS", bs);
-	pdf_dict_puts_drop(bs, "W", pdf_new_real(doc, thickness));
-
-	col = pdf_new_array(doc, 3);
-	pdf_dict_puts_drop(annot->obj, "C", col);
-	for (i = 0; i < 3; i++)
-		pdf_array_push_drop(col, pdf_new_real(doc, color[i]));
 }

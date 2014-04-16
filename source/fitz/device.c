@@ -19,6 +19,7 @@ fz_free_device(fz_device *dev)
 		return;
 	if (dev->free_user)
 		dev->free_user(dev);
+	fz_free(dev->ctx, dev->container);
 	fz_free(dev->ctx, dev);
 }
 
@@ -35,6 +36,16 @@ fz_disable_device_hints(fz_device *dev, int hints)
 }
 
 void
+fz_rebind_device(fz_device *dev, fz_context *ctx)
+{
+	if (dev == NULL)
+		return;
+	dev->ctx = ctx;
+	if (dev->rebind)
+		dev->rebind(dev);
+}
+
+void
 fz_begin_page(fz_device *dev, const fz_rect *rect, const fz_matrix *ctm)
 {
 	if (dev->begin_page)
@@ -46,6 +57,68 @@ fz_end_page(fz_device *dev)
 {
 	if (dev->end_page)
 		dev->end_page(dev);
+}
+
+static void
+push_clip_stack(fz_device *dev, const fz_rect *rect, int flags)
+{
+	if (dev->container_len == dev->container_cap)
+	{
+		int newmax = dev->container_cap * 2;
+		if (newmax == 0)
+			newmax = 4;
+		dev->container = fz_resize_array(dev->ctx, dev->container, newmax, sizeof(*dev->container));
+		dev->container_cap = newmax;
+	}
+	if (dev->container_len == 0)
+		dev->container[0].scissor = *rect;
+	else
+	{
+		dev->container[dev->container_len].scissor = dev->container[dev->container_len-1].scissor;
+		fz_intersect_rect(&dev->container[dev->container_len].scissor, rect);
+	}
+	dev->container[dev->container_len].flags = flags;
+	dev->container[dev->container_len].user = 0;
+	dev->container_len++;
+}
+
+static void
+push_clip_stack_accumulate(fz_device *dev, const fz_rect *rect, int accumulate)
+{
+	if (accumulate <= 1)
+	{
+		dev->scissor_accumulator = *rect;
+		if (dev->container_len == dev->container_cap)
+		{
+			int newmax = dev->container_cap * 2;
+			if (newmax == 0)
+				newmax = 4;
+			dev->container = fz_resize_array(dev->ctx, dev->container, newmax, sizeof(*dev->container));
+			dev->container_cap = newmax;
+		}
+		if (dev->container_len > 0)
+			dev->container[dev->container_len].scissor = dev->container[dev->container_len-1].scissor;
+		else
+			dev->container[dev->container_len].scissor = fz_infinite_rect;
+		fz_intersect_rect(&dev->container[dev->container_len].scissor, rect);
+		dev->container[dev->container_len].flags = fz_device_container_stack_is_clip_text;
+		dev->container[dev->container_len].user = 0;
+		dev->container_len++;
+	}
+	else
+	{
+		if (dev->container_len <= 0)
+			return;
+		fz_union_rect(&dev->scissor_accumulator, rect);
+		fz_intersect_rect(&dev->container[dev->container_len-1].scissor, &dev->scissor_accumulator);
+	}
+}
+
+static void
+pop_clip_stack(fz_device *dev)
+{
+	if (dev->container_len > 0)
+		dev->container_len--;
 }
 
 void
@@ -81,6 +154,17 @@ fz_clip_path(fz_device *dev, fz_path *path, const fz_rect *rect, int even_odd, c
 
 	fz_try(ctx)
 	{
+		if (dev->hints & FZ_MAINTAIN_CONTAINER_STACK)
+		{
+			if (rect == NULL)
+			{
+				fz_rect bbox;
+				fz_bound_path(ctx, path, NULL, ctm, &bbox);
+				push_clip_stack(dev, &bbox, fz_device_container_stack_is_clip_path);
+			}
+			else
+				push_clip_stack(dev, rect, fz_device_container_stack_is_clip_path);
+		}
 		if (dev->clip_path)
 			dev->clip_path(dev, path, rect, even_odd, ctm);
 	}
@@ -105,6 +189,17 @@ fz_clip_stroke_path(fz_device *dev, fz_path *path, const fz_rect *rect, fz_strok
 
 	fz_try(ctx)
 	{
+		if (dev->hints & FZ_MAINTAIN_CONTAINER_STACK)
+		{
+			if (rect == NULL)
+			{
+				fz_rect bbox;
+				fz_bound_path(ctx, path, stroke, ctm, &bbox);
+				push_clip_stack(dev, &bbox, fz_device_container_stack_is_clip_stroke_path);
+			}
+			else
+				push_clip_stack(dev, rect, fz_device_container_stack_is_clip_stroke_path);
+		}
 		if (dev->clip_stroke_path)
 			dev->clip_stroke_path(dev, path, rect, stroke, ctm);
 	}
@@ -150,6 +245,12 @@ fz_clip_text(fz_device *dev, fz_text *text, const fz_matrix *ctm, int accumulate
 
 	fz_try(ctx)
 	{
+		if (dev->hints & FZ_MAINTAIN_CONTAINER_STACK)
+		{
+			fz_rect bbox;
+			fz_bound_text(ctx, text, NULL, ctm, &bbox);
+			push_clip_stack_accumulate(dev, &bbox, accumulate);
+		}
 		if (dev->clip_text)
 			dev->clip_text(dev, text, ctm, accumulate);
 	}
@@ -176,6 +277,12 @@ fz_clip_stroke_text(fz_device *dev, fz_text *text, fz_stroke_state *stroke, cons
 
 	fz_try(ctx)
 	{
+		if (dev->hints & FZ_MAINTAIN_CONTAINER_STACK)
+		{
+			fz_rect bbox;
+			fz_bound_text(ctx, text, stroke, ctm, &bbox);
+			push_clip_stack(dev, &bbox, fz_device_container_stack_is_clip_stroke_text);
+		}
 		if (dev->clip_stroke_text)
 			dev->clip_stroke_text(dev, text, stroke, ctm);
 	}
@@ -206,6 +313,8 @@ fz_pop_clip(fz_device *dev)
 			fz_throw(dev->ctx, FZ_ERROR_GENERIC, "%s", dev->errmess);
 		return;
 	}
+	if (dev->hints & FZ_MAINTAIN_CONTAINER_STACK)
+		pop_clip_stack(dev);
 	if (dev->pop_clip)
 		dev->pop_clip(dev);
 }
@@ -251,6 +360,8 @@ fz_clip_image_mask(fz_device *dev, fz_image *image, const fz_rect *rect, const f
 
 	fz_try(ctx)
 	{
+		if (dev->hints & FZ_MAINTAIN_CONTAINER_STACK)
+			push_clip_stack(dev, rect, fz_device_container_stack_is_clip_image_mask);
 		if (dev->clip_image_mask)
 			dev->clip_image_mask(dev, image, rect, ctm);
 	}
@@ -275,6 +386,8 @@ fz_begin_mask(fz_device *dev, const fz_rect *area, int luminosity, fz_colorspace
 
 	fz_try(ctx)
 	{
+		if (dev->hints & FZ_MAINTAIN_CONTAINER_STACK)
+			push_clip_stack(dev, area, fz_device_container_stack_in_mask);
 		if (dev->begin_mask)
 			dev->begin_mask(dev, area, luminosity, colorspace, bc);
 	}
@@ -294,6 +407,11 @@ fz_end_mask(fz_device *dev)
 		/* Converts from mask to clip, so no change in stack depth */
 		return;
 	}
+	if (dev->hints & FZ_MAINTAIN_CONTAINER_STACK)
+	{
+		dev->container[dev->container_len-1].flags &= ~fz_device_container_stack_in_mask;
+		dev->container[dev->container_len-1].flags |= fz_device_container_stack_is_mask;
+	}
 	if (dev->end_mask)
 		dev->end_mask(dev);
 }
@@ -311,6 +429,8 @@ fz_begin_group(fz_device *dev, const fz_rect *area, int isolated, int knockout, 
 
 	fz_try(ctx)
 	{
+		if (dev->hints & FZ_MAINTAIN_CONTAINER_STACK)
+			push_clip_stack(dev, area, fz_device_container_stack_is_group);
 		if (dev->begin_group)
 			dev->begin_group(dev, area, isolated, knockout, blendmode, alpha);
 	}
@@ -334,6 +454,8 @@ fz_end_group(fz_device *dev)
 	}
 	if (dev->end_group)
 		dev->end_group(dev);
+	if (dev->hints & FZ_MAINTAIN_CONTAINER_STACK)
+		pop_clip_stack(dev);
 }
 
 void

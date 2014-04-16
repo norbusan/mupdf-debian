@@ -3,6 +3,8 @@ package com.artifex.mupdfdemo;
 import java.io.InputStream;
 import java.util.concurrent.Executor;
 
+import com.artifex.mupdfdemo.ReaderView.ViewMapper;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
@@ -25,7 +27,6 @@ import android.view.animation.Animation;
 import android.view.animation.TranslateAnimation;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.RelativeLayout;
@@ -39,7 +40,7 @@ class ThreadPerTaskExecutor implements Executor {
 	}
 }
 
-public class MuPDFActivity extends Activity
+public class MuPDFActivity extends Activity implements FilePicker.FilePickerSupport
 {
 	/* The core rendering instance */
 	enum TopBarMode {Main, Search, Annot, Delete, More, Accept};
@@ -47,6 +48,7 @@ public class MuPDFActivity extends Activity
 
 	private final int    OUTLINE_REQUEST=0;
 	private final int    PRINT_REQUEST=1;
+	private final int    FILEPICK_REQUEST=2;
 	private MuPDFCore    core;
 	private String       mFileName;
 	private MuPDFReaderView mDocView;
@@ -79,6 +81,7 @@ public class MuPDFActivity extends Activity
 	private boolean mReflow = false;
 	private AsyncTask<Void,Void,MuPDFAlert> mAlertTask;
 	private AlertDialog mAlertDialog;
+	private FilePicker mFilePicker;
 
 	public void createAlertWaiter() {
 		mAlertsActive = true;
@@ -419,7 +422,7 @@ public class MuPDFActivity extends Activity
 				}
 			}
 		};
-		mDocView.setAdapter(new MuPDFPageAdapter(this, core));
+		mDocView.setAdapter(new MuPDFPageAdapter(this, this, core));
 
 		mSearchTask = new SearchTask(this, core) {
 			@Override
@@ -593,6 +596,9 @@ public class MuPDFActivity extends Activity
 			if (resultCode == RESULT_CANCELED)
 				showInfo(getString(R.string.print_failed));
 			break;
+		case FILEPICK_REQUEST:
+			if (mFilePicker != null && resultCode == RESULT_OK)
+				mFilePicker.onPick(data.getData());
 		}
 		super.onActivityResult(requestCode, resultCode, data);
 	}
@@ -607,7 +613,7 @@ public class MuPDFActivity extends Activity
 	private void reflowModeSet(boolean reflow)
 	{
 		mReflow = reflow;
-		mDocView.setAdapter(mReflow ? new MuPDFReflowAdapter(this, core) : new MuPDFPageAdapter(this, core));
+		mDocView.setAdapter(mReflow ? new MuPDFReflowAdapter(this, core) : new MuPDFPageAdapter(this, this, core));
 		mReflowButton.setColorFilter(mReflow ? Color.argb(0xFF, 172, 114, 37) : Color.argb(0xFF, 255, 255, 255));
 		setButtonEnabled(mAnnotButton, !reflow);
 		setButtonEnabled(mSearchButton, !reflow);
@@ -666,6 +672,13 @@ public class MuPDFActivity extends Activity
 
 	public void onDestroy()
 	{
+		if (mDocView != null) {
+			mDocView.applyToChildren(new ReaderView.ViewMapper() {
+				void applyToView(View view) {
+					((MuPDFView)view).releaseBitmaps();
+				}
+			});
+		}
 		if (core != null)
 			core.onDestroy();
 		if (mAlertTask != null) {
@@ -1088,5 +1101,12 @@ public class MuPDFActivity extends Activity
 		} else {
 			super.onBackPressed();
 		}
+	}
+
+	@Override
+	public void performPickFor(FilePicker picker) {
+		mFilePicker = picker;
+		Intent intent = new Intent(this, ChoosePDFActivity.class);
+		startActivityForResult(intent, FILEPICK_REQUEST);
 	}
 }

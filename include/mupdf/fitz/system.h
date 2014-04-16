@@ -63,6 +63,15 @@
 
 #ifdef _MSC_VER /* Microsoft Visual C */
 
+/* MSVC up to VS2012 */
+#if _MSC_VER < 1800
+#define va_copy(a, oa) do { a=oa; } while (0)
+#define va_copy_end(a) do {} while(0)
+#define strtof(a,b) ((float)strtod((a),(b)))
+#else
+#define va_copy_end(a) va_end(a)
+#endif
+
 typedef signed char int8_t;
 typedef short int int16_t;
 typedef int int32_t;
@@ -74,15 +83,20 @@ typedef unsigned int uint32_t;
 typedef unsigned __int64 uint64_t;
 
 #pragma warning( disable: 4244 ) /* conversion from X to Y, possible loss of data */
-#pragma warning( disable: 4996 ) /* The POSIX name for this item is deprecated */
-#pragma warning( disable: 4996 ) /* This function or variable may be unsafe */
+#pragma warning( disable: 4701 ) /* Potentially uninitialized local variable 'name' used */
+#pragma warning( disable: 4996 ) /* 'function': was declared deprecated */
 
 #include <io.h>
 
+struct timeval;
+struct timezone;
 int gettimeofday(struct timeval *tv, struct timezone *tz);
 
 #define snprintf _snprintf
-#define isnan _isnan
+#if _MSC_VER < 1800
+#define isnan(x) _isnan(x)
+#define isinf(x) (!_finite(x))
+#endif
 #define hypotf _hypotf
 
 #define fopen fz_fopen_utf8
@@ -105,8 +119,9 @@ void fz_free_argv(int argc, char **argv);
 
 #ifndef O_BINARY
 #define O_BINARY 0
-
 #endif
+
+#define va_copy_end(a) va_end(a)
 
 #endif
 
@@ -350,5 +365,7 @@ static inline float my_atan2f(float o, float a)
 #define cosf(x) my_sinf(((float)(M_PI/2.0f)) + (x))
 #define atan2f(x,y) my_atan2f((x),(y))
 #endif
+
+int fz_strcasecmp(const char *a, const char *b);
 
 #endif

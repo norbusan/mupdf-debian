@@ -40,7 +40,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\scripts;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs"
 				PreprocessorDefinitions="DEBUG=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -105,7 +105,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="..\..\scripts;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -165,7 +165,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\scripts;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs"
 				PreprocessorDefinitions="MEMENTO=1;DEBUG=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -227,7 +227,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\scripts;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\openssl\include;..\..\thirdparty\mujs"
 				PreprocessorDefinitions="DEBUG=1;HAVE_OPENSSL"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -292,7 +292,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="..\..\scripts;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -434,6 +434,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\source\fitz\document-all.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\fitz\document.c"
 				>
 			</File>
@@ -506,6 +510,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\source\fitz\filter-leech.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\fitz\filter-lzw.c"
 				>
 			</File>
@@ -527,6 +535,10 @@
 			</File>
 			<File
 				RelativePath="..\..\source\fitz\getopt.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\fitz\glyph.c"
 				>
 			</File>
 			<File
@@ -555,6 +567,10 @@
 			</File>
 			<File
 				RelativePath="..\..\source\fitz\load-jpx.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\fitz\load-jxr.c"
 				>
 			</File>
 			<File
@@ -595,6 +611,10 @@
 			</File>
 			<File
 				RelativePath="..\..\source\fitz\pixmap.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\fitz\printf.c"
 				>
 			</File>
 			<File
@@ -658,6 +678,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\source\fitz\tree.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\fitz\ucdn.c"
 				>
 			</File>
@@ -686,11 +710,19 @@
 			Name="pdf"
 			>
 			<File
+				RelativePath="..\..\source\pdf\pdf-annot-edit.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\pdf\pdf-annot.c"
 				>
 			</File>
 			<File
 				RelativePath="..\..\source\pdf\pdf-appearance.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\pdf\pdf-clean.c"
 				>
 			</File>
 			<File
@@ -762,6 +794,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\source\pdf\pdf-interpret-imp.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\pdf\pdf-interpret.c"
 				>
 			</File>
@@ -779,6 +815,18 @@
 			</File>
 			<File
 				RelativePath="..\..\source\pdf\pdf-object.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\pdf\pdf-op-buffer.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\pdf\pdf-op-filter.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\pdf\pdf-op-run.c"
 				>
 			</File>
 			<File
@@ -803,6 +851,10 @@
 			</File>
 			<File
 				RelativePath="..\..\source\pdf\pdf-repair.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\pdf\pdf-run.c"
 				>
 			</File>
 			<File
@@ -841,6 +893,22 @@
 				RelativePath="..\..\source\pdf\pdf-xref.c"
 				>
 			</File>
+			<Filter
+				Name="js"
+				>
+				<File
+					RelativePath="..\..\source\pdf\js\pdf-js.c"
+					>
+				</File>
+				<File
+					RelativePath="..\..\source\pdf\js\pdf-jsimp-mu.c"
+					>
+				</File>
+				<File
+					RelativePath="..\..\source\pdf\js\pdf-util.js"
+					>
+				</File>
+			</Filter>
 		</Filter>
 		<Filter
 			Name="!include"
@@ -977,6 +1045,10 @@
 					>
 				</File>
 				<File
+					RelativePath="..\..\source\fitz\document-no-run.c"
+					>
+				</File>
+				<File
 					RelativePath="..\..\include\mupdf\fitz\document.h"
 					>
 				</File>
@@ -998,6 +1070,10 @@
 				</File>
 				<File
 					RelativePath="..\..\include\mupdf\fitz\glyph-cache.h"
+					>
+				</File>
+				<File
+					RelativePath="..\..\include\mupdf\fitz\glyph.h"
 					>
 				</File>
 				<File
@@ -1097,6 +1173,14 @@
 					>
 				</File>
 			</Filter>
+		</Filter>
+		<Filter
+			Name="tiff"
+			>
+			<File
+				RelativePath="..\..\source\tiff\mutiff.c"
+				>
+			</File>
 		</Filter>
 	</Files>
 	<Globals>

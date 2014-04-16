@@ -2,8 +2,6 @@
 
 /* TODO: check if this works with 16bpp images */
 
-enum { MAXC = 32 };
-
 typedef struct fz_predict_s fz_predict;
 
 struct fz_predict_s
@@ -21,6 +19,8 @@ struct fz_predict_s
 	unsigned char *out;
 	unsigned char *ref;
 	unsigned char *rp, *wp;
+
+	unsigned char buffer[4096];
 };
 
 static inline int getcomponent(unsigned char *line, int x, int bpc)
@@ -61,7 +61,7 @@ static inline int paeth(int a, int b, int c)
 static void
 fz_predict_tiff(fz_predict *state, unsigned char *out, unsigned char *in, int len)
 {
-	int left[MAXC];
+	int left[FZ_MAX_COLORS];
 	int i, k;
 	const int mask = (1 << state->bpc)-1;
 
@@ -88,6 +88,9 @@ fz_predict_png(fz_predict *state, unsigned char *out, unsigned char *in, int len
 	int bpp = state->bpp;
 	int i;
 	unsigned char *ref = state->ref;
+
+	if (bpp > len)
+		bpp = len;
 
 	switch (predictor)
 	{
@@ -142,13 +145,18 @@ fz_predict_png(fz_predict *state, unsigned char *out, unsigned char *in, int len
 }
 
 static int
-read_predict(fz_stream *stm, unsigned char *buf, int len)
+next_predict(fz_stream *stm, int len)
 {
 	fz_predict *state = stm->state;
+	unsigned char *buf = state->buffer;
 	unsigned char *p = buf;
-	unsigned char *ep = buf + len;
+	unsigned char *ep;
 	int ispng = state->predictor >= 10;
 	int n;
+
+	if (len >= sizeof(state->buffer))
+		len = sizeof(state->buffer);
+	ep = buf + len;
 
 	while (state->rp < state->wp && p < ep)
 		*p++ = *state->rp++;
@@ -157,7 +165,7 @@ read_predict(fz_stream *stm, unsigned char *buf, int len)
 	{
 		n = fz_read(state->chain, state->in, state->stride + ispng);
 		if (n == 0)
-			return p - buf;
+			break;
 
 		if (state->predictor == 1)
 			memcpy(state->out, state->in, n);
@@ -176,7 +184,13 @@ read_predict(fz_stream *stm, unsigned char *buf, int len)
 			*p++ = *state->rp++;
 	}
 
-	return p - buf;
+	stm->rp = buf;
+	stm->wp = p;
+	if (stm->rp == stm->wp)
+		return EOF;
+	stm->pos += p - buf;
+
+	return *stm->rp++;
 }
 
 static void
@@ -188,6 +202,13 @@ close_predict(fz_context *ctx, void *state_)
 	fz_free(ctx, state->out);
 	fz_free(ctx, state->ref);
 	fz_free(ctx, state);
+}
+
+static fz_stream *
+rebind_predict(fz_stream *s)
+{
+	fz_predict *state = s->state;
+	return state->chain;
 }
 
 /* Default values: predictor = 1, columns = 1, colors = 1, bpc = 8 */
@@ -210,6 +231,13 @@ fz_open_predict(fz_stream *chain, int predictor, int columns, int colors, int bp
 
 	fz_try(ctx)
 	{
+		if (bpc != 1 && bpc != 2 && bpc != 4 && bpc != 8 && bpc != 16)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "invalid number of bits per component: %d", bpc);
+		if (colors > FZ_MAX_COLORS)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "too many color components (%d > %d)", colors, FZ_MAX_COLORS);
+		if (columns >= INT_MAX / (bpc * colors))
+			fz_throw(ctx, FZ_ERROR_GENERIC, "too many columns lead to an integer overflow (%d)", columns);
+
 		state = fz_malloc_struct(ctx, fz_predict);
 		state->in = NULL;
 		state->out = NULL;
@@ -252,5 +280,5 @@ fz_open_predict(fz_stream *chain, int predictor, int columns, int colors, int bp
 		fz_rethrow(ctx);
 	}
 
-	return fz_new_stream(ctx, state, read_predict, close_predict);
+	return fz_new_stream(ctx, state, next_predict, close_predict, rebind_predict);
 }

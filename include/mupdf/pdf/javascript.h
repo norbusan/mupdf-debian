@@ -8,10 +8,10 @@ typedef struct pdf_js_event_s
 	int rc;
 } pdf_js_event;
 
-int pdf_js_supported(void);
-pdf_js *pdf_new_js(pdf_document *doc);
-void pdf_drop_js(pdf_js *js);
-void pdf_js_load_document_level(pdf_js *js);
+void pdf_enable_js(pdf_document *doc);
+void pdf_disable_js(pdf_document *doc);
+int pdf_js_supported(pdf_document *doc);
+
 void pdf_js_setup_event(pdf_js *js, pdf_js_event *e);
 pdf_js_event *pdf_js_get_event(pdf_js *js);
 void pdf_js_execute(pdf_js *js, char *code);
@@ -42,7 +42,7 @@ enum
 pdf_jsimp *pdf_new_jsimp(fz_context *ctx, void *jsctx);
 void pdf_drop_jsimp(pdf_jsimp *imp);
 
-pdf_jsimp_type *pdf_jsimp_new_type(pdf_jsimp *imp, pdf_jsimp_dtr *dtr);
+pdf_jsimp_type *pdf_jsimp_new_type(pdf_jsimp *imp, pdf_jsimp_dtr *dtr, char *name);
 void pdf_jsimp_drop_type(pdf_jsimp *imp, pdf_jsimp_type *type);
 void pdf_jsimp_addmethod(pdf_jsimp *imp, pdf_jsimp_type *type, char *name, pdf_jsimp_method *meth);
 void pdf_jsimp_addproperty(pdf_jsimp *imp, pdf_jsimp_type *type, char *name, pdf_jsimp_getter *get, pdf_jsimp_setter *set);

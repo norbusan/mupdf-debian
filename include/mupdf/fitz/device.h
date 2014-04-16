@@ -73,6 +73,27 @@ enum
 int fz_lookup_blendmode(char *name);
 char *fz_blendmode_name(int blendmode);
 
+typedef struct fz_device_container_stack_s fz_device_container_stack;
+
+struct fz_device_container_stack_s
+{
+	fz_rect scissor;
+	int flags;
+	int user;
+};
+
+enum
+{
+	fz_device_container_stack_is_clip_path = 1,
+	fz_device_container_stack_is_clip_stroke_path = 2,
+	fz_device_container_stack_is_clip_text = 4,
+	fz_device_container_stack_is_clip_stroke_text = 8,
+	fz_device_container_stack_is_clip_image_mask = 16,
+	fz_device_container_stack_in_mask = 32,
+	fz_device_container_stack_is_mask = 64,
+	fz_device_container_stack_is_group = 128,
+};
+
 struct fz_device_s
 {
 	int hints;
@@ -81,6 +102,8 @@ struct fz_device_s
 	void *user;
 	void (*free_user)(fz_device *);
 	fz_context *ctx;
+
+	void (*rebind)(fz_device *);
 
 	void (*begin_page)(fz_device *, const fz_rect *rect, const fz_matrix *ctm);
 	void (*end_page)(fz_device *);
@@ -113,8 +136,14 @@ struct fz_device_s
 
 	int error_depth;
 	char errmess[256];
+
+	int container_len;
+	int container_cap;
+	fz_device_container_stack *container;
+	fz_rect scissor_accumulator;
 };
 
+void fz_rebind_device(fz_device *dev, fz_context *ctx);
 void fz_begin_page(fz_device *dev, const fz_rect *rect, const fz_matrix *ctm);
 void fz_end_page(fz_device *dev);
 void fz_fill_path(fz_device *dev, fz_path *path, int even_odd, const fz_matrix *ctm, fz_colorspace *colorspace, float *color, float alpha);
@@ -175,6 +204,9 @@ enum
 	/* Hints */
 	FZ_IGNORE_IMAGE = 1,
 	FZ_IGNORE_SHADE = 2,
+	FZ_DONT_INTERPOLATE_IMAGES = 4,
+	FZ_MAINTAIN_CONTAINER_STACK = 8,
+	FZ_NO_CACHE = 16,
 };
 
 /*

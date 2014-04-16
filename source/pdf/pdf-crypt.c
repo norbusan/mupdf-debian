@@ -36,7 +36,6 @@ struct pdf_crypt_s
 	int encrypt_metadata;
 
 	unsigned char key[32]; /* decryption key generated from password */
-	fz_context *ctx;
 };
 
 static void pdf_parse_crypt_filter(fz_context *ctx, pdf_crypt_filter *cf, pdf_crypt *crypt, char *name);
@@ -97,6 +96,12 @@ pdf_new_crypt(fz_context *ctx, pdf_obj *dict, pdf_obj *id)
 	{
 		pdf_free_crypt(ctx, crypt);
 		fz_throw(ctx, FZ_ERROR_GENERIC, "encryption dictionary missing version and revision value");
+	}
+	if (crypt->r < 1 || crypt->r > 6)
+	{
+		int r = crypt->r;
+		pdf_free_crypt(ctx, crypt);
+		fz_throw(ctx, FZ_ERROR_GENERIC, "unknown crypt revision %d", r);
 	}
 
 	obj = pdf_dict_gets(dict, "O");
@@ -313,7 +318,7 @@ pdf_parse_crypt_filter(fz_context *ctx, pdf_crypt_filter *cf, pdf_crypt *crypt, 
 	if ((cf->length % 8) != 0)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "invalid key length: %d", cf->length);
 
-	if ((crypt->r == 1 || crypt->r == 2 || crypt->r == 4) &&
+	if ((crypt->r == 1 || crypt->r == 2 || crypt->r == 3 || crypt->r == 4) &&
 		(cf->length < 0 || cf->length > 128))
 		fz_throw(ctx, FZ_ERROR_GENERIC, "invalid key length: %d", cf->length);
 	if ((crypt->r == 5 || crypt->r == 6) && cf->length != 256)
@@ -477,7 +482,8 @@ pdf_compute_hardened_hash_r6(fz_context *ctx, unsigned char *password, int pwlen
 		/* Step 2: repeat password and data block 64 times */
 		memcpy(data, password, pwlen);
 		memcpy(data + pwlen, block, block_size);
-		memcpy(data + pwlen + block_size, ownerkey, ownerkey ? 48 : 0);
+		if (ownerkey)
+			memcpy(data + pwlen + block_size, ownerkey, 48);
 		data_len = pwlen + block_size + (ownerkey ? 48 : 0);
 		for (j = 1; j < 64; j++)
 			memcpy(data + j * data_len, data, data_len);
@@ -688,8 +694,8 @@ pdf_authenticate_owner_password(fz_context *ctx, pdf_crypt *crypt, unsigned char
 		memcpy(userpass, crypt->o, 32);
 		for (x = 0; x < 20; x++)
 		{
-			for (i = 0; i < n; i++)
-				xor[i] = key[i] ^ (19 - x);
+			for (i = 0; i < 32; i++)
+				xor[i] = pwbuf[i] ^ (19 - x);
 			fz_arc4_init(&arc4, xor, n);
 			fz_arc4_encrypt(&arc4, userpass, userpass, 32);
 		}
@@ -953,7 +959,6 @@ pdf_open_crypt_imp(fz_stream *chain, pdf_crypt *crypt, pdf_crypt_filter *stmf, i
 	unsigned char key[32];
 	int len;
 
-	crypt->ctx = chain->ctx;
 	len = pdf_compute_object_key(crypt, stmf, num, gen, key, 32);
 
 	if (stmf->method == PDF_CRYPT_RC4)

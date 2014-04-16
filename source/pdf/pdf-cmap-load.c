@@ -33,7 +33,7 @@ pdf_load_embedded_cmap(pdf_document *doc, pdf_obj *stmobj)
 	if (pdf_obj_marked(stmobj))
 		fz_throw(ctx, FZ_ERROR_GENERIC, "Recursion in embedded cmap");
 
-	if ((cmap = pdf_find_item(ctx, pdf_free_cmap_imp, stmobj)))
+	if ((cmap = pdf_find_item(ctx, pdf_free_cmap_imp, stmobj)) != NULL)
 	{
 		return cmap;
 	}
@@ -133,7 +133,7 @@ pdf_load_system_cmap(fz_context *ctx, char *cmap_name)
 	{
 		usecmap = pdf_load_builtin_cmap(ctx, cmap->usecmap_name);
 		if (!usecmap)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "nu builtin cmap file: %s", cmap->usecmap_name);
+			fz_throw(ctx, FZ_ERROR_GENERIC, "no builtin cmap file: %s", cmap->usecmap_name);
 		pdf_set_usecmap(ctx, cmap, usecmap);
 	}
 

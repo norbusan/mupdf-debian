@@ -33,17 +33,22 @@ namespace mupdfwinrt
 			int GetNumPages(void);
 			Point GetPageSize(int page_num);
 			Windows::Foundation::IAsyncOperation<InMemoryRandomAccessStream^>^
-				RenderPageAsync(int page_num, int width, int height, bool use_dlist);
+				RenderPageAsync(int page_num, int width, int height, 
+								bool use_dlist, float scale);
+			int RenderPageBitmapSync(int page_num, int bmp_width, int bmp_height,
+				float scale, bool use_dlist, bool flipy, bool tiling, Point top_left,
+				Point bottom_right, Array<unsigned char>^* bit_map);
 			Windows::Foundation::IAsyncOperationWithProgress<int, double>^
-				SearchDocumentWithProgressAsync(String^ textToFind, int dir, int start_page);
+				SearchDocumentWithProgressAsync(String^ textToFind, int dir, 
+												int start_page, int num_pages);
 			String^ ComputeHTML(int page_num);
 			int ComputeTextSearch(String^ text, int page_num);
-			Links^ GetTextSearch(int k);
+			Links^ GetTextSearch(unsigned int k);
 			int TextSearchCount(void);
-			int ComputeContents(void);
-			ContentItem^ GetContent(int k);
-			int ComputeLinks(int page_num);
-			Links^ GetLink(int k);
+			unsigned int ComputeContents(void);
+			ContentItem^ GetContent(unsigned int k);
+			unsigned int ComputeLinks(int page_num);
+			Links^ GetLink(unsigned int k);
 			bool RequiresPassword();
 			bool ApplyPassword(String^ password);
 	};

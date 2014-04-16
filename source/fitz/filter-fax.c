@@ -311,6 +311,7 @@ typedef struct fz_faxd_s fz_faxd;
 
 enum
 {
+	STATE_INIT,		/* initial state, optionally waiting for EOL */
 	STATE_NORMAL,	/* neutral state, waiting for any code */
 	STATE_MAKEUP,	/* got a 1d makeup code, waiting for terminating code */
 	STATE_EOL,		/* at eol, needs output buffer space */
@@ -343,6 +344,8 @@ struct fz_faxd_s
 	unsigned char *ref;
 	unsigned char *dst;
 	unsigned char *rp, *wp;
+
+	unsigned char buffer[4096];
 };
 
 static inline void eat_bits(fz_faxd *fax, int nbits)
@@ -354,7 +357,10 @@ static inline void eat_bits(fz_faxd *fax, int nbits)
 static int
 fill_bits(fz_faxd *fax)
 {
-	while (fax->bidx >= 8)
+	/* The longest length of bits we'll ever need is 13. Never read more
+	 * than we need to avoid unnecessary overreading of the end of the
+	 * stream. */
+	while (fax->bidx > (32-13))
 	{
 		int c = fz_read_byte(fax->chain);
 		if (c == EOF)
@@ -550,15 +556,35 @@ dec2d(fz_context *ctx, fz_faxd *fax)
 }
 
 static int
-read_faxd(fz_stream *stm, unsigned char *buf, int len)
+next_faxd(fz_stream *stm, int max)
 {
+	fz_context *ctx = stm->ctx;
 	fz_faxd *fax = stm->state;
-	unsigned char *p = buf;
-	unsigned char *ep = buf + len;
+	unsigned char *p = fax->buffer;
+	unsigned char *ep;
 	unsigned char *tmp;
 
+	if (max > sizeof(fax->buffer))
+		max = sizeof(fax->buffer);
+	ep = p + max;
+	if (fax->stage == STATE_INIT && fax->end_of_line)
+	{
+		fill_bits(fax);
+		if ((fax->word >> (32 - 12)) != 1)
+		{
+			fz_warn(ctx, "faxd stream doesn't start with EOL");
+			while (!fill_bits(fax) && (fax->word >> (32 - 12)) != 1)
+				eat_bits(fax, 1);
+		}
+		if ((fax->word >> (32 - 12)) != 1)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "initial EOL not found");
+	}
+
+	if (fax->stage == STATE_INIT)
+		fax->stage = STATE_NORMAL;
+
 	if (fax->stage == STATE_DONE)
-		return 0;
+		return EOF;
 
 	if (fax->stage == STATE_EOL)
 		goto eol;
@@ -609,12 +635,26 @@ loop:
 	else if (fax->dim == 1)
 	{
 		fax->eolc = 0;
-		dec1d(stm->ctx, fax);
+		fz_try(ctx)
+		{
+			dec1d(ctx, fax);
+		}
+		fz_catch(ctx)
+		{
+			goto error;
+		}
 	}
 	else if (fax->dim == 2)
 	{
 		fax->eolc = 0;
-		dec2d(stm->ctx, fax);
+		fz_try(ctx)
+		{
+			dec2d(ctx, fax);
+		}
+		fz_catch(ctx)
+		{
+			goto error;
+		}
 	}
 
 	/* no eol check after makeup codes nor in the middle of an H code */
@@ -647,7 +687,14 @@ eol:
 	}
 
 	if (fax->rp < fax->wp)
-		return p - buf;
+	{
+		stm->rp = fax->buffer;
+		stm->wp = p;
+		stm->pos += (p - fax->buffer);
+		if (p == fax->buffer)
+			return EOF;
+		return *stm->rp++;
+	}
 
 	tmp = fax->ref;
 	fax->ref = fax->dst;
@@ -662,11 +709,8 @@ eol:
 	fax->a = -1;
 	fax->ridx ++;
 
-	if (!fax->end_of_block && fax->rows)
-	{
-		if (fax->ridx >= fax->rows)
-			goto rtc;
-	}
+	if (!fax->end_of_block && fax->rows && fax->ridx >= fax->rows)
+		goto rtc;
 
 	/* we have not read dim from eol, make a guess */
 	if (fax->k > 0 && !fax->eolc && fax->a == -1)
@@ -687,14 +731,40 @@ eol:
 	}
 
 	/* no more space in output, don't decode the next row yet */
-	if (p == buf + len)
-		return p - buf;
+	if (p == fax->buffer + max)
+	{
+		stm->rp = fax->buffer;
+		stm->wp = p;
+		stm->pos += (p - fax->buffer);
+		if (p == fax->buffer)
+			return EOF;
+		return *stm->rp++;
+	}
 
 	goto loop;
 
+error:
+	/* decode the remaining pixels up to where the error occurred */
+	if (fax->black_is_1)
+	{
+		while (fax->rp < fax->wp && p < ep)
+			*p++ = *fax->rp++;
+	}
+	else
+	{
+		while (fax->rp < fax->wp && p < ep)
+			*p++ = *fax->rp++ ^ 0xff;
+	}
+	/* fallthrough */
+
 rtc:
 	fax->stage = STATE_DONE;
-	return p - buf;
+	stm->rp = fax->buffer;
+	stm->wp = p;
+	stm->pos += (p - fax->buffer);
+	if (p == fax->buffer)
+		return EOF;
+	return *stm->rp++;
 }
 
 static void
@@ -714,6 +784,13 @@ close_faxd(fz_context *ctx, void *state_)
 	fz_free(ctx, fax);
 }
 
+static fz_stream *
+rebind_faxd(fz_stream *s)
+{
+	fz_faxd *state = s->state;
+	return state->chain;
+}
+
 /* Default: columns = 1728, end_of_block = 1, the rest = 0 */
 fz_stream *
 fz_open_faxd(fz_stream *chain,
@@ -727,6 +804,9 @@ fz_open_faxd(fz_stream *chain,
 
 	fz_try(ctx)
 	{
+		if (columns < 0 || columns >= INT_MAX - 7)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "too many columns lead to an integer overflow (%d)", columns);
+
 		fax = fz_malloc_struct(ctx, fz_faxd);
 		fax->chain = chain;
 
@@ -746,7 +826,7 @@ fz_open_faxd(fz_stream *chain,
 		fax->bidx = 32;
 		fax->word = 0;
 
-		fax->stage = STATE_NORMAL;
+		fax->stage = STATE_INIT;
 		fax->a = -1;
 		fax->c = 0;
 		fax->dim = fax->k < 0 ? 2 : 1;
@@ -772,5 +852,5 @@ fz_open_faxd(fz_stream *chain,
 		fz_rethrow(ctx);
 	}
 
-	return fz_new_stream(ctx, fax, read_faxd, close_faxd);
+	return fz_new_stream(ctx, fax, next_faxd, close_faxd, rebind_faxd);
 }

@@ -49,6 +49,7 @@ fz_free_context(fz_context *ctx)
 		return;
 
 	/* Other finalisation calls go here (in reverse order) */
+	fz_drop_document_handler_context(ctx);
 	fz_drop_glyph_cache_context(ctx);
 	fz_drop_store_context(ctx);
 	fz_free_aa_context(ctx);
@@ -121,9 +122,15 @@ cleanup:
 }
 
 fz_context *
-fz_new_context(fz_alloc_context *alloc, fz_locks_context *locks, unsigned int max_store)
+fz_new_context_imp(fz_alloc_context *alloc, fz_locks_context *locks, unsigned int max_store, const char *version)
 {
 	fz_context *ctx;
+
+	if (strcmp(version, FZ_VERSION))
+	{
+		fprintf(stderr, "cannot create context: incompatible header (%s) and library (%s) versions", version, FZ_VERSION);
+		return NULL;
+	}
 
 	if (!alloc)
 		alloc = &fz_alloc_default;
@@ -143,6 +150,7 @@ fz_new_context(fz_alloc_context *alloc, fz_locks_context *locks, unsigned int ma
 		fz_new_colorspace_context(ctx);
 		fz_new_font_context(ctx);
 		fz_new_id_context(ctx);
+		fz_new_document_handler_context(ctx);
 	}
 	fz_catch(ctx)
 	{
@@ -189,6 +197,8 @@ fz_clone_context_internal(fz_context *ctx)
 	new_ctx->font = fz_keep_font_context(new_ctx);
 	new_ctx->id = ctx->id;
 	new_ctx->id = fz_keep_id_context(new_ctx);
+	new_ctx->handler = ctx->handler;
+	new_ctx->handler = fz_keep_document_handler_context(new_ctx);
 
 	return new_ctx;
 }

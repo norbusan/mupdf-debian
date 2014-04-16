@@ -10,13 +10,24 @@ import android.graphics.Bitmap;
 import android.graphics.Point;
 import android.graphics.PointF;
 import android.graphics.RectF;
+import android.net.Uri;
+import android.text.method.PasswordTransformationMethod;
 import android.view.LayoutInflater;
 import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
+
+/* This enum should be kept in line with the cooresponding C enum in mupdf.c */
+enum SignatureState {
+	NoSupport,
+	Unsigned,
+	Signed
+}
 
 abstract class PassClickResultVisitor {
 	public abstract void visitText(PassClickResultText result);
 	public abstract void visitChoice(PassClickResultChoice result);
+	public abstract void visitSignature(PassClickResultSignature result);
 }
 
 class PassClickResult {
@@ -58,7 +69,21 @@ class PassClickResultChoice extends PassClickResult {
 	}
 }
 
+class PassClickResultSignature extends PassClickResult {
+	public final SignatureState state;
+
+	public PassClickResultSignature(boolean _changed, int _state) {
+		super(_changed);
+		state = SignatureState.values()[_state];
+	}
+
+	public void acceptVisitor(PassClickResultVisitor visitor) {
+		visitor.visitSignature(this);
+	}
+}
+
 public class MuPDFPageView extends PageView implements MuPDFView {
+	final private FilePicker.FilePickerSupport mFilePickerSupport;
 	private final MuPDFCore mCore;
 	private AsyncTask<Void,Void,PassClickResult> mPassClick;
 	private RectF mWidgetAreas[];
@@ -68,17 +93,25 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 	private AsyncTask<Void,Void,Annotation[]> mLoadAnnotations;
 	private AlertDialog.Builder mTextEntryBuilder;
 	private AlertDialog.Builder mChoiceEntryBuilder;
+	private AlertDialog.Builder mSigningDialogBuilder;
+	private AlertDialog.Builder mSignatureReportBuilder;
+	private AlertDialog.Builder mPasswordEntryBuilder;
+	private EditText mPasswordText;
 	private AlertDialog mTextEntry;
+	private AlertDialog mPasswordEntry;
 	private EditText mEditText;
 	private AsyncTask<String,Void,Boolean> mSetWidgetText;
 	private AsyncTask<String,Void,Void> mSetWidgetChoice;
 	private AsyncTask<PointF[],Void,Void> mAddStrikeOut;
 	private AsyncTask<PointF[][],Void,Void> mAddInk;
 	private AsyncTask<Integer,Void,Void> mDeleteAnnotation;
+	private AsyncTask<Void,Void,String> mCheckSignature;
+	private AsyncTask<Void,Void,Boolean> mSign;
 	private Runnable changeReporter;
 
-	public MuPDFPageView(Context c, MuPDFCore core, Point parentSize) {
-		super(c, parentSize);
+	public MuPDFPageView(Context c, FilePicker.FilePickerSupport filePickerSupport, MuPDFCore core, Point parentSize, Bitmap sharedHqBm) {
+		super(c, parentSize, sharedHqBm);
+		mFilePickerSupport = filePickerSupport;
 		mCore = core;
 		mTextEntryBuilder = new AlertDialog.Builder(c);
 		mTextEntryBuilder.setTitle(getContext().getString(R.string.fill_out_text_field));
@@ -112,6 +145,90 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 
 		mChoiceEntryBuilder = new AlertDialog.Builder(c);
 		mChoiceEntryBuilder.setTitle(getContext().getString(R.string.choose_value));
+
+		mSigningDialogBuilder = new AlertDialog.Builder(c);
+		mSigningDialogBuilder.setTitle("Select certificate and sign?");
+		mSigningDialogBuilder.setNegativeButton(R.string.cancel, new DialogInterface.OnClickListener() {
+			@Override
+			public void onClick(DialogInterface dialog, int which) {
+				dialog.dismiss();
+			}
+		});
+		mSigningDialogBuilder.setPositiveButton(R.string.okay, new DialogInterface.OnClickListener() {
+			@Override
+			public void onClick(DialogInterface dialog, int which) {
+				FilePicker picker = new FilePicker(mFilePickerSupport) {
+					@Override
+					void onPick(Uri uri) {
+						signWithKeyFile(uri);
+					}
+				};
+
+				picker.pick();
+			}
+		});
+
+		mSignatureReportBuilder = new AlertDialog.Builder(c);
+		mSignatureReportBuilder.setTitle("Signature checked");
+		mSignatureReportBuilder.setPositiveButton(R.string.okay, new DialogInterface.OnClickListener() {
+			@Override
+			public void onClick(DialogInterface dialog, int which) {
+				dialog.dismiss();
+			}
+		});
+
+		mPasswordText = new EditText(c);
+		mPasswordText.setInputType(EditorInfo.TYPE_TEXT_VARIATION_PASSWORD);
+		mPasswordText.setTransformationMethod(new PasswordTransformationMethod());
+
+		mPasswordEntryBuilder = new AlertDialog.Builder(c);
+		mPasswordEntryBuilder.setTitle(R.string.enter_password);
+		mPasswordEntryBuilder.setView(mPasswordText);
+		mPasswordEntryBuilder.setNegativeButton(R.string.cancel, new DialogInterface.OnClickListener() {
+			@Override
+			public void onClick(DialogInterface dialog, int which) {
+				dialog.dismiss();
+			}
+		});
+
+		mPasswordEntry = mPasswordEntryBuilder.create();
+	}
+
+	private void signWithKeyFile(final Uri uri) {
+		mPasswordEntry.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+		mPasswordEntry.setButton(AlertDialog.BUTTON_POSITIVE, "Sign", new DialogInterface.OnClickListener() {
+			@Override
+			public void onClick(DialogInterface dialog, int which) {
+				dialog.dismiss();
+				signWithKeyFileAndPassword(uri, mPasswordText.getText().toString());
+			}
+		});
+
+		mPasswordEntry.show();
+	}
+
+	private void signWithKeyFileAndPassword(final Uri uri, final String password) {
+		mSign = new AsyncTask<Void,Void,Boolean>() {
+			@Override
+			protected Boolean doInBackground(Void... params) {
+				return mCore.signFocusedSignature(Uri.decode(uri.getEncodedPath()), password);
+			}
+			@Override
+			protected void onPostExecute(Boolean result) {
+				if (result)
+				{
+					changeReporter.run();
+				}
+				else
+				{
+					mPasswordText.setText("");
+					signWithKeyFile(uri);
+				}
+			}
+
+		};
+
+		mSign.execute();
 	}
 
 	public LinkInfo hitLink(float x, float y) {
@@ -160,6 +277,34 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 		dialog.show();
 	}
 
+	private void invokeSignatureCheckingDialog() {
+		mCheckSignature = new AsyncTask<Void,Void,String> () {
+			@Override
+			protected String doInBackground(Void... params) {
+				return mCore.checkFocusedSignature();
+			}
+			@Override
+			protected void onPostExecute(String result) {
+				AlertDialog report = mSignatureReportBuilder.create();
+				report.setMessage(result);
+				report.show();
+			}
+		};
+
+		mCheckSignature.execute();
+	}
+
+	private void invokeSigningDialog() {
+		AlertDialog dialog = mSigningDialogBuilder.create();
+		dialog.show();
+	}
+
+	private void warnNoSignatureSupport() {
+		AlertDialog dialog = mSignatureReportBuilder.create();
+		dialog.setTitle("App built with no signature support");
+		dialog.show();
+	}
+
 	public void setChangeReporter(Runnable reporter) {
 		changeReporter = reporter;
 	}
@@ -195,7 +340,7 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 		mSelectedAnnotationIndex = -1;
 		setItemSelectBox(null);
 
-		if (!MuPDFCore.javascriptSupported())
+		if (!mCore.javascriptSupported())
 			return Hit.Nothing;
 
 		if (mWidgetAreas != null) {
@@ -226,6 +371,21 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 						@Override
 						public void visitChoice(PassClickResultChoice result) {
 							invokeChoiceDialog(result.options);
+						}
+
+						@Override
+						public void visitSignature(PassClickResultSignature result) {
+							switch (result.state) {
+							case NoSupport:
+								warnNoSignatureSupport();
+								break;
+							case Unsigned:
+								invokeSigningDialog();
+								break;
+							case Signed:
+								invokeSignatureCheckingDialog();
+								break;
+							}
 						}
 					});
 				}
@@ -389,15 +549,15 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 	}
 
 	@Override
-	protected Bitmap drawPage(int sizeX, int sizeY,
+	protected void drawPage(Bitmap bm, int sizeX, int sizeY,
 			int patchX, int patchY, int patchWidth, int patchHeight) {
-		return mCore.drawPage(mPageNumber, sizeX, sizeY, patchX, patchY, patchWidth, patchHeight);
+		mCore.drawPage(bm, mPageNumber, sizeX, sizeY, patchX, patchY, patchWidth, patchHeight);
 	}
 
 	@Override
-	protected Bitmap updatePage(BitmapHolder h, int sizeX, int sizeY,
+	protected void updatePage(Bitmap bm, int sizeX, int sizeY,
 			int patchX, int patchY, int patchWidth, int patchHeight) {
-		return mCore.updatePage(h, mPageNumber, sizeX, sizeY, patchX, patchY, patchWidth, patchHeight);
+		mCore.updatePage(bm, mPageNumber, sizeX, sizeY, patchX, patchY, patchWidth, patchHeight);
 	}
 
 	@Override

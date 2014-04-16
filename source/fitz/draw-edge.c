@@ -160,7 +160,7 @@ struct fz_edge_s
 struct fz_gel_s
 {
 	fz_rect clip;
-	fz_rect bbox;
+	fz_irect bbox;
 	int cap, len;
 	fz_edge *edges;
 	int acap, alen;
@@ -224,6 +224,7 @@ fz_reset_gel(fz_gel *gel, const fz_irect *clip)
 	gel->bbox.x1 = gel->bbox.y1 = BBOX_MIN;
 
 	gel->len = 0;
+	gel->alen = 0;
 }
 
 void
@@ -252,6 +253,19 @@ fz_bound_gel(const fz_gel *gel, fz_irect *bbox)
 		bbox->y1 = fz_idiv(gel->bbox.y1, fz_aa_vscale) + 1;
 	}
 	return bbox;
+}
+
+fz_rect *
+fz_gel_scissor(const fz_gel *gel, fz_rect *r)
+{
+	fz_aa_context *ctxaa = gel->ctx->aa;
+
+	r->x0 = gel->clip.x0 / fz_aa_hscale;
+	r->x1 = gel->clip.x1 / fz_aa_vscale;
+	r->y0 = gel->clip.y0 / fz_aa_hscale;
+	r->y1 = gel->clip.y1 / fz_aa_vscale;
+
+	return r;
 }
 
 enum { INSIDE, OUTSIDE, LEAVE, ENTER };
@@ -922,7 +936,6 @@ fz_scan_convert_sharp(fz_gel *gel, int eofill, const fz_irect *clip,
 			y += height;
 			if (y >= clip->y0)
 			{
-				height -= y - clip->y0;
 				y = clip->y0;
 				break;
 			}

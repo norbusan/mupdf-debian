@@ -15,6 +15,7 @@
 #include "../source/fitz/buffer.c"
 #include "../source/fitz/stream-open.c"
 #include "../source/fitz/stream-read.c"
+#include "../source/fitz/printf.c"
 
 #include "../source/pdf/pdf-lex.c"
 #include "../source/pdf/pdf-cmap.c"
@@ -74,6 +75,10 @@ main(int argc, char **argv)
 			realname ++;
 		else
 			realname = argv[i];
+
+		/* ignore VCS folders (such as .svn) */
+		if (*realname == '.')
+			continue;
 
 		if (strlen(realname) > (sizeof name - 1))
 		{
@@ -239,6 +244,19 @@ void fz_drop_glyph_cache_context(fz_context *ctx)
 }
 
 fz_glyph_cache *fz_keep_glyph_cache(fz_context *ctx)
+{
+	return NULL;
+}
+
+void fz_new_document_handler_context(fz_context *ctx)
+{
+}
+
+void fz_drop_document_handler_context(fz_context *ctx)
+{
+}
+
+fz_document_handler_context *fz_keep_document_handler_context(fz_context *ctx)
 {
 	return NULL;
 }

@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|ARM">
       <Configuration>Debug</Configuration>
@@ -51,6 +51,8 @@
     <ClCompile Include="..\..\source\fitz\crypt-md5.c" />
     <ClCompile Include="..\..\source\fitz\crypt-sha2.c" />
     <ClCompile Include="..\..\source\fitz\device.c" />
+    <ClCompile Include="..\..\source\fitz\document-all.c" />
+    <ClCompile Include="..\..\source\fitz\document-no-run.c" />
     <ClCompile Include="..\..\source\fitz\document.c" />
     <ClCompile Include="..\..\source\fitz\draw-affine.c" />
     <ClCompile Include="..\..\source\fitz\draw-blend.c" />
@@ -68,12 +70,14 @@
     <ClCompile Include="..\..\source\fitz\filter-fax.c" />
     <ClCompile Include="..\..\source\fitz\filter-flate.c" />
     <ClCompile Include="..\..\source\fitz\filter-jbig2.c" />
+    <ClCompile Include="..\..\source\fitz\filter-leech.c" />
     <ClCompile Include="..\..\source\fitz\filter-lzw.c" />
     <ClCompile Include="..\..\source\fitz\filter-predict.c" />
     <ClCompile Include="..\..\source\fitz\font.c" />
     <ClCompile Include="..\..\source\fitz\function.c" />
     <ClCompile Include="..\..\source\fitz\geometry.c" />
     <ClCompile Include="..\..\source\fitz\getopt.c" />
+    <ClCompile Include="..\..\source\fitz\glyph.c" />
     <ClCompile Include="..\..\source\fitz\halftone.c" />
     <ClCompile Include="..\..\source\fitz\hash.c" />
     <ClCompile Include="..\..\source\fitz\image.c" />
@@ -81,6 +85,7 @@
     <ClCompile Include="..\..\source\fitz\list-device.c" />
     <ClCompile Include="..\..\source\fitz\load-jpeg.c" />
     <ClCompile Include="..\..\source\fitz\load-jpx.c" />
+    <ClCompile Include="..\..\source\fitz\load-jxr.c" />
     <ClCompile Include="..\..\source\fitz\load-png.c" />
     <ClCompile Include="..\..\source\fitz\load-tiff.c" />
     <ClCompile Include="..\..\source\fitz\memento.c" />
@@ -91,6 +96,7 @@
     <ClCompile Include="..\..\source\fitz\output.c" />
     <ClCompile Include="..\..\source\fitz\path.c" />
     <ClCompile Include="..\..\source\fitz\pixmap.c" />
+    <ClCompile Include="..\..\source\fitz\printf.c" />
     <ClCompile Include="..\..\source\fitz\shade.c" />
     <ClCompile Include="..\..\source\fitz\stext-device.c" />
     <ClCompile Include="..\..\source\fitz\stext-output.c" />
@@ -110,6 +116,7 @@
     <ClCompile Include="..\..\source\img\muimage.c" />
     <ClCompile Include="..\..\source\pdf\pdf-annot.c" />
     <ClCompile Include="..\..\source\pdf\pdf-appearance.c" />
+    <ClCompile Include="..\..\source\pdf\pdf-clean.c" />
     <ClCompile Include="..\..\source\pdf\pdf-cmap-load.c" />
     <ClCompile Include="..\..\source\pdf\pdf-cmap-parse.c" />
     <ClCompile Include="..\..\source\pdf\pdf-cmap-table.c" />
@@ -130,12 +137,16 @@
     <ClCompile Include="..\..\source\pdf\pdf-metrics.c" />
     <ClCompile Include="..\..\source\pdf\pdf-nametree.c" />
     <ClCompile Include="..\..\source\pdf\pdf-object.c" />
+    <ClCompile Include="..\..\source\pdf\pdf-op-buffer.c" />
+    <ClCompile Include="..\..\source\pdf\pdf-op-filter.c" />
+    <ClCompile Include="..\..\source\pdf\pdf-op-run.c" />
     <ClCompile Include="..\..\source\pdf\pdf-outline.c" />
     <ClCompile Include="..\..\source\pdf\pdf-page.c" />
     <ClCompile Include="..\..\source\pdf\pdf-parse.c" />
     <ClCompile Include="..\..\source\pdf\pdf-pattern.c" />
     <ClCompile Include="..\..\source\pdf\pdf-pkcs7.c" />
     <ClCompile Include="..\..\source\pdf\pdf-repair.c" />
+    <ClCompile Include="..\..\source\pdf\pdf-run.c" />
     <ClCompile Include="..\..\source\pdf\pdf-shade.c" />
     <ClCompile Include="..\..\source\pdf\pdf-store.c" />
     <ClCompile Include="..\..\source\pdf\pdf-stream.c" />
@@ -145,6 +156,7 @@
     <ClCompile Include="..\..\source\pdf\pdf-xobject.c" />
     <ClCompile Include="..\..\source\pdf\pdf-xref-aux.c" />
     <ClCompile Include="..\..\source\pdf\pdf-xref.c" />
+    <ClCompile Include="..\..\source\tiff\mutiff.c" />
     <ClCompile Include="..\..\source\xps\xps-common.c" />
     <ClCompile Include="..\..\source\xps\xps-doc.c" />
     <ClCompile Include="..\..\source\xps\xps-glyphs.c" />
@@ -224,6 +236,7 @@
     <ClInclude Include="..\..\source\fitz\unicodedata_db.h" />
     <ClInclude Include="..\..\source\pdf\pdf-encodings.h" />
     <ClInclude Include="..\..\source\pdf\pdf-glyphlist.h" />
+    <ClInclude Include="..\..\source\pdf\pdf-interpret-imp.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{0715f3cf-5d1b-4617-a331-6527371365b7}</ProjectGuid>
@@ -231,57 +244,59 @@
     <ProjectName>libmupdf_winRT</ProjectName>
     <RootNamespace>libmupdf_winRT</RootNamespace>
     <DefaultLanguage>en-US</DefaultLanguage>
-    <MinimumVisualStudioVersion>11.0</MinimumVisualStudioVersion>
+    <MinimumVisualStudioVersion>12.0</MinimumVisualStudioVersion>
     <AppContainerApplication>true</AppContainerApplication>
+    <ApplicationType>Windows Store</ApplicationType>
+    <ApplicationTypeRevision>8.1</ApplicationTypeRevision>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v110</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Memento|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v110</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v110</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Memento|ARM'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v110</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v110</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Memento|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v110</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <PlatformToolset>v110</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <PlatformToolset>v110</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <PlatformToolset>v110</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -363,7 +378,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <CompileAsWinRT>false</CompileAsWinRT>
       <SDLCheck>false</SDLCheck>
-      <AdditionalIncludeDirectories>..\..\scripts;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>DEBUG=1;_WINRT;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -377,7 +392,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <CompileAsWinRT>false</CompileAsWinRT>
       <SDLCheck>false</SDLCheck>
-      <AdditionalIncludeDirectories>..\..\scripts;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>MEMENTO=1;DEBUG=1;_WINRT;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -391,8 +406,8 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <CompileAsWinRT>false</CompileAsWinRT>
       <SDLCheck>false</SDLCheck>
-      <AdditionalIncludeDirectories>..\..\scripts;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_WINRT;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;_WINRT;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -406,7 +421,7 @@
       <CompileAsWinRT>false</CompileAsWinRT>
       <SDLCheck>false</SDLCheck>
       <PreprocessorDefinitions>DEBUG=1;_WINRT;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\..\scripts;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -420,7 +435,7 @@
       <CompileAsWinRT>false</CompileAsWinRT>
       <SDLCheck>false</SDLCheck>
       <PreprocessorDefinitions>MEMENTO=1;DEBUG=1;_WINRT;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\..\scripts;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -433,8 +448,8 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <CompileAsWinRT>false</CompileAsWinRT>
       <SDLCheck>false</SDLCheck>
-      <AdditionalIncludeDirectories>..\..\scripts;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_WINRT;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;_WINRT;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -447,7 +462,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <CompileAsWinRT>false</CompileAsWinRT>
       <SDLCheck>false</SDLCheck>
-      <AdditionalIncludeDirectories>..\..\scripts;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>DEBUG=1;_WINRT;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -461,7 +476,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <CompileAsWinRT>false</CompileAsWinRT>
       <SDLCheck>false</SDLCheck>
-      <AdditionalIncludeDirectories>..\..\scripts;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>MEMENTO=1;DEBUG=1;_WINRT;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -475,8 +490,8 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <CompileAsWinRT>false</CompileAsWinRT>
       <SDLCheck>false</SDLCheck>
-      <AdditionalIncludeDirectories>..\..\scripts;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_WINRT;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\ucdn;..\..\include;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;_WINRT;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

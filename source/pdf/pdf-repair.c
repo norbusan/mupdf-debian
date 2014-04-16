@@ -19,7 +19,6 @@ pdf_repair_obj(pdf_document *doc, pdf_lexbuf *buf, int *stmofsp, int *stmlenp, p
 {
 	pdf_token tok;
 	int stm_len;
-	int n;
 	fz_stream *file = doc->file;
 	fz_context *ctx = file->ctx;
 
@@ -134,9 +133,7 @@ pdf_repair_obj(pdf_document *doc, pdf_lexbuf *buf, int *stmofsp, int *stmlenp, p
 			fz_seek(file, *stmofsp, 0);
 		}
 
-		n = fz_read(file, (unsigned char *) buf->scratch, 9);
-		if (n < 0)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot read from file");
+		(void)fz_read(file, (unsigned char *) buf->scratch, 9);
 
 		while (memcmp(buf->scratch, "endstream", 9) != 0)
 		{
@@ -237,7 +234,6 @@ pdf_repair_obj_stm(pdf_document *doc, int num, int gen)
 	}
 }
 
-/* Entered with file locked, remains locked throughout. */
 void
 pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf)
 {
@@ -257,7 +253,7 @@ pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf)
 	int num = 0;
 	int gen = 0;
 	int tmpofs, numofs = 0, genofs = 0;
-	int stm_len, stm_ofs = 0;
+	int stm_len, stm_ofs;
 	pdf_token tok;
 	int next;
 	int i, n, c;
@@ -269,6 +265,10 @@ pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf)
 	fz_var(info);
 	fz_var(list);
 	fz_var(obj);
+
+	if (doc->repair_attempted)
+		fz_throw(doc->ctx, FZ_ERROR_GENERIC, "Repair failed already - not trying again");
+	doc->repair_attempted = 1;
 
 	doc->dirty = 1;
 	/* Can't support incremental update after repair */
@@ -285,8 +285,6 @@ pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf)
 
 		/* look for '%PDF' version marker within first kilobyte of file */
 		n = fz_read(doc->file, (unsigned char *)buf->scratch, fz_mini(buf->size, 1024));
-		if (n < 0)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot read from file");
 
 		fz_seek(doc->file, 0, 0);
 		for (i = 0; i < n - 4; i++)
@@ -313,7 +311,7 @@ pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf)
 
 			fz_try(ctx)
 			{
-				tok = pdf_lex(doc->file, buf);
+				tok = pdf_lex_no_string(doc->file, buf);
 			}
 			fz_catch(ctx)
 			{
@@ -329,6 +327,12 @@ pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf)
 
 			if (tok == PDF_TOK_INT)
 			{
+				if (buf->i < 0)
+				{
+					num = 0;
+					gen = 0;
+					continue;
+				}
 				numofs = genofs;
 				num = gen;
 				genofs = tmpofs;
@@ -339,6 +343,8 @@ pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf)
 			{
 				fz_try(ctx)
 				{
+					stm_len = 0;
+					stm_ofs = 0;
 					tok = pdf_repair_obj(doc, buf, &stm_ofs, &stm_len, &encrypt, &id, NULL, &tmpofs);
 				}
 				fz_catch(ctx)
@@ -380,7 +386,9 @@ pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf)
 				goto have_next_token;
 			}
 
-			/* trailer dictionary */
+			/* If we find a dictionary it is probably the trailer,
+			 * but could be a stream (or bogus) dictionary caused
+			 * by a corrupt file. */
 			else if (tok == PDF_TOK_OPEN_DICT)
 			{
 				fz_try(ctx)
@@ -390,13 +398,11 @@ pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf)
 				fz_catch(ctx)
 				{
 					fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
-					/* If we haven't seen a root yet, there is nothing
-					 * we can do, but give up. Otherwise, we'll make
-					 * do. */
-					if (!root)
-						fz_rethrow(ctx);
-					fz_warn(ctx, "cannot parse trailer dictionary - ignoring rest of file");
-					break;
+					/* If this was the real trailer dict
+					 * it was broken, in which case we are
+					 * in trouble. Keep going though in
+					 * case this was just a bogus dict. */
+					continue;
 				}
 
 				obj = pdf_dict_gets(dict, "Encrypt");
@@ -431,11 +437,16 @@ pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf)
 				obj = NULL;
 			}
 
-			else if (tok == PDF_TOK_ERROR)
-				fz_read_byte(doc->file);
-
 			else if (tok == PDF_TOK_EOF)
 				break;
+			else
+			{
+				if (tok == PDF_TOK_ERROR)
+					fz_read_byte(doc->file);
+				num = 0;
+				gen = 0;
+			}
+
 		}
 
 		/* make xref reasonable */
@@ -473,7 +484,6 @@ pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf)
 		entry->ofs = 0;
 		entry->gen = 65535;
 		entry->stm_ofs = 0;
-		entry->obj = NULL;
 
 		next = 0;
 		for (i = pdf_xref_len(doc) - 1; i >= 0; i--)
@@ -578,14 +588,11 @@ pdf_repair_obj_stms(pdf_document *doc)
 				if (!strcmp(pdf_to_name(pdf_dict_gets(dict, "Type")), "ObjStm"))
 					pdf_repair_obj_stm(doc, i, 0);
 			}
-			fz_always(ctx)
-			{
-				pdf_drop_obj(dict);
-			}
 			fz_catch(ctx)
 			{
-				fz_rethrow(ctx);
+				fz_warn(ctx, "ignoring broken object stream (%d 0 R)", i);
 			}
+			pdf_drop_obj(dict);
 		}
 	}
 

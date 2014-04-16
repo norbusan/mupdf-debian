@@ -9,7 +9,8 @@
 FREETYPE_DIR := thirdparty/freetype
 JBIG2DEC_DIR := thirdparty/jbig2dec
 JPEG_DIR := thirdparty/jpeg
-OPENJPEG_DIR := thirdparty/openjpeg
+MUJS_DIR := thirdparty/mujs
+OPENJPEG_DIR := thirdparty/openjpeg/libopenjpeg
 OPENSSL_DIR := thirdparty/openssl
 ZLIB_DIR := thirdparty/zlib
 CURL_DIR := thirdparty/curl
@@ -23,7 +24,6 @@ V8_DIR := $(wildcard thirdparty/v8*)
 
 ifneq "$(V8_DIR)" ""
 
-CFLAGS += -I$(V8_DIR)/include
 ifeq "$(build)" "release"
 V8_LIB_CHOICE := release
 else ifeq "$(build)" "profile"
@@ -36,14 +36,33 @@ V8_ARCH ?= x64
 
 # If you are building for 32bit linux use V8_ARCH=ia32
 ifeq "$(OS)" "Darwin"
-V8_LIBS = -L$(V8_DIR)/out-mac/$(V8_ARCH).$(V8_LIB_CHOICE)/ -lv8_base -lv8_snapshot -lstdc++
+V8_LIBS := -L$(V8_DIR)/out-mac/$(V8_ARCH).$(V8_LIB_CHOICE)/ -lv8_base -lv8_snapshot -lstdc++
 else
-V8_LIBS = -L$(V8_DIR)/out/$(V8_ARCH).$(V8_LIB_CHOICE)/obj.target/tools/gyp -lv8_base -lv8_snapshot -lpthread -ldl -lstdc++
+V8_LIBS := -L$(V8_DIR)/out/$(V8_ARCH).$(V8_LIB_CHOICE)/obj.target/tools/gyp -lv8_base -lv8_snapshot -lpthread -ldl -lstdc++
 endif
 
-V8_PRESENT := yes
-else
-V8_PRESENT := no
+V8_CFLAGS := -I$(V8_DIR)/include
+
+HAVE_V8 := yes
+endif
+
+# --- MuJS ---
+
+ifneq "$(wildcard $(MUJS_DIR)/README)" ""
+
+MUJS_LIB := $(OUT)/libmujs.a
+MUJS_OUT := $(OUT)/mujs
+MUJS_SRC := one.c
+
+$(MUJS_LIB): $(addprefix $(MUJS_OUT)/, $(MUJS_SRC:%.c=%.o))
+$(MUJS_OUT):
+	$(MKDIR_CMD)
+$(MUJS_OUT)/%.o: $(MUJS_DIR)/%.c | $(MUJS_OUT)
+	$(CC_CMD)
+
+MUJS_CFLAGS := -I$(MUJS_DIR)
+
+HAVE_MUJS := yes
 endif
 
 # --- FreeType 2 ---
@@ -108,7 +127,7 @@ $(FREETYPE_OUT)/%.o: $(FREETYPE_DIR)/src/truetype/%.c	| $(FREETYPE_OUT)
 $(FREETYPE_OUT)/%.o: $(FREETYPE_DIR)/src/type1/%.c	| $(FREETYPE_OUT)
 	$(CC_CMD) $(FT_CFLAGS)
 
-FREETYPE_CFLAGS := -I$(FREETYPE_DIR)/include
+FREETYPE_CFLAGS := -Iscripts/freetype -I$(FREETYPE_DIR)/include
 else
 FREETYPE_CFLAGS := $(SYS_FREETYPE_CFLAGS)
 FREETYPE_LIBS := $(SYS_FREETYPE_LIBS)
@@ -194,7 +213,7 @@ $(JPEG_OUT):
 $(JPEG_OUT)/%.o: $(JPEG_DIR)/%.c | $(JPEG_OUT)
 	$(CC_CMD) -Dmain=xxxmain
 
-JPEG_CFLAGS := -I$(JPEG_DIR)
+JPEG_CFLAGS := -Iscripts/jpeg -I$(JPEG_DIR)
 else
 JPEG_CFLAGS := $(SYS_JPEG_CFLAGS)
 JPEG_LIBS := $(SYS_JPEG_LIBS)
@@ -202,7 +221,7 @@ endif
 
 # --- OpenJPEG ---
 
-ifneq "$(wildcard $(OPENJPEG_DIR)/README)" ""
+ifneq "$(wildcard $(OPENJPEG_DIR)/CMakeLists.txt)" ""
 
 OPENJPEG_LIB := $(OUT)/libopenjpeg.a
 OPENJPEG_OUT := $(OUT)/openjpeg
@@ -235,10 +254,10 @@ OPENJPEG_SRC := \
 $(OPENJPEG_LIB): $(addprefix $(OPENJPEG_OUT)/, $(OPENJPEG_SRC:%.c=%.o))
 $(OPENJPEG_OUT):
 	$(MKDIR_CMD)
-$(OPENJPEG_OUT)/%.o: $(OPENJPEG_DIR)/src/lib/openjp2/%.c | $(OPENJPEG_OUT)
+$(OPENJPEG_OUT)/%.o: $(OPENJPEG_DIR)/%.c | $(OPENJPEG_OUT)
 	$(CC_CMD) -DOPJ_STATIC -DOPJ_HAVE_STDINT_H
 
-OPENJPEG_CFLAGS += -I$(OPENJPEG_DIR)/src/lib/openjp2
+OPENJPEG_CFLAGS += -Iscripts/openjpeg -I$(OPENJPEG_DIR)
 else
 OPENJPEG_CFLAGS := $(SYS_OPENJPEG_CFLAGS)
 OPENJPEG_LIBS := $(SYS_OPENJPEG_LIBS)
@@ -300,16 +319,6 @@ OPENSSL_CFLAGS := -DHAVE_OPENSSL -I$(OPENSSL_DIR)/include
 else
 OPENSSL_CFLAGS := $(SYS_OPENSSL_CFLAGS)
 OPENSSL_LIBS := $(SYS_OPENSSL_LIBS)
-endif
-
-# --- X11 ---
-
-ifeq "$(NOX11)" ""
-X11_CFLAGS := $(SYS_X11_CFLAGS)
-X11_LIBS := $(SYS_X11_LIBS)
-else
-X11_CFLAGS :=
-X11_LIBS :=
 endif
 
 # --- cURL ---
@@ -443,6 +452,16 @@ $(CURL_OUT)/%.o: $(CURL_DIR)/lib/%.c	| $(CURL_OUT)
 
 CURL_CFLAGS := -I$(CURL_DIR)/include
 CURL_LIBS := $(SYS_CURL_DEPS)
+
+HAVE_CURL := yes
+endif
+
+# --- X11 ---
+
+ifeq "$(HAVE_X11)" "yes"
+X11_CFLAGS := $(SYS_X11_CFLAGS)
+X11_LIBS := $(SYS_X11_LIBS)
 else
-NOCURL := yes
+X11_CFLAGS :=
+X11_LIBS :=
 endif

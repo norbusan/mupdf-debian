@@ -47,7 +47,14 @@ enum {
 	For FZ_LINK_GOTO or FZ_LINK_GOTOR:
 
 		gotor.page: The target page number to move to (0 being the
-		first page in the document).
+		first page in the document). In the FZ_LINK_GOTOR case, the
+		page number either refers to to the file specified by
+		gotor.file_spec, or the page number is -1 suggesting that
+		the destination is given by gotor.dest.
+
+		gotor.dest: If set, the target destination name to be
+		resolved in the file specified by gotor.file_spec. Always
+		NULL in the FZ_LINK_GOTO case.
 
 		gotor.flags: A bitfield consisting of fz_link_flag_*
 		describing the validity and meaning of the different parts
@@ -68,7 +75,7 @@ enum {
 		case.
 
 		gotor.new_window: If true, the destination should open in a
-		new window.
+		new window. Always false in the FZ_LINK_GOTO case.
 
 	For FZ_LINK_URI:
 
@@ -84,6 +91,8 @@ enum {
 		launch.new_window: If true, the destination should be launched
 		in a new window.
 
+		launch.is_uri: If true, launch.file_spec is a URI to launch.
+
 	For FZ_LINK_NAMED:
 
 		named.named: The named action to perform. Likely to be
@@ -97,6 +106,7 @@ struct fz_link_dest_s
 		struct
 		{
 			int page;
+			char *dest;
 			int flags;
 			fz_point lt;
 			fz_point rb;
@@ -114,6 +124,7 @@ struct fz_link_dest_s
 		{
 			char *file_spec;
 			int new_window;
+			int is_uri;
 		}
 		launch;
 		struct

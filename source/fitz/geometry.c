@@ -214,6 +214,25 @@ fz_invert_matrix(fz_matrix *dst, const fz_matrix *src)
 }
 
 int
+fz_try_invert_matrix(fz_matrix *dst, const fz_matrix *src)
+{
+	/* Be careful to cope with dst == src */
+	float a = src->a;
+	float det = a * src->d - src->b * src->c;
+	if (det >= -FLT_EPSILON && det <= FLT_EPSILON)
+		return 1;
+	det = 1 / det;
+	dst->a = src->d * det;
+	dst->b = -src->b * det;
+	dst->c = -src->c * det;
+	dst->d = a * det;
+	a = -src->e * dst->a - src->f * dst->c;
+	dst->f = -src->e * dst->b - src->f * dst->d;
+	dst->e = a;
+	return 0;
+}
+
+int
 fz_is_rectilinear(const fz_matrix *m)
 {
 	return (fabsf(m->b) < FLT_EPSILON && fabsf(m->c) < FLT_EPSILON) ||
@@ -248,6 +267,14 @@ fz_transform_point(fz_point *restrict p, const fz_matrix *restrict m)
 	float x = p->x;
 	p->x = x * m->a + p->y * m->c + m->e;
 	p->y = x * m->b + p->y * m->d + m->f;
+	return p;
+}
+
+fz_point *
+fz_transform_point_xy(fz_point *restrict p, const fz_matrix *restrict m, float x, float y)
+{
+	p->x = x * m->a + y * m->c + m->e;
+	p->y = x * m->b + y * m->d + m->f;
 	return p;
 }
 
