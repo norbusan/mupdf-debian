@@ -1,4 +1,4 @@
-disable_openjpeg.patch
+use_openjpeg_1.5.patch
 fix_libjpeg_header_mismatch.patch
 fix_mudraw_man_format.patch
 mupdf_manpage.patch
