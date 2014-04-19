@@ -8,7 +8,6 @@ mupdf (1.4-1) UNRELEASED; urgency=medium
   * Update debian/copyright.
   * Enable JavaScript support with v8. (Closes: #743414)
   * Won't crash when pdf file changes. (Closes: #699686)
-  * Don't exit when reload pdf failes. (Closes: #702479)
   * Add mupdf.sh so it could be used with compressed pdf-files. Thanks
     Jörg-Volker Peetz! (Closes: #734183)
 

@@ -1,4 +1,3 @@
-dont_exit_when_reload_fails.patch
 fix_libv8_linkage.patch
 use_openjpeg_1.5.patch
 fix_libjpeg_header_mismatch.patch
