@@ -31,7 +31,7 @@ override_dh_auto_build:
 
 override_dh_auto_install:
 	$(MAKE) $(BUILD_FLAGS) prefix=$(CURDIR)/debian/tmp/usr install
-	install -m644 -T $(CURDIR)/debian/mupdf.sh $(CURDIR)/debian/tmp/usr/bin/mupdf
+	install -m744 -T $(CURDIR)/debian/mupdf.sh $(CURDIR)/debian/tmp/usr/bin/mupdf
 
 override_dh_auto_clean:
 	-rm -rf build
