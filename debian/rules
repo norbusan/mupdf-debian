@@ -24,11 +24,13 @@ ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 	MAKEFLAGS += -j$(NUMJOBS)
 endif
 
+BUILD_FLAGS=build=release OS=Linux HAVE_V8=yes
+
 override_dh_auto_build:
-	$(MAKE) build=release OS=Linux
+	$(MAKE) $(BUILD_FLAGS)
 
 override_dh_auto_install:
-	$(MAKE) build=release OS=Linux prefix=$(CURDIR)/debian/tmp/usr install
+	$(MAKE) $(BUILD_FLAGS) prefix=$(CURDIR)/debian/tmp/usr install
 
 override_dh_auto_clean:
 	-rm -rf build
