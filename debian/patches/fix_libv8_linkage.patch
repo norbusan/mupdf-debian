@@ -21,7 +21,7 @@
  # If you are building for 32bit linux use V8_ARCH=ia32
 -ifeq "$(OS)" "Darwin"
 +ifeq "$(OS)" "Linux"
-+V8_LIBS := -lv8 -lpthread -ldl -lstdc++
++V8_LIBS := -lv8 -lpthread -lstdc++
 +else ifeq "$(OS)" "Darwin"
  V8_LIBS := -L$(V8_DIR)/out-mac/$(V8_ARCH).$(V8_LIB_CHOICE)/ -lv8_base -lv8_snapshot -lstdc++
  else
