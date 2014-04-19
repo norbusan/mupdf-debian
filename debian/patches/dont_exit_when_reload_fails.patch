@@ -1,0 +1,18 @@
+---
+ platform/x11/pdfapp.c |    5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+--- a/platform/x11/pdfapp.c
++++ b/platform/x11/pdfapp.c
+@@ -313,7 +313,10 @@
+ 	}
+ 	fz_catch(ctx)
+ 	{
+-		pdfapp_error(app, "cannot open document");
++		if (reload)
++			pdfapp_warn(app, "Cannot open document");
++		else
++			pdfapp_error(app, "Cannot open document");
+ 	}
+ 
+ 	if (app->pageno < 1)

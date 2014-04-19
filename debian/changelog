@@ -8,8 +8,9 @@ mupdf (1.4-1) UNRELEASED; urgency=medium
   * Update debian/copyright.
   * Enable JavaScript support with v8. (Closes: #743414)
   * Won't crash when pdf file changes. (Closes: #699686)
+  * Don't exit when reload pdf failes. (Closes: #702479)
 
- --
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sun, 20 Apr 2014 00:27:46 +0800
 
 mupdf (1.3-2) unstable; urgency=medium
 
