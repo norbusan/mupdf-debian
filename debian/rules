@@ -12,6 +12,7 @@ export DH_OPTIONS
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 DPKG_EXPORT_BUILDFLAGS = 1
 include /usr/share/dpkg/buildflags.mk
+include /usr/share/dpkg/architecture.mk
 # The build system doesn't use CPPFLAGS, pass them to CFLAGS to enable the
 # missing (hardening) flags.
 CFLAGS += $(CPPFLAGS)
@@ -24,7 +25,10 @@ ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 	MAKEFLAGS += -j$(NUMJOBS)
 endif
 
-BUILD_FLAGS=build=release OS=Linux HAVE_V8=yes
+BUILD_FLAGS=build=release OS=Linux
+ifeq (,$(strip $(foreach arch,powerpc s390x sparc,$(findstring $(arch),$(DEB_HOST_ARCH)))))
+	BUILD_FLAGS += HAVE_V8=yes
+endif
 
 override_dh_auto_build:
 	$(MAKE) $(BUILD_FLAGS)

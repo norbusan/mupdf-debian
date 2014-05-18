@@ -6,7 +6,7 @@ Uploaders: Quoc-Viet Nguyen <afelion@gmail.com>
 Build-Depends: debhelper (>= 7.0.50~), dpkg-dev (>= 1.16.1.1~),
  libfreetype6-dev, pkg-config, libjpeg-dev, libjbig2dec-dev,
  libopenjpeg-dev, libx11-dev, libxext-dev, zlib1g-dev,
- libv8-dev
+ libv8-dev [!powerpc !s390x !sparc]
 Standards-Version: 3.9.5
 Homepage: http://mupdf.com/
 Vcs-Git: git://git.debian.org/git/users/koster/mupdf.git
