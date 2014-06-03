@@ -1,3 +1,10 @@
+mupdf (0.9-2+deb7u1) wheezy-security; urgency=high
+
+  * Backport fix of CVE-2014-2013: Stack-based Buffer Overflow in
+    xps_parse_color() from unstable. (Closes: #738857)
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Tue, 03 Jun 2014 23:59:34 +0800
+
 mupdf (0.9-2) unstable; urgency=low
 
   * Enable harden flags.
