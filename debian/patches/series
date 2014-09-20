@@ -4,3 +4,4 @@
 0004-Fix-Werror-format-security-error.patch
 0005-Fix-unsafe-conversion-from-float-to-fz_linecap.patch
 0006-Fix-FTBFS-with-clang.patch
+0007-Add-mudraw-F-command-switch-to-man-page.patch
