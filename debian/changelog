@@ -1,3 +1,22 @@
+mupdf (1.5-1) unstable; urgency=medium
+
+  * New upstream release. (Closes: #761960)
+  * Use git-buildpackage to maintain the package repository
+  * Unapply patches from source after build
+  * Use MUJS to provide JS functionality (Closes: #760480, #745247)
+  * Build against openjpeg 2.1 (Closes: #745246, #761955)
+  * Fix build with libopenjp2.
+  * Fix -Werror=format-security error
+  * debian/copyright: Add Files-Excluded header
+  * debian/copyright: Update short license name
+  * Fix unsafe conversion from float to fz_linecap (Closes: #749902)
+  * Enable verbose build log
+  * Fix FTBFS with clang.
+    Thanks to Alexander (Closes: #755741)
+  * Document mudraw -F command line switch in man page (Closes: #750724)
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sat, 20 Sep 2014 23:18:10 +0800
+
 mupdf (1.4-2) unstable; urgency=medium
 
   * Disable JavaScript support on powerpc, s390x and sparc. (Closes: #747131)
