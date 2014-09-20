@@ -15,7 +15,7 @@ struct fz_output_s
 {
 	fz_context *ctx;
 	void *opaque;
-	int (*printf)(fz_output *, const char *, va_list ap);
+	int (*printf_)(fz_output *, const char *, va_list ap);
 	int (*write)(fz_output *, const void *, int n);
 	void (*close)(fz_output *);
 };

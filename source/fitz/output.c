@@ -36,7 +36,7 @@ fz_new_output_with_file(fz_context *ctx, FILE *file)
 	fz_output *out = fz_malloc_struct(ctx, fz_output);
 	out->ctx = ctx;
 	out->opaque = file;
-	out->printf = file_printf;
+	out->printf_ = file_printf;
 	out->write = file_write;
 	out->close = NULL;
 	return out;
@@ -58,7 +58,7 @@ fz_new_output_to_filename(fz_context *ctx, const char *filename)
 		out = fz_malloc_struct(ctx, fz_output);
 		out->ctx = ctx;
 		out->opaque = file;
-		out->printf = file_printf;
+		out->printf_ = file_printf;
 		out->write = file_write;
 		out->close = file_close;
 	}
@@ -90,7 +90,7 @@ fz_printf(fz_output *out, const char *fmt, ...)
 		return 0;
 
 	va_start(ap, fmt);
-	ret = out->printf(out, fmt, ap);
+	ret = out->printf_(out, fmt, ap);
 	va_end(ap);
 
 	return ret;
@@ -142,7 +142,7 @@ fz_new_output_with_buffer(fz_context *ctx, fz_buffer *buf)
 	fz_output *out = fz_malloc_struct(ctx, fz_output);
 	out->ctx = ctx;
 	out->opaque = buf;
-	out->printf = buffer_printf;
+	out->printf_ = buffer_printf;
 	out->write = buffer_write;
 	out->close = NULL;
 	return out;
