@@ -2000,12 +2000,19 @@ static void pdf_run_J(pdf_csi *csi, void *state)
 {
 	pdf_run_state *pr = (pdf_run_state *)state;
 	pdf_gstate *gstate = pr->gstate + pr->gtop;
+	fz_context *ctx = pr->ctx;
+	int linecap;
 
 	pr->dev->flags &= ~(FZ_DEVFLAG_STARTCAP_UNDEFINED | FZ_DEVFLAG_DASHCAP_UNDEFINED | FZ_DEVFLAG_ENDCAP_UNDEFINED);
 	gstate->stroke_state = fz_unshare_stroke_state(csi->doc->ctx, gstate->stroke_state);
-	gstate->stroke_state->start_cap = csi->stack[0];
-	gstate->stroke_state->dash_cap = csi->stack[0];
-	gstate->stroke_state->end_cap = csi->stack[0];
+
+	linecap = (int) csi->stack[0];
+	if (linecap < FZ_LINECAP_BUTT || linecap > FZ_LINECAP_TRIANGLE)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "Invalid linecap %d", linecap);
+
+	gstate->stroke_state->start_cap = linecap;
+	gstate->stroke_state->dash_cap = linecap;
+	gstate->stroke_state->end_cap = linecap;
 }
 
 static void pdf_run_K(pdf_csi *csi, void *state)
