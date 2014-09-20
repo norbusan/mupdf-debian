@@ -178,8 +178,8 @@ CMAP_KOREA_SRC := $(wildcard resources/cmaps/korea/*)
 
 FONT_BASE14_SRC := $(wildcard resources/fonts/urw/*.cff)
 FONT_DROID_SRC := resources/fonts/droid/DroidSans.ttf resources/fonts/droid/DroidSansMono.ttf
-FONT_CJK_SRC := resources/fonts/droid/DroidSansFallback.ttf
-FONT_CJK_FULL_SRC := resources/fonts/droid/DroidSansFallbackFull.ttf
+FONT_CJK_SRC := resources/fonts/droid/DroidSansFallback.ttc
+FONT_CJK_FULL_SRC := resources/fonts/droid/DroidSansFallbackFull.ttc
 
 $(GEN)/gen_cmap_cns.h : $(CMAP_CNS_SRC)
 	$(QUIET_GEN) $(CMAPDUMP) $@ $(CMAP_CNS_SRC)
@@ -226,7 +226,7 @@ $(OUT)/pdf/pdf-cmap-table.o : $(CMAP_GEN)
 $(OUT)/pdf/pdf-fontfile.o : $(FONT_GEN)
 $(OUT)/pdf/pdf-pkcs7.o : $(ADOBECA_GEN)
 $(OUT)/pdf/js/pdf-js.o : $(JAVASCRIPT_GEN)
-$(OUT)/cmapdump.o : source/pdf/pdf-cmap.c source/pdf/pdf-cmap-parse.c
+$(OUT)/cmapdump.o : include/mupdf/pdf/cmap.h source/pdf/pdf-cmap.c source/pdf/pdf-cmap-parse.c
 
 # --- Tools and Apps ---
 
@@ -256,15 +256,19 @@ $(MUJSTEST) : $(addprefix $(OUT)/platform/x11/, jstest_main.o pdfapp.o)
 
 ifeq "$(HAVE_X11)" "yes"
 MUVIEW_X11 := $(OUT)/mupdf-x11
+MUVIEW_X11_OBJ := $(addprefix $(OUT)/platform/x11/, x11_main.o x11_image.o pdfapp.o)
+$(MUVIEW_X11_OBJ) : $(FITZ_HDR) $(PDF_HDR)
 $(MUVIEW_X11) : $(MUPDF_LIB) $(THIRD_LIBS)
-$(MUVIEW_X11) : $(addprefix $(OUT)/platform/x11/, x11_main.o x11_image.o pdfapp.o)
+$(MUVIEW_X11) : $(MUVIEW_X11_OBJ)
 	$(LINK_CMD) $(X11_LIBS)
 
 ifeq "$(HAVE_CURL)" "yes"
 MUVIEW_X11_CURL := $(OUT)/mupdf-x11-curl
+MUVIEW_X11_CURL_OBJ := $(addprefix $(OUT)/platform/x11/curl/, x11_main.o x11_image.o pdfapp.o curl_stream.o)
+$(MUVIEW_X11_CURL_OBJ) : $(FITZ_HDR) $(PDF_HDR)
 $(MUVIEW_X11_CURL) : $(MUPDF_LIB) $(THIRD_LIBS) $(CURL_LIB)
-$(MUVIEW_X11_CURL) : $(addprefix $(OUT)/platform/x11/curl/, x11_main.o x11_image.o pdfapp.o curl_stream.o)
-	$(LINK_CMD) $(X11_LIBS) $(CURL_LIBS)
+$(MUVIEW_X11_CURL) : $(MUVIEW_X11_CURL_OBJ)
+	$(LINK_CMD) $(X11_LIBS) $(CURL_LIBS) $(SYS_CURL_DEPS)
 endif
 endif
 
@@ -299,7 +303,7 @@ incdir ?= $(prefix)/include
 mandir ?= $(prefix)/share/man
 docdir ?= $(prefix)/share/doc/mupdf
 
-third: $(THIRD_LIBS)
+third: $(THIRD_LIBS) $(CURL_LIB)
 libs: $(INSTALL_LIBS)
 apps: $(INSTALL_APPS)
 

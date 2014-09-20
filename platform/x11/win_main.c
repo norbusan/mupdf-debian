@@ -442,6 +442,7 @@ INT CALLBACK
 dloginfoproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	char buf[256];
+	wchar_t bufx[256];
 	fz_document *doc = gapp.doc;
 
 	switch(message)
@@ -488,7 +489,8 @@ dloginfoproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 			*(char **)buf = STRING; \
 			if (fz_meta(doc, FZ_META_INFO, buf, 256) <= 0) \
 				buf[0] = 0; \
-			SetDlgItemTextA(hwnd, ID, buf); \
+			MultiByteToWideChar(CP_UTF8, 0, buf, -1, bufx, nelem(bufx)); \
+			SetDlgItemTextW(hwnd, ID, bufx); \
 		}
 
 		SETUTF8(0x20, "Title");
@@ -987,8 +989,6 @@ frameproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 			info();
 			return 0;
 		}
-		if (wParam == SC_MAXIMIZE)
-			gapp.shrinkwrap = 0;
 		break;
 
 	case WM_SIZE:
@@ -999,6 +999,8 @@ frameproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 		GetClientRect(hwnd, &rect);
 		MoveWindow(hwndview, rect.left, rect.top,
 		rect.right-rect.left, rect.bottom-rect.top, TRUE);
+		if (wParam == SIZE_MAXIMIZED)
+			gapp.shrinkwrap = 0;
 		return 0;
 	}
 

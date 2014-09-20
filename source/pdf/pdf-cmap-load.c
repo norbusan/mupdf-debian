@@ -8,7 +8,10 @@ pdf_cmap_size(fz_context *ctx, pdf_cmap *cmap)
 	if (cmap->storable.refs < 0)
 		return 0;
 
-	return cmap->rcap * sizeof(pdf_range) + cmap->tcap * sizeof(short) + pdf_cmap_size(ctx, cmap->usecmap);
+	return pdf_cmap_size(ctx, cmap->usecmap) +
+		cmap->rcap * sizeof *cmap->ranges +
+		cmap->xcap * sizeof *cmap->xranges +
+		cmap->mcap * sizeof *cmap->mranges;
 }
 
 /*
@@ -102,9 +105,10 @@ pdf_new_identity_cmap(fz_context *ctx, int wmode, int bytes)
 	pdf_cmap *cmap = pdf_new_cmap(ctx);
 	fz_try(ctx)
 	{
+		unsigned int high = (1 << (bytes * 8)) - 1;
 		sprintf(cmap->cmap_name, "Identity-%c", wmode ? 'V' : 'H');
-		pdf_add_codespace(ctx, cmap, 0x0000, 0xffff, bytes);
-		pdf_map_range_to_range(ctx, cmap, 0x0000, 0xffff, 0);
+		pdf_add_codespace(ctx, cmap, 0, high, bytes);
+		pdf_map_range_to_range(ctx, cmap, 0, high, 0);
 		pdf_sort_cmap(ctx, cmap);
 		pdf_set_cmap_wmode(ctx, cmap, wmode);
 	}
@@ -131,7 +135,7 @@ pdf_load_system_cmap(fz_context *ctx, char *cmap_name)
 
 	if (cmap->usecmap_name[0] && !cmap->usecmap)
 	{
-		usecmap = pdf_load_builtin_cmap(ctx, cmap->usecmap_name);
+		usecmap = pdf_load_system_cmap(ctx, cmap->usecmap_name);
 		if (!usecmap)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "no builtin cmap file: %s", cmap->usecmap_name);
 		pdf_set_usecmap(ctx, cmap, usecmap);

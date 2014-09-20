@@ -1197,7 +1197,8 @@ pdf_show_string(pdf_csi *csi, pdf_run_state *pr, unsigned char *buf, int len)
 	pdf_gstate *gstate = pr->gstate + pr->gtop;
 	pdf_font_desc *fontdesc = gstate->font;
 	unsigned char *end = buf + len;
-	int cpt, cid;
+	unsigned int cpt;
+	int cid;
 
 	if (!fontdesc)
 	{
@@ -1214,7 +1215,7 @@ pdf_show_string(pdf_csi *csi, pdf_run_state *pr, unsigned char *buf, int len)
 		if (cid >= 0)
 			pdf_show_char(csi, pr, cid);
 		else
-			fz_warn(ctx, "cannot encode character with code point %#x", cpt);
+			fz_warn(ctx, "cannot encode character");
 		if (cpt == 32 && w == 1)
 			pdf_show_space(pr, gstate->word_space);
 	}
@@ -1602,11 +1603,14 @@ run_xobject(pdf_csi *csi, void *state, pdf_obj *resources, pdf_xobject *xobj, co
 	int gparent_save;
 	fz_matrix gparent_save_ctm;
 	pdf_run_state *pr = (pdf_run_state *)state;
+	int cleanup_state = 0;
+	char errmess[256] = "";
 
 	/* Avoid infinite recursion */
 	if (xobj == NULL || pdf_mark_obj(xobj->me))
 		return;
 
+	fz_var(cleanup_state);
 	fz_var(gstate);
 	fz_var(oldtop);
 
@@ -1633,8 +1637,15 @@ run_xobject(pdf_csi *csi, void *state, pdf_obj *resources, pdf_xobject *xobj, co
 		{
 			fz_rect bbox = xobj->bbox;
 			fz_transform_rect(&bbox, &gstate->ctm);
+
+			/* Remember that we tried to call begin_softmask. Even
+			 * if it throws an error, we must call end_softmask. */
+			cleanup_state = 1;
 			gstate = begin_softmask(csi, pr, &softmask);
 
+			/* Remember that we tried to call fz_begin_group. Even
+			 * if it throws an error, we must call fz_end_group. */
+			cleanup_state = 2;
 			fz_begin_group(pr->dev, &bbox,
 				xobj->isolated, xobj->knockout, gstate->blendmode, gstate->fill.alpha);
 
@@ -1643,6 +1654,9 @@ run_xobject(pdf_csi *csi, void *state, pdf_obj *resources, pdf_xobject *xobj, co
 			gstate->fill.alpha = 1;
 		}
 
+		/* Remember that we tried to save for the clippath. Even if it
+		 * throws an error, we must pop it. */
+		cleanup_state = 3;
 		pdf_gsave(pr); /* Save here so the clippath doesn't persist */
 
 		/* clip to the bounds */
@@ -1663,13 +1677,36 @@ run_xobject(pdf_csi *csi, void *state, pdf_obj *resources, pdf_xobject *xobj, co
 	}
 	fz_always(ctx)
 	{
-		pdf_grestore(pr); /* Remove the clippath */
+		if (cleanup_state >= 3)
+			pdf_grestore(pr); /* Remove the clippath */
 
 		/* wrap up transparency stacks */
 		if (xobj->transparency)
 		{
-			fz_end_group(pr->dev);
-			end_softmask(csi, pr, &softmask);
+			if (cleanup_state >= 2)
+			{
+				fz_try(ctx)
+				{
+					fz_end_group(pr->dev);
+				}
+				fz_catch(ctx)
+				{
+					/* Postpone the problem */
+					strcpy(errmess, fz_caught_message(ctx));
+				}
+			}
+			if (cleanup_state >= 1)
+			{
+				fz_try(ctx)
+				{
+					end_softmask(csi, pr, &softmask);
+				}
+				fz_catch(ctx)
+				{
+					/* Postpone the problem */
+					strcpy(errmess, fz_caught_message(ctx));
+				}
+			}
 		}
 
 		pr->gstate[pr->gparent].ctm = gparent_save_ctm;
@@ -1689,6 +1726,10 @@ run_xobject(pdf_csi *csi, void *state, pdf_obj *resources, pdf_xobject *xobj, co
 	{
 		fz_rethrow(ctx);
 	}
+
+	/* Rethrow postponed errors */
+	if (errmess[0])
+		fz_throw(ctx, FZ_ERROR_GENERIC, errmess);
 }
 
 static void pdf_run_BDC(pdf_csi *csi, void *state)
@@ -2272,9 +2313,10 @@ static void pdf_run_c(pdf_csi *csi, void *state)
 static void pdf_run_cm(pdf_csi *csi, void *state)
 {
 	pdf_run_state *pr = (pdf_run_state *)state;
-	pdf_gstate *gstate = pr->gstate + pr->gtop;
+	pdf_gstate *gstate;
 	fz_matrix m;
 
+	gstate = pdf_flush_text(csi, pr);
 	m.a = csi->stack[0];
 	m.b = csi->stack[1];
 	m.c = csi->stack[2];

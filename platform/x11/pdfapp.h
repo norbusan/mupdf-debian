@@ -10,8 +10,9 @@
  * uses a number of callbacks to the GUI app.
  */
 
-#define MINRES 54
-#define MAXRES 300
+/* 25% .. 400% */
+#define MINRES 18
+#define MAXRES 288
 
 typedef struct pdfapp_s pdfapp_t;
 
@@ -149,6 +150,9 @@ void pdfapp_oncopy(pdfapp_t *app, unsigned short *ucsbuf, int ucslen);
 void pdfapp_onresize(pdfapp_t *app, int w, int h);
 void pdfapp_gotopage(pdfapp_t *app, int number);
 void pdfapp_reloadpage(pdfapp_t *app);
+void pdfapp_autozoom_horizontal(pdfapp_t *app);
+void pdfapp_autozoom_vertical(pdfapp_t *app);
+void pdfapp_autozoom(pdfapp_t *app);
 
 void pdfapp_invert(pdfapp_t *app, const fz_rect *rect);
 void pdfapp_inverthit(pdfapp_t *app);

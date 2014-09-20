@@ -3,7 +3,6 @@
 
 #include <ctype.h> /* for tolower() */
 
-#define ZOOMSTEP 1.142857
 #define BEYOND_THRESHHOLD 40
 #ifndef PATH_MAX
 #define PATH_MAX (1024)
@@ -28,6 +27,26 @@ enum
 
 static void pdfapp_showpage(pdfapp_t *app, int loadpage, int drawpage, int repaint, int transition, int searching);
 static void pdfapp_updatepage(pdfapp_t *app);
+
+static const int zoomlist[] = { 18, 24, 36, 54, 72, 96, 120, 144, 180, 216, 288 };
+
+static int zoom_in(int oldres)
+{
+	int i;
+	for (i = 0; i < nelem(zoomlist) - 1; ++i)
+		if (zoomlist[i] <= oldres && zoomlist[i+1] > oldres)
+			return zoomlist[i+1];
+	return zoomlist[i];
+}
+
+static int zoom_out(int oldres)
+{
+	int i;
+	for (i = 0; i < nelem(zoomlist) - 1; ++i)
+		if (zoomlist[i] < oldres && zoomlist[i+1] >= oldres)
+			return zoomlist[i];
+	return zoomlist[0];
+}
 
 static void pdfapp_warn(pdfapp_t *app, const char *fmt, ...)
 {
@@ -65,6 +84,7 @@ char *pdfapp_usage(pdfapp_t *app)
 		"-\t\t-- zoom out\n"
 		"W\t\t-- zoom to fit window width\n"
 		"H\t\t-- zoom to fit window height\n"
+		"Z\t\t-- zoom to fit page\n"
 		"w\t\t-- shrinkwrap\n"
 		"f\t\t-- fullscreen\n"
 		"r\t\t-- reload file\n"
@@ -95,6 +115,8 @@ void pdfapp_init(fz_context *ctx, pdfapp_t *app)
 	app->scrh = 480;
 	app->resolution = 72;
 	app->ctx = ctx;
+	app->transition.duration = 0.25;
+	app->transition.type = FZ_TRANSITION_FADE;
 #ifdef _WIN32
 	app->colorspace = fz_device_bgr(ctx);
 #else
@@ -281,6 +303,8 @@ void pdfapp_open_progressive(pdfapp_t *app, char *filename, int reload, int bps)
 			fz_try(ctx)
 			{
 				app->pagecount = fz_count_pages(app->doc);
+				if (app->pagecount <= 0)
+					fz_throw(ctx, FZ_ERROR_GENERIC, "No pages in document");
 			}
 			fz_catch(ctx)
 			{
@@ -812,15 +836,6 @@ static void pdfapp_showpage(pdfapp_t *app, int loadpage, int drawpage, int repai
 		new_trans = fz_page_presentation(app->doc, app->page, &app->duration);
 		if (new_trans)
 			app->transition = *new_trans;
-		else
-		{
-			/* If no transition specified, use a default one */
-			memset(&app->transition, 0, sizeof(*new_trans));
-			app->transition.duration = 1.0;
-			app->transition.type = FZ_TRANSITION_WIPE;
-			app->transition.vertical = 0;
-			app->transition.direction = 0;
-		}
 		if (app->duration == 0)
 			app->duration = 5;
 		app->in_transit = fz_generate_transition(app->image, app->old_image, app->new_image, 0, &app->transition);
@@ -876,13 +891,21 @@ void pdfapp_gotopage(pdfapp_t *app, int number)
 	app->issearching = 0;
 	winrepaint(app);
 
+	if (number < 1)
+		number = 1;
+	if (number > app->pagecount)
+		number = app->pagecount;
+
+	if (number == app->pageno)
+		return;
+
 	if (app->histlen + 1 == 256)
 	{
 		memmove(app->hist, app->hist + 1, sizeof(int) * 255);
 		app->histlen --;
 	}
 	app->hist[app->histlen++] = app->pageno;
-	app->pageno = number + 1;
+	app->pageno = number;
 	pdfapp_showpage(app, 1, 1, 1, 0, 0);
 }
 
@@ -956,6 +979,36 @@ void pdfapp_onresize(pdfapp_t *app, int w, int h)
 		pdfapp_panview(app, app->panx, app->pany);
 		winrepaint(app);
 	}
+}
+
+void pdfapp_autozoom_vertical(pdfapp_t *app)
+{
+	app->resolution *= (double) app->winh / (double) fz_pixmap_height(app->ctx, app->image);
+	if (app->resolution > MAXRES)
+		app->resolution = MAXRES;
+	else if (app->resolution < MINRES)
+		app->resolution = MINRES;
+	pdfapp_showpage(app, 0, 1, 1, 0, 0);
+}
+
+void pdfapp_autozoom_horizontal(pdfapp_t *app)
+{
+	app->resolution *= (double) app->winw / (double) fz_pixmap_width(app->ctx, app->image);
+	if (app->resolution > MAXRES)
+		app->resolution = MAXRES;
+	else if (app->resolution < MINRES)
+		app->resolution = MINRES;
+	pdfapp_showpage(app, 0, 1, 1, 0, 0);
+}
+
+void pdfapp_autozoom(pdfapp_t *app)
+{
+	float page_aspect = (float) fz_pixmap_width(app->ctx, app->image) / fz_pixmap_height(app->ctx, app->image);
+	float win_aspect = (float) app->winw / app->winh;
+	if (page_aspect > win_aspect)
+		pdfapp_autozoom_horizontal(app);
+	else
+		pdfapp_autozoom_vertical(app);
 }
 
 void pdfapp_onkey(pdfapp_t *app, int c)
@@ -1036,33 +1089,22 @@ void pdfapp_onkey(pdfapp_t *app, int c)
 
 	case '+':
 	case '=':
-		app->resolution *= ZOOMSTEP;
-		if (app->resolution > MAXRES)
-			app->resolution = MAXRES;
+		app->resolution = zoom_in(app->resolution);
 		pdfapp_showpage(app, 0, 1, 1, 0, 0);
 		break;
 	case '-':
-		app->resolution /= ZOOMSTEP;
-		if (app->resolution < MINRES)
-			app->resolution = MINRES;
+		app->resolution = zoom_out(app->resolution);
 		pdfapp_showpage(app, 0, 1, 1, 0, 0);
 		break;
 
 	case 'W':
-		app->resolution *= (double) app->winw / (double) fz_pixmap_width(app->ctx, app->image);
-		if (app->resolution > MAXRES)
-			app->resolution = MAXRES;
-		else if (app->resolution < MINRES)
-			app->resolution = MINRES;
-		pdfapp_showpage(app, 0, 1, 1, 0, 0);
+		pdfapp_autozoom_horizontal(app);
 		break;
 	case 'H':
-		app->resolution *= (double) app->winh / (double) fz_pixmap_height(app->ctx, app->image);
-		if (app->resolution > MAXRES)
-			app->resolution = MAXRES;
-		else if (app->resolution < MINRES)
-			app->resolution = MINRES;
-		pdfapp_showpage(app, 0, 1, 1, 0, 0);
+		pdfapp_autozoom_vertical(app);
+		break;
+	case 'Z':
+		pdfapp_autozoom(app);
 		break;
 
 	case 'L':
@@ -1122,14 +1164,36 @@ void pdfapp_onkey(pdfapp_t *app, int c)
 		break;
 
 	case 'j':
-		app->pany -= fz_pixmap_height(app->ctx, app->image) / 10;
-		pdfapp_showpage(app, 0, 0, 1, 0, 0);
-		break;
+		{
+			int h = fz_pixmap_height(app->ctx, app->image);
+			if (h <= app->winh || app->pany <= app->winh - h)
+			{
+				panto = PAN_TO_TOP;
+				app->pageno++;
+			}
+			else
+			{
+				app->pany -= h / 10;
+				pdfapp_showpage(app, 0, 0, 1, 0, 0);
+			}
+			break;
+		}
 
 	case 'k':
-		app->pany += fz_pixmap_height(app->ctx, app->image) / 10;
-		pdfapp_showpage(app, 0, 0, 1, 0, 0);
-		break;
+		{
+			int h = fz_pixmap_height(app->ctx, app->image);
+			if (h <= app->winh || app->pany == 0)
+			{
+				panto = PAN_TO_BOTTOM;
+				app->pageno--;
+			}
+			else
+			{
+				app->pany += h / 10;
+				pdfapp_showpage(app, 0, 0, 1, 0, 0);
+			}
+			break;
+		}
 
 	case 'l':
 		app->panx -= fz_pixmap_width(app->ctx, app->image) / 10;
@@ -1144,20 +1208,19 @@ void pdfapp_onkey(pdfapp_t *app, int c)
 	case '\n':
 	case '\r':
 		if (app->numberlen > 0)
-			app->pageno = atoi(app->number);
+			pdfapp_gotopage(app, atoi(app->number));
 		else
-			app->pageno = 1;
+			pdfapp_gotopage(app, 1);
 		break;
 
 	case 'G':
-		app->pageno = app->pagecount;
+		pdfapp_gotopage(app, app->pagecount);
 		break;
 
 	case 'm':
 		if (app->numberlen > 0)
 		{
 			int idx = atoi(app->number);
-
 			if (idx >= 0 && idx < nelem(app->marks))
 				app->marks[idx] = app->pageno;
 		}
@@ -1458,7 +1521,7 @@ void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int sta
 			if (link->dest.kind == FZ_LINK_URI)
 				pdfapp_gotouri(app, link->dest.ld.uri.uri);
 			else if (link->dest.kind == FZ_LINK_GOTO)
-				pdfapp_gotopage(app, link->dest.ld.gotor.page);
+				pdfapp_gotopage(app, link->dest.ld.gotor.page + 1);
 			return;
 		}
 	}
@@ -1506,9 +1569,9 @@ void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int sta
 			{
 				/* zoom in/out if ctrl is pressed */
 				if (dir > 0)
-					app->resolution *= ZOOMSTEP;
+					app->resolution = zoom_in(app->resolution);
 				else
-					app->resolution /= ZOOMSTEP;
+					app->resolution = zoom_out(app->resolution);
 				if (app->resolution > MAXRES)
 					app->resolution = MAXRES;
 				if (app->resolution < MINRES)
@@ -1625,8 +1688,7 @@ void pdfapp_oncopy(pdfapp_t *app, unsigned short *ucsbuf, int ucslen)
 	fz_rect hitbox;
 	fz_matrix ctm;
 	fz_text_page *page = app->page_text;
-	int c, i, p;
-	int seen = 0;
+	int c, i, p, need_newline;
 	int block_num;
 
 	int x0 = app->selr.x0;
@@ -1637,6 +1699,7 @@ void pdfapp_oncopy(pdfapp_t *app, unsigned short *ucsbuf, int ucslen)
 	pdfapp_viewctm(&ctm, app);
 
 	p = 0;
+	need_newline = 0;
 
 	for (block_num = 0; block_num < page->len; block_num++)
 	{
@@ -1650,20 +1713,10 @@ void pdfapp_oncopy(pdfapp_t *app, unsigned short *ucsbuf, int ucslen)
 
 		for (line = block->lines; line < block->lines + block->len; line++)
 		{
+			int saw_text = 0;
+
 			for (span = line->first_span; span; span = span->next)
 			{
-				if (seen)
-				{
-#ifdef _WIN32
-					if (p < ucslen - 1)
-						ucsbuf[p++] = '\r';
-#endif
-					if (p < ucslen - 1)
-						ucsbuf[p++] = '\n';
-				}
-
-				seen = 0;
-
 				for (i = 0; i < span->len; i++)
 				{
 					fz_text_char_bbox(&hitbox, span, i);
@@ -1673,14 +1726,27 @@ void pdfapp_oncopy(pdfapp_t *app, unsigned short *ucsbuf, int ucslen)
 						c = '?';
 					if (hitbox.x1 >= x0 && hitbox.x0 <= x1 && hitbox.y1 >= y0 && hitbox.y0 <= y1)
 					{
+						saw_text = 1;
+
+						if (need_newline)
+						{
+#ifdef _WIN32
+							if (p < ucslen - 1)
+								ucsbuf[p++] = '\r';
+#endif
+							if (p < ucslen - 1)
+								ucsbuf[p++] = '\n';
+							need_newline = 0;
+						}
+
 						if (p < ucslen - 1)
 							ucsbuf[p++] = c;
-						seen = 1;
 					}
 				}
-
-				seen = (seen && span == line->last_span);
 			}
+
+			if (saw_text)
+				need_newline = 1;
 		}
 	}
 

@@ -510,7 +510,7 @@ static pdf_obj *sweepref(pdf_document *doc, pdf_write_options *opts, pdf_obj *ob
 	int gen = pdf_to_gen(obj);
 	fz_context *ctx = doc->ctx;
 
-	if (num < 0 || num >= pdf_xref_len(doc))
+	if (num <= 0 || num >= pdf_xref_len(doc))
 		return NULL;
 	if (opts->use_list[num])
 		return NULL;
@@ -2651,6 +2651,11 @@ void pdf_write_document(pdf_document *doc, char *filename, fz_write_options *fz_
 		/* Make renumbering affect all indirect references and update xref */
 		if (opts.do_garbage >= 2 || opts.do_linear)
 			renumberobjs(doc, &opts);
+
+		/* Truncate the xref after compacting and renumbering */
+		if (opts.do_garbage >= 2 && !opts.do_incremental)
+			while (xref_len > 0 && !opts.use_list[xref_len-1])
+				xref_len--;
 
 		if (opts.do_linear)
 		{

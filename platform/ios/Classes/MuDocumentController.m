@@ -6,6 +6,7 @@
 #import "MuDocumentController.h"
 #import "MuTextFieldController.h"
 #import "MuChoiceFieldController.h"
+#import "MuPrintPageRenderer.h"
 
 #define GAP 20
 #define INDICATOR_Y -44-24
@@ -13,6 +14,11 @@
 #define SEARCH_W (width - GAP - 170)
 #define MIN_SCALE (1.0)
 #define MAX_SCALE (5.0)
+
+static NSString *const AlertTitle = @"Save Document?";
+// Correct functioning of the app relies on CloseAlertMessage and ShareAlertMessage differing
+static NSString *const CloseAlertMessage = @"Changes have been made to the document that will be lost if not saved";
+static NSString *const ShareAlertMessage = @"Your changes will not be shared unless the document is first saved";
 
 static void flattenOutline(NSMutableArray *titles, NSMutableArray *pages, fz_outline *outline, int level)
 {
@@ -249,6 +255,9 @@ static void saveDoc(char *current_path, fz_document *doc)
 	nextButton = [self resourceBasedButton:@"ic_arrow_right" withAction:@selector(onSearchNext:)];
 	reflowButton = [self resourceBasedButton:@"ic_reflow" withAction:@selector(onToggleReflow:)];
 	moreButton = [self resourceBasedButton:@"ic_more" withAction:@selector(onMore:)];
+	annotButton = [self resourceBasedButton:@"ic_annotation" withAction:@selector(onAnnot:)];
+	shareButton = [self resourceBasedButton:@"ic_share" withAction:@selector(onShare:)];
+	printButton = [self resourceBasedButton:@"ic_print" withAction:@selector(onPrint:)];
 	highlightButton = [self resourceBasedButton:@"ic_highlight" withAction:@selector(onHighlight:)];
 	underlineButton = [self resourceBasedButton:@"ic_underline" withAction:@selector(onUnderline:)];
 	strikeoutButton = [self resourceBasedButton:@"ic_strike" withAction:@selector(onStrikeout:)];
@@ -278,13 +287,18 @@ static void saveDoc(char *current_path, fz_document *doc)
 	[slider release]; slider = nil;
 	[sliderWrapper release]; sliderWrapper = nil;
 	[reflowButton release]; reflowButton = nil;
+	[backButton release]; backButton = nil;
 	[moreButton release]; moreButton = nil;
 	[searchBar release]; searchBar = nil;
 	[outlineButton release]; outlineButton = nil;
+	[linkButton release]; linkButton = nil;
 	[searchButton release]; searchButton = nil;
 	[cancelButton release]; cancelButton = nil;
 	[prevButton release]; prevButton = nil;
 	[nextButton release]; nextButton = nil;
+	[shareButton release]; shareButton = nil;
+	[printButton release]; printButton = nil;
+	[annotButton release]; annotButton = nil;
 	[highlightButton release]; highlightButton = nil;
 	[underlineButton release]; underlineButton = nil;
 	[strikeoutButton release]; strikeoutButton = nil;
@@ -443,6 +457,17 @@ static void saveDoc(char *current_path, fz_document *doc)
 	[self scrollViewDidScroll:canvas];
 }
 
+- (void) showMoreMenu
+{
+	NSMutableArray *rightbuttons = [NSMutableArray arrayWithObjects:printButton, shareButton, nil];
+	if (docRef->interactive)
+		[rightbuttons insertObject:annotButton atIndex:0];
+	[[self navigationItem] setRightBarButtonItems:rightbuttons];
+	[[self navigationItem] setLeftBarButtonItem:cancelButton];
+
+	barmode = BARMODE_MORE;
+}
+
 - (void) showAnnotationMenu
 {
 	[[self navigationItem] setRightBarButtonItems:[NSArray arrayWithObjects:inkButton, strikeoutButton, underlineButton, highlightButton, nil]];
@@ -465,7 +490,61 @@ static void saveDoc(char *current_path, fz_document *doc)
 
 - (void) onMore: (id)sender
 {
+	[self showMoreMenu];
+}
+
+- (void) onAnnot: (id)sender
+{
 	[self showAnnotationMenu];
+}
+
+- (void) onPrint: (id)sender
+{
+	UIPrintInteractionController *pic = [UIPrintInteractionController sharedPrintController];
+	if (pic) {
+		UIPrintInfo *printInfo = [UIPrintInfo printInfo];
+		printInfo.outputType = UIPrintInfoOutputGeneral;
+		printInfo.jobName = key;
+		printInfo.duplex = UIPrintInfoDuplexLongEdge;
+		pic.printInfo = printInfo;
+		pic.showsPageRange = YES;
+		pic.printPageRenderer = [[[MuPrintPageRenderer alloc] initWithDocRef:docRef] autorelease];
+
+		void (^completionHandler)(UIPrintInteractionController *, BOOL, NSError *) =
+			^(UIPrintInteractionController *pic, BOOL completed, NSError *error) {
+				if (!completed && error)
+					NSLog(@"FAILED! due to error in domain %@ with error code %u",
+							error.domain, (unsigned int)error.code);
+			};
+		if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+			[pic presentFromBarButtonItem:printButton animated:YES
+				completionHandler:completionHandler];
+		} else {
+			[pic presentAnimated:YES completionHandler:completionHandler];
+		}
+	}
+}
+
+- (void) shareDocument
+{
+	NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:filePath]];
+	UIActivityViewController *cont = [[UIActivityViewController alloc] initWithActivityItems:[NSArray arrayWithObject:url] applicationActivities:nil];
+	[self presentViewController:cont animated:YES completion:nil];
+}
+
+- (void) onShare: (id)sender
+{
+	pdf_document *idoc = pdf_specifics(doc);
+	if (idoc && pdf_has_unsaved_changes(idoc))
+	{
+		UIAlertView *alertView = [[UIAlertView alloc] initWithTitle:AlertTitle message:ShareAlertMessage delegate:self cancelButtonTitle:@"Cancel" otherButtonTitles:@"Save and Share", nil];
+		[alertView show];
+		[alertView release];
+	}
+	else
+	{
+		[self shareDocument];
+	}
 }
 
 - (void) textSelectModeOn
@@ -594,6 +673,7 @@ static void saveDoc(char *current_path, fz_document *doc)
 			[self resetSearch];
 			/* fallthrough */
 		case BARMODE_ANNOTATION:
+		case BARMODE_MORE:
 			[[self navigationItem] setTitleView: nil];
 			[self addMainMenuButtons];
 			barmode = BARMODE_MAIN;
@@ -620,9 +700,10 @@ static void saveDoc(char *current_path, fz_document *doc)
 	if (idoc && pdf_has_unsaved_changes(idoc))
 	{
 		UIAlertView *saveAlert = [[UIAlertView alloc]
-			initWithTitle:@"Save changes?" message:nil delegate:self
+			initWithTitle:AlertTitle message:CloseAlertMessage delegate:self
 			cancelButtonTitle:@"Discard" otherButtonTitles:@"Save", nil];
 		[saveAlert show];
+		[saveAlert release];
 	}
 	else
 	{
@@ -632,11 +713,24 @@ static void saveDoc(char *current_path, fz_document *doc)
 
 - (void) alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
 {
-	if (buttonIndex == 1)
-		saveDoc(filePath, doc);
+	if ([CloseAlertMessage isEqualToString:alertView.message])
+	{
+		if (buttonIndex == 1)
+			saveDoc(filePath, doc);
 
-	[alertView dismissWithClickedButtonIndex:buttonIndex animated:YES];
-	[[self navigationController] popViewControllerAnimated:YES];
+		[alertView dismissWithClickedButtonIndex:buttonIndex animated:YES];
+		[[self navigationController] popViewControllerAnimated:YES];
+	}
+
+	if ([ShareAlertMessage isEqualToString:alertView.message])
+	{
+		[alertView dismissWithClickedButtonIndex:buttonIndex animated:NO];
+		if (buttonIndex == 1)
+		{
+			saveDoc(filePath, doc);
+			[self shareDocument];
+		}
+	}
 }
 
 - (void) resetSearch
@@ -850,7 +944,7 @@ static void saveDoc(char *current_path, fz_document *doc)
 	if (sender.scale > MAX_SCALE)
 		sender.scale = MAX_SCALE;
 
-	if (sender.state ==  UIGestureRecognizerStateEnded)
+	if (sender.state == UIGestureRecognizerStateEnded)
 		scale = sender.scale;
 
 	for (UIView<MuPageView> *view in [canvas subviews])

@@ -117,6 +117,34 @@ fz_mask_color_key(fz_pixmap *pix, int n, int *colorkey)
 	}
 }
 
+static void
+fz_unblend_masked_tile(fz_context *ctx, fz_pixmap *tile, fz_image *image)
+{
+	fz_pixmap *mask = image->mask->get_pixmap(ctx, image->mask, tile->w, tile->h);
+	unsigned char *s = mask->samples, *end = s + mask->w * mask->h;
+	unsigned char *d = tile->samples;
+	int k;
+
+	if (tile->w != mask->w || tile->h != mask->h)
+	{
+		fz_warn(ctx, "mask must be of same size as image for /Matte");
+		fz_drop_pixmap(ctx, mask);
+		return;
+	}
+
+	for (; s < end; s++, d += tile->n)
+	{
+		if (*s == 0)
+			for (k = 0; k < image->n - 1; k++)
+				d[k] = image->colorkey[k];
+		else
+			for (k = 0; k < image->n - 1; k++)
+				d[k] = fz_clampi(image->colorkey[k] + (d[k] - image->colorkey[k]) * 255 / *s, 0, 255);
+	}
+
+	fz_drop_pixmap(ctx, mask);
+}
+
 fz_pixmap *
 fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, int indexed, int l2factor, int native_l2factor)
 {
@@ -163,7 +191,8 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, in
 		fz_free(ctx, samples);
 		samples = NULL;
 
-		if (image->usecolorkey)
+		/* color keyed transparency */
+		if (image->usecolorkey && !image->mask)
 			fz_mask_color_key(tile, image->n, image->colorkey);
 
 		if (indexed)
@@ -178,6 +207,10 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, in
 		{
 			fz_decode_tile(tile, image->decode);
 		}
+
+		/* pre-blended matte color */
+		if (image->usecolorkey && image->mask)
+			fz_unblend_masked_tile(ctx, tile, image);
 	}
 	fz_always(ctx)
 	{
@@ -278,6 +311,25 @@ fz_image_get_pixmap(fz_context *ctx, fz_image *image, int w, int h)
 	case FZ_IMAGE_JXR:
 		tile = fz_load_jxr(ctx, image->buffer->buffer->data, image->buffer->buffer->len);
 		break;
+	case FZ_IMAGE_JPEG:
+		/* Scan JPEG stream and patch missing height values in header */
+		{
+			unsigned char *s = image->buffer->buffer->data;
+			unsigned char *e = s + image->buffer->buffer->len;
+			unsigned char *d;
+			for (d = s + 2; s < d && d < e - 9 && d[0] == 0xFF; d += (d[2] << 8 | d[3]) + 2)
+			{
+				if (d[1] < 0xC0 || (0xC3 < d[1] && d[1] < 0xC9) || 0xCB < d[1])
+					continue;
+				if ((d[5] == 0 && d[6] == 0) || ((d[5] << 8) | d[6]) > image->h)
+				{
+					d[5] = (image->h >> 8) & 0xFF;
+					d[6] = image->h & 0xFF;
+				}
+			}
+		}
+		/* fall through */
+
 	default:
 		native_l2factor = l2factor;
 		stm = fz_open_image_decomp_stream_from_buffer(ctx, image->buffer, &native_l2factor);

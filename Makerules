@@ -63,7 +63,11 @@ SYS_OPENSSL_CFLAGS = -DHAVE_OPENSSL $(shell pkg-config --cflags libcrypto)
 SYS_OPENSSL_LIBS = $(shell pkg-config --libs libcrypto)
 endif
 
-# TODO: use pkg-config for system CURL
+ifeq "$(shell pkg-config --exists libcurl && echo yes)" "yes"
+HAVE_CURL = yes
+SYS_CURL_CFLAGS = $(shell pkg-config --cflags libcurl)
+SYS_CURL_LIBS = $(shell pkg-config --libs libcurl)
+endif
 SYS_CURL_DEPS = -lpthread -lrt
 
 SYS_X11_CFLAGS = $(shell pkg-config --cflags x11 xext)
@@ -71,8 +75,8 @@ SYS_X11_LIBS = $(shell pkg-config --libs x11 xext)
 
 SYS_FREETYPE_CFLAGS = $(shell pkg-config --cflags freetype2)
 SYS_FREETYPE_LIBS = $(shell pkg-config --libs freetype2)
-SYS_OPENJPEG_CFLAGS = $(shell pkg-config --cflags libopenjpeg1)
-SYS_OPENJPEG_LIBS = $(shell pkg-config --libs libopenjpeg1)
+SYS_OPENJPEG_CFLAGS = $(shell pkg-config --cflags libopenjp2)
+SYS_OPENJPEG_LIBS = $(shell pkg-config --libs libopenjp2)
 SYS_JBIG2DEC_LIBS = -ljbig2dec
 SYS_JPEG_LIBS = -ljpeg
 SYS_ZLIB_LIBS = -lz

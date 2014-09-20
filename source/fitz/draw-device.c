@@ -10,6 +10,9 @@
 /* Enable the following to help debug group blending. */
 #undef DUMP_GROUP_BLENDS
 
+/* Enable the following to help debug graphics stack pushes/pops */
+#undef DUMP_STACK_CHANGES
+
 typedef struct fz_draw_device_s fz_draw_device;
 
 enum {
@@ -73,6 +76,30 @@ static void dump_spaces(int x, const char *s)
 
 #endif
 
+#ifdef DUMP_STACK_CHANGES
+#define STACK_PUSHED(A) stack_change(dev, ">" ## A)
+#define STACK_POPPED(A) stack_change(dev, "<" ## A)
+#define STACK_CONVERT(A) stack_change(dev, A)
+
+static void stack_change(fz_draw_device *dev, char *s)
+{
+	int depth = dev->top;
+	int n;
+
+	if (*s != '<')
+		depth--;
+	n = depth;
+	while (n--)
+		fputc(' ', stderr);
+	fprintf(stderr, "%s (%d)\n", s, depth);
+}
+#else
+#define STACK_PUSHED(A) do {} while (0)
+#define STACK_POPPED(A) do {} while (0)
+#define STACK_CONVERT(A) do {} while (0)
+#endif
+
+
 static void fz_grow_stack(fz_draw_device *dev)
 {
 	int max = dev->stack_cap * 2;
@@ -118,6 +145,7 @@ static void emergency_pop_stack(fz_draw_device *dev, fz_draw_state *state)
 	if (state[1].shape != state[0].shape)
 		fz_drop_pixmap(ctx, state[1].shape);
 	dev->top--;
+	STACK_POPPED("emergency");
 	fz_rethrow(ctx);
 }
 
@@ -134,6 +162,7 @@ fz_knockout_begin(fz_draw_device *dev)
 		return state;
 
 	state = push_stack(dev);
+	STACK_PUSHED("knockout");
 
 	fz_pixmap_bbox(dev->ctx, state->dest, &bbox);
 	fz_intersect_irect(&bbox, &state->scissor);
@@ -195,6 +224,7 @@ static void fz_knockout_end(fz_draw_device *dev)
 		return;
 	}
 	state = &dev->stack[--dev->top];
+	STACK_POPPED("knockout");
 	if ((state[0].blendmode & FZ_BLEND_KNOCKOUT) == 0)
 		return;
 
@@ -371,6 +401,7 @@ fz_draw_clip_path(fz_device *devp, fz_path *path, const fz_rect *rect, int even_
 	fz_sort_gel(dev->gel);
 
 	state = push_stack(dev);
+	STACK_PUSHED("clip path");
 	model = state->dest->colorspace;
 
 	fz_intersect_irect(fz_bound_gel(dev->gel, &bbox), &state->scissor);
@@ -441,6 +472,7 @@ fz_draw_clip_stroke_path(fz_device *devp, fz_path *path, const fz_rect *rect, fz
 	fz_sort_gel(dev->gel);
 
 	state = push_stack(dev);
+	STACK_PUSHED("clip stroke");
 	model = state->dest->colorspace;
 
 	fz_intersect_irect(fz_bound_gel(dev->gel, &bbox), &state->scissor);
@@ -583,10 +615,10 @@ fz_draw_fill_text(fz_device *devp, fz_text *text, const fz_matrix *ctm,
 		}
 		else
 		{
-			fz_path *path = fz_outline_glyph(dev->ctx, text->font, gid, &trm);
+			fz_path *path = fz_outline_glyph(dev->ctx, text->font, gid, &tm);
 			if (path)
 			{
-				fz_draw_fill_path(devp, path, 0, &fz_identity, colorspace, color, alpha);
+				fz_draw_fill_path(devp, path, 0, ctm, colorspace, color, alpha);
 				fz_free_path(dev->ctx, path);
 			}
 			else
@@ -646,10 +678,10 @@ fz_draw_stroke_text(fz_device *devp, fz_text *text, fz_stroke_state *stroke,
 		}
 		else
 		{
-			fz_path *path = fz_outline_glyph(dev->ctx, text->font, gid, &trm);
+			fz_path *path = fz_outline_glyph(dev->ctx, text->font, gid, &tm);
 			if (path)
 			{
-				fz_draw_stroke_path(devp, path, stroke, &fz_identity, colorspace, color, alpha);
+				fz_draw_stroke_path(devp, path, stroke, ctm, colorspace, color, alpha);
 				fz_free_path(dev->ctx, path);
 			}
 			else
@@ -681,6 +713,7 @@ fz_draw_clip_text(fz_device *devp, fz_text *text, const fz_matrix *ctm, int accu
 	/* If accumulate == 2 then this text object is a continuation */
 
 	state = push_stack(dev);
+	STACK_PUSHED("clip text");
 	model = state->dest->colorspace;
 
 	if (accumulate == 0)
@@ -726,6 +759,7 @@ fz_draw_clip_text(fz_device *devp, fz_text *text, const fz_matrix *ctm, int accu
 		{
 			mask = state->mask;
 			dev->top--;
+			STACK_POPPED("clip text");
 		}
 
 		if (!fz_is_empty_irect(&bbox) && mask)
@@ -754,7 +788,7 @@ fz_draw_clip_text(fz_device *devp, fz_text *text, const fz_matrix *ctm, int accu
 				}
 				else
 				{
-					fz_path *path = fz_outline_glyph(dev->ctx, text->font, gid, &trm);
+					fz_path *path = fz_outline_glyph(dev->ctx, text->font, gid, &tm);
 					if (path)
 					{
 						fz_pixmap *old_dest;
@@ -765,7 +799,7 @@ fz_draw_clip_text(fz_device *devp, fz_text *text, const fz_matrix *ctm, int accu
 						state[1].mask = NULL;
 						fz_try(ctx)
 						{
-							fz_draw_fill_path(devp, path, 0, &fz_identity, fz_device_gray(ctx), &white, 1);
+							fz_draw_fill_path(devp, path, 0, ctm, fz_device_gray(ctx), &white, 1);
 						}
 						fz_always(ctx)
 						{
@@ -808,6 +842,7 @@ fz_draw_clip_stroke_text(fz_device *devp, fz_text *text, fz_stroke_state *stroke
 	fz_colorspace *model = state->dest->colorspace;
 	fz_rect rect;
 
+	STACK_PUSHED("clip stroke text");
 	/* make the mask the exact size needed */
 	fz_irect_from_rect(&bbox, fz_bound_text(dev->ctx, text, stroke, ctm, &rect));
 	fz_intersect_irect(&bbox, &state->scissor);
@@ -858,7 +893,7 @@ fz_draw_clip_stroke_text(fz_device *devp, fz_text *text, fz_stroke_state *stroke
 				}
 				else
 				{
-					fz_path *path = fz_outline_glyph(dev->ctx, text->font, gid, &trm);
+					fz_path *path = fz_outline_glyph(dev->ctx, text->font, gid, &tm);
 					if (path)
 					{
 						fz_pixmap *old_dest;
@@ -870,7 +905,7 @@ fz_draw_clip_stroke_text(fz_device *devp, fz_text *text, fz_stroke_state *stroke
 						state[0].mask = NULL;
 						fz_try(ctx)
 						{
-							fz_draw_stroke_path(devp, path, stroke, &fz_identity, fz_device_gray(ctx), &white, 1);
+							fz_draw_stroke_path(devp, path, stroke, ctm, fz_device_gray(ctx), &white, 1);
 						}
 						fz_always(ctx)
 						{
@@ -1250,6 +1285,7 @@ fz_draw_clip_image_mask(fz_device *devp, fz_image *image, const fz_rect *rect, c
 	fz_matrix local_ctm = *ctm;
 	fz_rect urect;
 
+	STACK_PUSHED("clip image mask");
 	fz_pixmap_bbox(ctx, state->dest, &clip);
 	fz_intersect_irect(&clip, &state->scissor);
 
@@ -1345,6 +1381,7 @@ fz_draw_pop_clip(fz_device *devp)
 		return;
 	}
 	state = &dev->stack[--dev->top];
+	STACK_POPPED("clip");
 
 	/* We can get here with state[1].mask == NULL if the clipping actually
 	 * resolved to a rectangle earlier.
@@ -1399,6 +1436,7 @@ fz_draw_begin_mask(fz_device *devp, const fz_rect *rect, int luminosity, fz_colo
 	fz_pixmap *shape = state->shape;
 	fz_context *ctx = dev->ctx;
 
+	STACK_PUSHED("mask");
 	fz_intersect_irect(fz_irect_from_rect(&bbox, rect), &state->scissor);
 
 	fz_try(ctx)
@@ -1460,41 +1498,48 @@ fz_draw_end_mask(fz_device *devp)
 		return;
 	}
 	state = &dev->stack[dev->top-1];
+	STACK_CONVERT("(mask)");
 	/* pop soft mask buffer */
 	luminosity = state[1].luminosity;
 
 #ifdef DUMP_GROUP_BLENDS
 	dump_spaces(dev->top-1, "Mask -> Clip\n");
 #endif
-	/* convert to alpha mask */
-	temp = fz_alpha_from_gray(dev->ctx, state[1].dest, luminosity);
-	if (state[1].dest != state[0].dest)
-		fz_drop_pixmap(dev->ctx, state[1].dest);
-	state[1].dest = NULL;
-	if (state[1].shape != state[0].shape)
-		fz_drop_pixmap(dev->ctx, state[1].shape);
-	state[1].shape = NULL;
-	if (state[1].mask != state[0].mask)
-		fz_drop_pixmap(dev->ctx, state[1].mask);
-	state[1].mask = NULL;
-
-	/* create new dest scratch buffer */
-	fz_pixmap_bbox(ctx, temp, &bbox);
-	dest = fz_new_pixmap_with_bbox(dev->ctx, state->dest->colorspace, &bbox);
-	fz_clear_pixmap(dev->ctx, dest);
-
-	/* push soft mask as clip mask */
-	state[1].mask = temp;
-	state[1].dest = dest;
-	state[1].blendmode |= FZ_BLEND_ISOLATED;
-	/* If we have a shape, then it'll need to be masked with the
-	 * clip mask when we pop. So create a new shape now. */
-	if (state[0].shape)
+	fz_try(ctx)
 	{
-		state[1].shape = fz_new_pixmap_with_bbox(dev->ctx, NULL, &bbox);
-		fz_clear_pixmap(dev->ctx, state[1].shape);
+		/* convert to alpha mask */
+		temp = fz_alpha_from_gray(dev->ctx, state[1].dest, luminosity);
+		if (state[1].mask != state[0].mask)
+			fz_drop_pixmap(dev->ctx, state[1].mask);
+		state[1].mask = temp;
+		if (state[1].dest != state[0].dest)
+			fz_drop_pixmap(dev->ctx, state[1].dest);
+		state[1].dest = NULL;
+		if (state[1].shape != state[0].shape)
+			fz_drop_pixmap(dev->ctx, state[1].shape);
+		state[1].shape = NULL;
+
+		/* create new dest scratch buffer */
+		fz_pixmap_bbox(ctx, temp, &bbox);
+		dest = fz_new_pixmap_with_bbox(dev->ctx, state->dest->colorspace, &bbox);
+		fz_clear_pixmap(dev->ctx, dest);
+
+		/* push soft mask as clip mask */
+		state[1].dest = dest;
+		state[1].blendmode |= FZ_BLEND_ISOLATED;
+		/* If we have a shape, then it'll need to be masked with the
+		 * clip mask when we pop. So create a new shape now. */
+		if (state[0].shape)
+		{
+			state[1].shape = fz_new_pixmap_with_bbox(dev->ctx, NULL, &bbox);
+			fz_clear_pixmap(dev->ctx, state[1].shape);
+		}
+		state[1].scissor = bbox;
 	}
-	state[1].scissor = bbox;
+	fz_catch(ctx)
+	{
+		emergency_pop_stack(dev, state);
+	}
 }
 
 static void
@@ -1511,6 +1556,7 @@ fz_draw_begin_group(fz_device *devp, const fz_rect *rect, int isolated, int knoc
 		fz_knockout_begin(dev);
 
 	state = push_stack(dev);
+	STACK_PUSHED("group");
 	fz_intersect_irect(fz_irect_from_rect(&bbox, rect), &state->scissor);
 
 	fz_try(ctx)
@@ -1574,6 +1620,7 @@ fz_draw_end_group(fz_device *devp)
 	}
 
 	state = &dev->stack[--dev->top];
+	STACK_POPPED("group");
 	alpha = state[1].alpha;
 	blendmode = state[1].blendmode & FZ_BLEND_MODEMASK;
 	isolated = state[1].blendmode & FZ_BLEND_ISOLATED;
@@ -1760,6 +1807,7 @@ fz_draw_begin_tile(fz_device *devp, const fz_rect *area, const fz_rect *view, fl
 		fz_knockout_begin(dev);
 
 	state = push_stack(dev);
+	STACK_PUSHED("tile");
 	fz_irect_from_rect(&bbox, fz_transform_rect(&local_view, ctm));
 	/* We should never have a bbox that entirely covers our destination.
 	 * If we do, then the check for only 1 tile being visible above has
@@ -1852,6 +1900,7 @@ fz_draw_end_tile(fz_device *devp)
 	}
 
 	state = &dev->stack[--dev->top];
+	STACK_PUSHED("tile");
 	xstep = state[1].xstep;
 	ystep = state[1].ystep;
 	area = state[1].area;

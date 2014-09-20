@@ -323,9 +323,11 @@ pdf_read_start_xref(pdf_document *doc)
 		if (memcmp(buf + i, "startxref", 9) == 0)
 		{
 			i += 9;
-			while (iswhite(buf[i]) && i < n)
+			while (i < n && iswhite(buf[i]))
 				i ++;
-			doc->startxref = atoi((char*)(buf + i));
+			doc->startxref = 0;
+			while (i < n && buf[i] >= '0' && buf[i] <= '9')
+				doc->startxref = doc->startxref * 10 + (buf[i++] - '0');
 			if (doc->startxref != 0)
 				return;
 			break;
@@ -372,7 +374,7 @@ pdf_xref_size_from_old_trailer(pdf_document *doc, pdf_lexbuf *buf)
 		if (!s)
 			fz_throw(doc->ctx, FZ_ERROR_GENERIC, "invalid range marker in xref");
 		len = fz_atoi(fz_strsep(&s, " "));
-		if (len <= 0)
+		if (len < 0)
 			fz_throw(doc->ctx, FZ_ERROR_GENERIC, "xref range marker must be positive");
 
 		/* broken pdfs where the section is not on a separate line */
@@ -1347,7 +1349,7 @@ pdf_load_obj_stm(pdf_document *doc, int num, int gen, pdf_lexbuf *buf)
 
 			obj = pdf_parse_stm_obj(doc, stm, buf);
 
-			if (numbuf[i] < 1 || numbuf[i] >= xref_len)
+			if (numbuf[i] <= 0 || numbuf[i] >= xref_len)
 			{
 				pdf_drop_obj(obj);
 				fz_throw(ctx, FZ_ERROR_GENERIC, "object id (%d 0 R) out of range (0..%d)", numbuf[i], xref_len - 1);
@@ -1636,7 +1638,7 @@ pdf_cache_object(pdf_document *doc, int num, int gen)
 
 	fz_var(try_repair);
 
-	if (num < 0 || num >= pdf_xref_len(doc))
+	if (num <= 0 || num >= pdf_xref_len(doc))
 		fz_throw(ctx, FZ_ERROR_GENERIC, "object out of range (%d %d R); xref size %d", num, gen, pdf_xref_len(doc));
 
 object_updated:
@@ -1762,7 +1764,7 @@ pdf_resolve_indirect(pdf_obj *ref)
 	{
 		if (--sanity == 0)
 		{
-			fz_warn(ctx, "Too many indirections (possible indirection cycle involving %d %d R)", num, gen);
+			fz_warn(ctx, "too many indirections (possible indirection cycle involving %d %d R)", num, gen);
 			return NULL;
 		}
 		doc = pdf_get_indirect_document(ref);
@@ -1771,6 +1773,13 @@ pdf_resolve_indirect(pdf_obj *ref)
 		ctx = doc->ctx;
 		num = pdf_to_num(ref);
 		gen = pdf_to_gen(ref);
+
+		if (num <= 0 || gen < 0)
+		{
+			fz_warn(ctx, "invalid indirect reference (%d %d R)", num, gen);
+			return NULL;
+		}
+
 		fz_try(ctx)
 		{
 			pdf_cache_object(doc, num, gen);
@@ -1817,7 +1826,7 @@ pdf_delete_object(pdf_document *doc, int num)
 {
 	pdf_xref_entry *x;
 
-	if (num < 0 || num >= pdf_xref_len(doc))
+	if (num <= 0 || num >= pdf_xref_len(doc))
 	{
 		fz_warn(doc->ctx, "object out of range (%d 0 R); xref size %d", num, pdf_xref_len(doc));
 		return;
@@ -1841,7 +1850,7 @@ pdf_update_object(pdf_document *doc, int num, pdf_obj *newobj)
 {
 	pdf_xref_entry *x;
 
-	if (num < 0 || num >= pdf_xref_len(doc))
+	if (num <= 0 || num >= pdf_xref_len(doc))
 	{
 		fz_warn(doc->ctx, "object out of range (%d 0 R); xref size %d", num, pdf_xref_len(doc));
 		return;
@@ -1863,7 +1872,7 @@ pdf_update_stream(pdf_document *doc, int num, fz_buffer *newbuf)
 {
 	pdf_xref_entry *x;
 
-	if (num < 0 || num >= pdf_xref_len(doc))
+	if (num <= 0 || num >= pdf_xref_len(doc))
 	{
 		fz_warn(doc->ctx, "object out of range (%d 0 R); xref size %d", num, pdf_xref_len(doc));
 		return;
@@ -2425,6 +2434,7 @@ pdf_document *pdf_create_document(fz_context *ctx)
 		pdf_dict_puts_drop(pages, "Count", pdf_new_int(doc, 0));
 		pdf_dict_puts_drop(pages, "Kids", pdf_new_array(doc, 1));
 		pdf_set_populating_xref_trailer(doc, trailer);
+		pdf_drop_obj(trailer);
 	}
 	fz_catch(ctx)
 	{
