@@ -15,7 +15,7 @@ License: AGPL-3+
 
 Files: resources/cmaps/*
 Copyright: 1990-2009, Adobe Systems Incorporated.
-License:
+License: BSD-3-clause
  Copyright 1990-2009 Adobe Systems Incorporated.
  All rights reserved.
  .
@@ -53,7 +53,7 @@ License:
 
 Files: source/fitz/crypt-arc4.c
 Copyright: April 29, 1997 Kalle Kaukonen.
-License:
+License: BSD-1-clause
  Redistribution and use in source and binary forms, with or
  without modification, are permitted provided that this copyright
  notice and disclaimer are retained.
@@ -73,7 +73,7 @@ License:
 
 Files: source/fitz/crypt-aes.c
 Copyright: 2006-2007 Christophe Devine
-License:
+License: BSD-3-clause
  Redistribution and use in source and binary forms, with or without
  modification, are permitted provided that the following conditions
  are met:
@@ -102,7 +102,7 @@ License:
 
 Files: source/fitz/crypt-md5.c
 Copyright: 1991-2, RSA Data Security, Inc. Created 1991.
-License:
+License: RSA-MD5
  MD5C.C - RSA Data Security, Inc., MD5 message-digest algorithm
  .
  Copyright (C) 1991-2, RSA Data Security, Inc. Created 1991.
@@ -153,7 +153,7 @@ License: ISC
 Files: resources/fonts/*.cff
 Copyright: (URW)++ Design & Development
            Valek Filippov <frob@df.ru>
-License: AGPL-3 with Font exception
+License: AGPL-3+ with Font exception
  The font and related files in this directory are distributed under the
  GNU AFFERO GENERAL PUBLIC LICENSE Version 3 (see the file COPYING), with
  the following exemption:
@@ -225,7 +225,7 @@ License: GPL-2+
  License version 2 can be found in the file
  `/usr/share/common-licenses/GPL-2'.
 
-License: AGPL-3
+License: AGPL-3+
                      GNU AFFERO GENERAL PUBLIC LICENSE
                         Version 3, 19 November 2007
  .
