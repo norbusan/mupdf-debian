@@ -25,7 +25,7 @@ ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 	MAKEFLAGS += -j$(NUMJOBS)
 endif
 
-BUILD_FLAGS=build=release OS=Linux
+BUILD_FLAGS=build=release OS=Linux verbose=yes
 
 override_dh_auto_build:
 	$(MAKE) $(BUILD_FLAGS)
