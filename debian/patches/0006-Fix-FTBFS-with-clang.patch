@@ -1,0 +1,63 @@
+From: =?utf-8?q?=22Kan-Ru_Chen_=28=E9=99=B3=E4=BE=83=E5=A6=82=29=22?=
+ <koster@debian.org>
+Date: Sat, 20 Sep 2014 23:02:09 +0800
+Subject: Fix FTBFS with clang
+
+---
+ include/mupdf/fitz/output.h | 2 +-
+ source/fitz/output.c        | 8 ++++----
+ 2 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/include/mupdf/fitz/output.h b/include/mupdf/fitz/output.h
+index 9c0c9dd..fa692db 100644
+--- a/include/mupdf/fitz/output.h
++++ b/include/mupdf/fitz/output.h
+@@ -15,7 +15,7 @@ struct fz_output_s
+ {
+ 	fz_context *ctx;
+ 	void *opaque;
+-	int (*printf)(fz_output *, const char *, va_list ap);
++	int (*printf_)(fz_output *, const char *, va_list ap);
+ 	int (*write)(fz_output *, const void *, int n);
+ 	void (*close)(fz_output *);
+ };
+diff --git a/source/fitz/output.c b/source/fitz/output.c
+index fe63de9..84f43ac 100644
+--- a/source/fitz/output.c
++++ b/source/fitz/output.c
+@@ -36,7 +36,7 @@ fz_new_output_with_file(fz_context *ctx, FILE *file)
+ 	fz_output *out = fz_malloc_struct(ctx, fz_output);
+ 	out->ctx = ctx;
+ 	out->opaque = file;
+-	out->printf = file_printf;
++	out->printf_ = file_printf;
+ 	out->write = file_write;
+ 	out->close = NULL;
+ 	return out;
+@@ -58,7 +58,7 @@ fz_new_output_to_filename(fz_context *ctx, const char *filename)
+ 		out = fz_malloc_struct(ctx, fz_output);
+ 		out->ctx = ctx;
+ 		out->opaque = file;
+-		out->printf = file_printf;
++		out->printf_ = file_printf;
+ 		out->write = file_write;
+ 		out->close = file_close;
+ 	}
+@@ -90,7 +90,7 @@ fz_printf(fz_output *out, const char *fmt, ...)
+ 		return 0;
+ 
+ 	va_start(ap, fmt);
+-	ret = out->printf(out, fmt, ap);
++	ret = out->printf_(out, fmt, ap);
+ 	va_end(ap);
+ 
+ 	return ret;
+@@ -142,7 +142,7 @@ fz_new_output_with_buffer(fz_context *ctx, fz_buffer *buf)
+ 	fz_output *out = fz_malloc_struct(ctx, fz_output);
+ 	out->ctx = ctx;
+ 	out->opaque = buf;
+-	out->printf = buffer_printf;
++	out->printf_ = buffer_printf;
+ 	out->write = buffer_write;
+ 	out->close = NULL;
+ 	return out;
