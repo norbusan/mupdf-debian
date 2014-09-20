@@ -1,3 +1,8 @@
+From: =?utf-8?q?=22Kan-Ru_Chen_=28=E9=99=B3=E4=BE=83=E5=A6=82=29=22?=
+ <koster@debian.org>
+Date: Sat, 20 Sep 2014 11:08:32 +0800
+Subject: fix_libjpeg_header_mismatch
+
 commit 674a7b563e3010d26faef86d674b246d42c8edf0
 Author: Quoc-Viet Nguyen <afelion@gmail.com>
 Date:   Fri Apr 18 23:25:03 2014 +1000
@@ -6,6 +11,7 @@ Date:   Fri Apr 18 23:25:03 2014 +1000
 ---
  scripts/jpeg/jconfig.h | 45 ---------------------------------------------
  1 file changed, 45 deletions(-)
+ delete mode 100644 scripts/jpeg/jconfig.h
 
 diff --git a/scripts/jpeg/jconfig.h b/scripts/jpeg/jconfig.h
 deleted file mode 100644

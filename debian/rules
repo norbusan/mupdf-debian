@@ -26,9 +26,6 @@ ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 endif
 
 BUILD_FLAGS=build=release OS=Linux
-ifeq (,$(strip $(foreach arch,powerpc s390x sparc,$(findstring $(arch),$(DEB_HOST_ARCH)))))
-	BUILD_FLAGS += HAVE_V8=yes
-endif
 
 override_dh_auto_build:
 	$(MAKE) $(BUILD_FLAGS)

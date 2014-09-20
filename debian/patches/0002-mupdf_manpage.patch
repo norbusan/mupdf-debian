@@ -1,10 +1,17 @@
+From: =?utf-8?q?=22Kan-Ru_Chen_=28=E9=99=B3=E4=BE=83=E5=A6=82=29=22?=
+ <koster@debian.org>
+Date: Sat, 20 Sep 2014 11:08:32 +0800
+Subject: mupdf_manpage
+
 ---
- docs/man/mupdf.1 |   10 ++++++++++
+ docs/man/mupdf.1 | 10 ++++++++++
  1 file changed, 10 insertions(+)
 
+diff --git a/docs/man/mupdf.1 b/docs/man/mupdf.1
+index 5831c0c..d0921e4 100644
 --- a/docs/man/mupdf.1
 +++ b/docs/man/mupdf.1
-@@ -117,6 +117,9 @@
+@@ -117,6 +117,9 @@ Toggles fullscreen mode.
  .B p
  Toggle presentation mode.
  .TP
@@ -14,7 +21,7 @@
  .B c
  Toggle between color and grayscale rendering.
  .TP
-@@ -133,6 +136,13 @@
+@@ -133,6 +136,13 @@ Quit.
  Sending a \fBSIGHUP\fR signal to the mupdf process will also cause the viewed
  file to be reloaded automatically, for use in e.g. build scripts.
  

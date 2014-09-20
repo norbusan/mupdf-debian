@@ -1,5 +1,2 @@
-fix_libv8_linkage.patch
-use_openjpeg_1.5.patch
-fix_libjpeg_header_mismatch.patch
-fix_mudraw_man_format.patch
-mupdf_manpage.patch
+0001-fix_libjpeg_header_mismatch.patch
+0002-mupdf_manpage.patch
