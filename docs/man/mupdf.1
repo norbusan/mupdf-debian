@@ -117,6 +117,9 @@ Toggles fullscreen mode.
 .B p
 Toggle presentation mode.
 .TP
+.B P
+Displays the current page number temporarily.
+.TP
 .B c
 Toggle between color and grayscale rendering.
 .TP
@@ -132,6 +135,13 @@ Quit.
 .B SIGHUP
 Sending a \fBSIGHUP\fR signal to the mupdf process will also cause the viewed
 file to be reloaded automatically, for use in e.g. build scripts.
+
+.SH ENVIRONMENT
+
+.TP
+.B BROWSER
+When \fBmupdf\fR opens a link it first uses BROWSER to browse the link
+and falls back to "xdg-open" if BROWSER is not defined.
 
 .SH SEE ALSO
 .BR mudraw (1),
