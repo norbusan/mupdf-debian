@@ -49,7 +49,6 @@ static void showAlert(NSString *msg, NSString *filename)
 	BOOL isdir;
 	while (file = [direnum nextObject]) {
 		NSString *filepath = [docdir stringByAppendingPathComponent:file];
-		NSLog(@"file %@\n", file);
 		if ([fileman fileExistsAtPath:filepath isDirectory:&isdir] && !isdir) {
 			[outfiles addObject:file];
 		}
@@ -93,7 +92,7 @@ static void showAlert(NSString *msg, NSString *filename)
 
 		strcpy(filename, [NSHomeDirectory() UTF8String]);
 		strcat(filename, "/Documents/");
-		strcat(filename, [[files objectAtIndex: row - 1] UTF8String]);
+		strcat(filename, [[files objectAtIndex: row] UTF8String]);
 
 		printf("delete document '%s'\n", filename);
 
@@ -106,7 +105,7 @@ static void showAlert(NSString *msg, NSString *filename)
 - (void) onTapDelete: (UIControl*)sender
 {
 	int row = [sender tag];
-	NSString *title = [NSString stringWithFormat: @"Delete %@?", [files objectAtIndex: row - 1]];
+	NSString *title = [NSString stringWithFormat: @"Delete %@?", [files objectAtIndex:row]];
 	UIActionSheet *sheet = [[UIActionSheet alloc]
 							initWithTitle: title
 							delegate: self
@@ -151,7 +150,7 @@ static NSString *alteredfilename(NSString *name, int i)
 
 	NSString *nam = [name stringByDeletingPathExtension];
 	NSString *e = [name pathExtension];
-	return [[[NSString alloc] initWithFormat:@"%@(%d)%@", nam, i, e] autorelease];
+	return [[[NSString alloc] initWithFormat:@"%@(%d).%@", nam, i, e] autorelease];
 }
 
 static NSString *moveOutOfInbox(NSString *docpath)

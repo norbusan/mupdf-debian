@@ -291,7 +291,7 @@ fz_expand_tiff_colormap(struct tiff *tiff)
 	if (tiff->samplesperpixel != 1 && tiff->samplesperpixel != 2)
 		fz_throw(tiff->ctx, FZ_ERROR_GENERIC, "invalid number of samples for RGBPal");
 
-	if (tiff->bitspersample != 4 && tiff->bitspersample != 8)
+	if (tiff->bitspersample != 1 && tiff->bitspersample != 4 && tiff->bitspersample != 8)
 		fz_throw(tiff->ctx, FZ_ERROR_GENERIC, "invalid number of bits for RGBPal");
 
 	if (tiff->colormaplen < (unsigned)maxval * 3)
@@ -904,8 +904,8 @@ fz_load_tiff_info_subimage(fz_context *ctx, unsigned char *buf, int len, int *wp
 
 		*wp = tiff.imagewidth;
 		*hp = tiff.imagelength;
-		*xresp = tiff.xresolution;
-		*yresp = tiff.yresolution;
+		*xresp = (tiff.xresolution ? tiff.xresolution : 96);
+		*yresp = (tiff.yresolution ? tiff.yresolution : 96);
 		*cspacep = tiff.colorspace;
 	}
 	fz_always(ctx)

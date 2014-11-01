@@ -15,6 +15,8 @@
 #include "../source/fitz/buffer.c"
 #include "../source/fitz/stream-open.c"
 #include "../source/fitz/stream-read.c"
+#include "../source/fitz/strtod.c"
+#include "../source/fitz/ftoa.c"
 #include "../source/fitz/printf.c"
 
 #include "../source/pdf/pdf-lex.c"
@@ -107,7 +109,7 @@ main(int argc, char **argv)
 			{
 				if (k % 4 == 0)
 					fprintf(fo, "\n");
-				fprintf(fo, "{%u,%u,%u},", cmap->ranges[k].low, cmap->ranges[k].high, cmap->ranges[k].out);
+				fprintf(fo, "{%uu,%uu,%uu},", cmap->ranges[k].low, cmap->ranges[k].high, cmap->ranges[k].out);
 			}
 			fprintf(fo, "\n};\n\n");
 		}
@@ -119,7 +121,7 @@ main(int argc, char **argv)
 			{
 				if (k % 4 == 0)
 					fprintf(fo, "\n");
-				fprintf(fo, "{%u,%u,%u},", cmap->xranges[k].low, cmap->xranges[k].high, cmap->xranges[k].out);
+				fprintf(fo, "{%uu,%uu,%uu},", cmap->xranges[k].low, cmap->xranges[k].high, cmap->xranges[k].out);
 			}
 			fprintf(fo, "\n};\n\n");
 		}
@@ -129,9 +131,9 @@ main(int argc, char **argv)
 			fprintf(fo, "static const pdf_mrange cmap_%s_mranges[] = {", name);
 			for (k = 0; k < cmap->mlen; k++)
 			{
-				fprintf(fo, "\n{%u,%u,{", cmap->mranges[k].low, cmap->mranges[k].len);
+				fprintf(fo, "\n{%uu,%uu,{", cmap->mranges[k].low, cmap->mranges[k].len);
 				for (m = 0; m < PDF_MRANGE_CAP; ++m)
-					fprintf(fo, "%u,", cmap->mranges[k].out[m]);
+					fprintf(fo, "%uu,", cmap->mranges[k].out[m]);
 				fprintf(fo, "}},");
 			}
 			fprintf(fo, "\n};\n\n");
@@ -149,7 +151,7 @@ main(int argc, char **argv)
 		}
 		for (k = 0; k < cmap->codespace_len; k++)
 		{
-			fprintf(fo, "{%u,%u,%u},", cmap->codespace[k].n, cmap->codespace[k].low, cmap->codespace[k].high);
+			fprintf(fo, "{%u,%uu,%uu},", cmap->codespace[k].n, cmap->codespace[k].low, cmap->codespace[k].high);
 		}
 		fprintf(fo, " },\n");
 

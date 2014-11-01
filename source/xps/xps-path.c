@@ -12,7 +12,7 @@ xps_parse_float_array(char *s, int num, float *x)
 	{
 		while (*s == 0x0d || *s == '\t' || *s == ' ' || *s == 0x0a)
 			s++;
-		x[k] = (float)strtod(s, &s);
+		x[k] = (float)fz_strtod(s, &s);
 		while (*s == 0x0d || *s == '\t' || *s == ' ' || *s == 0x0a)
 			s++;
 		if (*s == ',')
@@ -668,13 +668,13 @@ xps_parse_path_figure(fz_context *doc, fz_path *path, fz_xml *root, int stroking
 
 	for (node = fz_xml_down(root); node; node = fz_xml_next(node))
 	{
-		if (!strcmp(fz_xml_tag(node), "ArcSegment"))
+		if (fz_xml_is_tag(node, "ArcSegment"))
 			xps_parse_arc_segment(doc, path, node, stroking, &skipped_stroke);
-		if (!strcmp(fz_xml_tag(node), "PolyBezierSegment"))
+		if (fz_xml_is_tag(node, "PolyBezierSegment"))
 			xps_parse_poly_bezier_segment(doc, path, node, stroking, &skipped_stroke);
-		if (!strcmp(fz_xml_tag(node), "PolyLineSegment"))
+		if (fz_xml_is_tag(node, "PolyLineSegment"))
 			xps_parse_poly_line_segment(doc, path, node, stroking, &skipped_stroke);
-		if (!strcmp(fz_xml_tag(node), "PolyQuadraticBezierSegment"))
+		if (fz_xml_is_tag(node, "PolyQuadraticBezierSegment"))
 			xps_parse_poly_quadratic_bezier_segment(doc, path, node, stroking, &skipped_stroke);
 	}
 
@@ -708,7 +708,7 @@ xps_parse_path_geometry(xps_document *doc, xps_resource *dict, fz_xml *root, int
 
 	for (node = fz_xml_down(root); node; node = fz_xml_next(node))
 	{
-		if (!strcmp(fz_xml_tag(node), "PathGeometry.Transform"))
+		if (fz_xml_is_tag(node, "PathGeometry.Transform"))
 			transform_tag = fz_xml_down(node);
 	}
 
@@ -739,7 +739,7 @@ xps_parse_path_geometry(xps_document *doc, xps_resource *dict, fz_xml *root, int
 
 	for (node = fz_xml_down(root); node; node = fz_xml_next(node))
 	{
-		if (!strcmp(fz_xml_tag(node), "PathFigure"))
+		if (fz_xml_is_tag(node, "PathFigure"))
 			xps_parse_path_figure(doc->ctx, path, node, stroking);
 	}
 
@@ -855,17 +855,17 @@ xps_parse_path(xps_document *doc, const fz_matrix *ctm, char *base_uri, xps_reso
 
 	for (node = fz_xml_down(root); node; node = fz_xml_next(node))
 	{
-		if (!strcmp(fz_xml_tag(node), "Path.RenderTransform"))
+		if (fz_xml_is_tag(node, "Path.RenderTransform"))
 			transform_tag = fz_xml_down(node);
-		if (!strcmp(fz_xml_tag(node), "Path.OpacityMask"))
+		if (fz_xml_is_tag(node, "Path.OpacityMask"))
 			opacity_mask_tag = fz_xml_down(node);
-		if (!strcmp(fz_xml_tag(node), "Path.Clip"))
+		if (fz_xml_is_tag(node, "Path.Clip"))
 			clip_tag = fz_xml_down(node);
-		if (!strcmp(fz_xml_tag(node), "Path.Fill"))
+		if (fz_xml_is_tag(node, "Path.Fill"))
 			fill_tag = fz_xml_down(node);
-		if (!strcmp(fz_xml_tag(node), "Path.Stroke"))
+		if (fz_xml_is_tag(node, "Path.Stroke"))
 			stroke_tag = fz_xml_down(node);
-		if (!strcmp(fz_xml_tag(node), "Path.Data"))
+		if (fz_xml_is_tag(node, "Path.Data"))
 			data_tag = fz_xml_down(node);
 	}
 
@@ -956,6 +956,16 @@ xps_parse_path(xps_document *doc, const fz_matrix *ctm, char *base_uri, xps_reso
 					stroke->dash_list[stroke->dash_len++] = fz_atof(s) * stroke->linewidth;
 				while (*s && *s != ' ')
 					s++;
+			}
+			if (dash_len > 0)
+			{
+				/* fz_stroke_path doesn't draw non-empty paths with phase length zero */
+				float phase_len = 0;
+				int i;
+				for (i = 0; i < dash_len; i++)
+					phase_len += stroke->dash_list[i];
+				if (phase_len == 0)
+					dash_len = 0;
 			}
 			stroke->dash_len = dash_len;
 		}

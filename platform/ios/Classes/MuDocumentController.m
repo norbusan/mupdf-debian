@@ -1,6 +1,5 @@
 #include "common.h"
 
-#import <TapImage.h>
 #import "MuPageViewNormal.h"
 #import "MuPageViewReflow.h"
 #import "MuDocumentController.h"
@@ -124,6 +123,9 @@ static void saveDoc(char *current_path, fz_document *doc)
 }
 
 @implementation MuDocumentController
+{
+	BOOL _isRotating;
+}
 
 - (id) initWithFilename: (NSString*)filename path:(char *)cstr document: (MuDocRef *)aDoc
 {
@@ -157,7 +159,7 @@ static void saveDoc(char *current_path, fz_document *doc)
 	return self;
 }
 
-- (UIBarButtonItem *) resourceBasedButton:(NSString *)resource withAction:(SEL)selector
+- (UIBarButtonItem *) newResourceBasedButton:(NSString *)resource withAction:(SEL)selector
 {
 	if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad)
 	{
@@ -165,10 +167,15 @@ static void saveDoc(char *current_path, fz_document *doc)
 	}
 	else
 	{
-		UIView *iv = [[TapImage alloc] initWithResource:resource target:self action:selector];
-		UIBarButtonItem *ib = [[UIBarButtonItem alloc] initWithCustomView:iv];
-		[iv release];
-		return ib;
+		UIView *buttonView;
+		BOOL iOS7Style = ([[UIDevice currentDevice].systemVersion floatValue] >= 7.0f);
+		UIButton *button = [UIButton buttonWithType:iOS7Style ? UIButtonTypeSystem : UIButtonTypeCustom];
+		[button setImage:[UIImage imageNamed:resource] forState:UIControlStateNormal];
+		[button addTarget:self action:selector forControlEvents:UIControlEventTouchUpInside];
+		[button sizeToFit];
+		buttonView = button;
+
+		return [[UIBarButtonItem alloc] initWithCustomView:buttonView];
 	}
 }
 
@@ -196,6 +203,7 @@ static void saveDoc(char *current_path, fz_document *doc)
 	UIView *view = [[UIView alloc] initWithFrame: CGRectZero];
 	[view setAutoresizingMask: UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight];
 	[view setAutoresizesSubviews: YES];
+	view.backgroundColor = [UIColor grayColor];
 
 	canvas = [[UIScrollView alloc] initWithFrame: CGRectMake(0,0,GAP,0)];
 	[canvas setAutoresizingMask: UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight];
@@ -246,26 +254,26 @@ static void saveDoc(char *current_path, fz_document *doc)
 	// Set up the buttons on the navigation and search bar
 
 	if (outline) {
-		outlineButton = [self resourceBasedButton:@"ic_list" withAction:@selector(onShowOutline:)];
+		outlineButton = [self newResourceBasedButton:@"ic_list" withAction:@selector(onShowOutline:)];
 	}
-	linkButton = [self resourceBasedButton:@"ic_link" withAction:@selector(onToggleLinks:)];
-	cancelButton = [self resourceBasedButton:@"ic_cancel" withAction:@selector(onCancel:)];
-	searchButton = [self resourceBasedButton:@"ic_magnifying_glass" withAction:@selector(onShowSearch:)];
-	prevButton = [self resourceBasedButton:@"ic_arrow_left" withAction:@selector(onSearchPrev:)];
-	nextButton = [self resourceBasedButton:@"ic_arrow_right" withAction:@selector(onSearchNext:)];
-	reflowButton = [self resourceBasedButton:@"ic_reflow" withAction:@selector(onToggleReflow:)];
-	moreButton = [self resourceBasedButton:@"ic_more" withAction:@selector(onMore:)];
-	annotButton = [self resourceBasedButton:@"ic_annotation" withAction:@selector(onAnnot:)];
-	shareButton = [self resourceBasedButton:@"ic_share" withAction:@selector(onShare:)];
-	printButton = [self resourceBasedButton:@"ic_print" withAction:@selector(onPrint:)];
-	highlightButton = [self resourceBasedButton:@"ic_highlight" withAction:@selector(onHighlight:)];
-	underlineButton = [self resourceBasedButton:@"ic_underline" withAction:@selector(onUnderline:)];
-	strikeoutButton = [self resourceBasedButton:@"ic_strike" withAction:@selector(onStrikeout:)];
-	inkButton = [self resourceBasedButton:@"ic_pen" withAction:@selector(onInk:)];
-	tickButton = [self resourceBasedButton:@"ic_check" withAction:@selector(onTick:)];
-	deleteButton = [self resourceBasedButton:@"ic_trash" withAction:@selector(onDelete:)];
+	linkButton = [self newResourceBasedButton:@"ic_link" withAction:@selector(onToggleLinks:)];
+	cancelButton = [self newResourceBasedButton:@"ic_cancel" withAction:@selector(onCancel:)];
+	searchButton = [self newResourceBasedButton:@"ic_magnifying_glass" withAction:@selector(onShowSearch:)];
+	prevButton = [self newResourceBasedButton:@"ic_arrow_left" withAction:@selector(onSearchPrev:)];
+	nextButton = [self newResourceBasedButton:@"ic_arrow_right" withAction:@selector(onSearchNext:)];
+	reflowButton = [self newResourceBasedButton:@"ic_reflow" withAction:@selector(onToggleReflow:)];
+	moreButton = [self newResourceBasedButton:@"ic_more" withAction:@selector(onMore:)];
+	annotButton = [self newResourceBasedButton:@"ic_annotation" withAction:@selector(onAnnot:)];
+	shareButton = [self newResourceBasedButton:@"ic_share" withAction:@selector(onShare:)];
+	printButton = [self newResourceBasedButton:@"ic_print" withAction:@selector(onPrint:)];
+	highlightButton = [self newResourceBasedButton:@"ic_highlight" withAction:@selector(onHighlight:)];
+	underlineButton = [self newResourceBasedButton:@"ic_underline" withAction:@selector(onUnderline:)];
+	strikeoutButton = [self newResourceBasedButton:@"ic_strike" withAction:@selector(onStrikeout:)];
+	inkButton = [self newResourceBasedButton:@"ic_pen" withAction:@selector(onInk:)];
+	tickButton = [self newResourceBasedButton:@"ic_check" withAction:@selector(onTick:)];
+	deleteButton = [self newResourceBasedButton:@"ic_trash" withAction:@selector(onDelete:)];
 	searchBar = [[UISearchBar alloc] initWithFrame: CGRectMake(0,0,50,32)];
-	backButton = [self resourceBasedButton:@"ic_arrow_left" withAction:@selector(onBack:)];
+	backButton = [self newResourceBasedButton:@"ic_arrow_left" withAction:@selector(onBack:)];
 	[searchBar setPlaceholder: @"Search"];
 	[searchBar setDelegate: self];
 
@@ -453,6 +461,12 @@ static void saveDoc(char *current_path, fz_document *doc)
 - (void) onToggleReflow: (id)sender
 {
 	reflowMode = !reflowMode;
+
+	[annotButton setEnabled:!reflowMode];
+	[searchButton setEnabled:!reflowMode];
+	[linkButton setEnabled:!reflowMode];
+	[moreButton setEnabled:!reflowMode];
+
 	[[canvas subviews] makeObjectsPerformSelector:@selector(removeFromSuperview)];
 	[self scrollViewDidScroll:canvas];
 }
@@ -530,6 +544,7 @@ static void saveDoc(char *current_path, fz_document *doc)
 	NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:filePath]];
 	UIActivityViewController *cont = [[UIActivityViewController alloc] initWithActivityItems:[NSArray arrayWithObject:url] applicationActivities:nil];
 	[self presentViewController:cont animated:YES completion:nil];
+	[cont release];
 }
 
 - (void) onShare: (id)sender
@@ -963,6 +978,16 @@ static void saveDoc(char *current_path, fz_document *doc)
 
 - (void) scrollViewDidScroll: (UIScrollView*)scrollview
 {
+	// scrollViewDidScroll seems to get called part way through a screen rotation.
+	// (This is possibly a UIScrollView bug - see
+	// http://stackoverflow.com/questions/4123991/uiscrollview-disable-scrolling-while-rotating-on-iphone-ipad/8141423#8141423 ).
+	// This ends up corrupting the current page number, because the calculation
+	// 'current = x / width' is using the new value of 'width' before the
+	// pages have been resized/repositioned. To avoid this problem, we filter out
+	// calls to scrollViewDidScroll during rotation.
+	if (_isRotating)
+		return;
+
 	if (width == 0)
 		return; // not visible yet
 
@@ -1086,8 +1111,18 @@ static void saveDoc(char *current_path, fz_document *doc)
 	return YES;
 }
 
+- (void) willRotateToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation duration:(NSTimeInterval)duration
+{
+	_isRotating = YES;
+}
+
 - (void) didRotateFromInterfaceOrientation: (UIInterfaceOrientation)o
 {
+	_isRotating = NO;
+
+	// We need to set these here, because during the animation we may use a wider
+	// size (the maximum of the landscape/portrait widths), to avoid clipping during
+	// the rotation.
 	[canvas setContentSize: CGSizeMake(fz_count_pages(doc) * width, height)];
 	[canvas setContentOffset: CGPointMake(current * width, 0)];
 }
