@@ -1,3 +1,11 @@
+mupdf (1.6-1) unstable; urgency=medium
+
+  * New upstream release. (Closes: #767391)
+  * Refresh patches.
+  * debian/copyright: New files source/fitz/{ftoa.c,strtod.c}
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sat, 01 Nov 2014 19:28:58 +0800
+
 mupdf (1.5-1) unstable; urgency=medium
 
   * New upstream release. (Closes: #761960)
