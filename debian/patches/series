@@ -1,7 +1,6 @@
 0001-fix_libjpeg_header_mismatch.patch
 0002-mupdf_manpage.patch
 0003-Fix-build-with-libopenjp2.patch
-0004-Fix-Werror-format-security-error.patch
-0005-Fix-unsafe-conversion-from-float-to-fz_linecap.patch
-0006-Fix-FTBFS-with-clang.patch
-0007-Add-mudraw-F-command-switch-to-man-page.patch
+0004-Fix-unsafe-conversion-from-float-to-fz_linecap.patch
+0005-Fix-FTBFS-with-clang.patch
+0006-Add-mudraw-F-command-switch-to-man-page.patch

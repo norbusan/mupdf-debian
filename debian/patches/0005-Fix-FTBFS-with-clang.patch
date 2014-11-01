@@ -9,7 +9,7 @@ Subject: Fix FTBFS with clang
  2 files changed, 5 insertions(+), 5 deletions(-)
 
 diff --git a/include/mupdf/fitz/output.h b/include/mupdf/fitz/output.h
-index 9c0c9dd..fa692db 100644
+index 5bbf3d9..1a18bb2 100644
 --- a/include/mupdf/fitz/output.h
 +++ b/include/mupdf/fitz/output.h
 @@ -15,7 +15,7 @@ struct fz_output_s
