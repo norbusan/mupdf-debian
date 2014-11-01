@@ -4,6 +4,13 @@
 typedef struct js_Property js_Property;
 typedef struct js_Iterator js_Iterator;
 
+/* Hint to ToPrimitive() */
+enum {
+	JS_HNONE,
+	JS_HNUMBER,
+	JS_HSTRING
+};
+
 enum js_Type {
 	JS_TUNDEFINED,
 	JS_TNULL,
@@ -123,7 +130,7 @@ const char *jsV_tostring(js_State *J, const js_Value *v);
 js_Object *jsV_toobject(js_State *J, const js_Value *v);
 js_Value jsV_toprimitive(js_State *J, const js_Value *v, int preferred);
 
-double js_strtod(const char *s, char **ep);
+double js_stringtofloat(const char *s, char **ep);
 double jsV_numbertointeger(double n);
 int jsV_numbertoint32(double n);
 unsigned int jsV_numbertouint32(double n);
@@ -131,10 +138,6 @@ short jsV_numbertoint16(double n);
 unsigned short jsV_numbertouint16(double n);
 const char *jsV_numbertostring(js_State *J, double number);
 double jsV_stringtonumber(js_State *J, const char *string);
-
-/* jsdtoa.c */
-void jsV_fmtexp(char *p, int e);
-void jsV_dtoa(double f, char *digits, int *exp, int *neg, int *ndigits);
 
 /* jsproperty.c */
 js_Object *jsV_newobject(js_State *J, enum js_Class type, js_Object *prototype);

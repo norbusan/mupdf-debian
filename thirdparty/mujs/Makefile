@@ -13,7 +13,7 @@ CFLAGS := -std=c99 -pedantic -Wall -Wextra -Wno-unused-parameter -Wunreachable-c
 ifeq "$(build)" "debug"
 CFLAGS += -g
 else
-CFLAGS += -O3
+CFLAGS += -O2
 endif
 
 default: build build/mujs build/mujsone
@@ -57,6 +57,13 @@ install: release
 	install -t $(DESTDIR)$(incdir) mujs.h
 	install -t $(DESTDIR)$(libdir) build/libmujs.a
 	install -t $(DESTDIR)$(bindir) build/mujs
+
+VERSION = $(shell git describe --tags --always)
+
+tarball:
+	git archive --format=zip --prefix=mujs-$(VERSION)/ HEAD > mujs-$(VERSION).zip
+	git archive --format=tar --prefix=mujs-$(VERSION)/ HEAD | gzip > mujs-$(VERSION).tar.gz
+	git archive --format=tar --prefix=mujs-$(VERSION)/ HEAD | xz > mujs-$(VERSION).tar.xz
 
 tags: $(SRCS) main.c $(HDRS)
 	ctags $^

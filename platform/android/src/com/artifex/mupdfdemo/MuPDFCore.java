@@ -21,11 +21,14 @@ public class MuPDFCore
 	private long globals;
 	private byte fileBuffer[];
 	private String file_format;
+	private boolean isUnencryptedPDF;
+	private final boolean wasOpenedFromBuffer;
 
 	/* The native functions */
 	private native long openFile(String filename);
-	private native long openBuffer();
+	private native long openBuffer(String magic);
 	private native String fileFormatInternal();
+	private native boolean isUnencryptedPDFInternal();
 	private native int countPagesInternal();
 	private native void gotoPageInternal(int localActionPageNum);
 	private native float getPageWidth();
@@ -33,12 +36,14 @@ public class MuPDFCore
 	private native void drawPage(Bitmap bitmap,
 			int pageW, int pageH,
 			int patchX, int patchY,
-			int patchW, int patchH);
+			int patchW, int patchH,
+			long cookiePtr);
 	private native void updatePageInternal(Bitmap bitmap,
 			int page,
 			int pageW, int pageH,
 			int patchX, int patchY,
-			int patchW, int patchH);
+			int patchW, int patchH,
+			long cookiePtr);
 	private native RectF[] searchPage(String text);
 	private native TextChar[][][][] text();
 	private native byte[] textAsHtml();
@@ -69,8 +74,35 @@ public class MuPDFCore
 	private native void destroying();
 	private native boolean hasChangesInternal();
 	private native void saveInternal();
+	private native long createCookie();
+	private native void destroyCookie(long cookie);
+	private native void abortCookie(long cookie);
 
 	public native boolean javascriptSupported();
+
+	public class Cookie
+	{
+		private final long cookiePtr;
+
+		public Cookie()
+		{
+			cookiePtr = createCookie();
+			if (cookiePtr == 0)
+				throw new OutOfMemoryError();
+		}
+
+		public void abort()
+		{
+			abortCookie(cookiePtr);
+		}
+
+		public void destroy()
+		{
+			// We could do this in finalize, but there's no guarantee that
+			// a finalize will occur before the muPDF context occurs.
+			destroyCookie(cookiePtr);
+		}
+	}
 
 	public MuPDFCore(Context context, String filename) throws Exception
 	{
@@ -80,17 +112,20 @@ public class MuPDFCore
 			throw new Exception(String.format(context.getString(R.string.cannot_open_file_Path), filename));
 		}
 		file_format = fileFormatInternal();
+		isUnencryptedPDF = isUnencryptedPDFInternal();
+		wasOpenedFromBuffer = false;
 	}
 
-	public MuPDFCore(Context context, byte buffer[]) throws Exception
-	{
+	public MuPDFCore(Context context, byte buffer[], String magic) throws Exception {
 		fileBuffer = buffer;
-		globals = openBuffer();
+		globals = openBuffer(magic != null ? magic : "");
 		if (globals == 0)
 		{
 			throw new Exception(context.getString(R.string.cannot_open_buffer));
 		}
 		file_format = fileFormatInternal();
+		isUnencryptedPDF = isUnencryptedPDFInternal();
+		wasOpenedFromBuffer = true;
 	}
 
 	public  int countPages()
@@ -104,6 +139,16 @@ public class MuPDFCore
 	public String fileFormat()
 	{
 		return file_format;
+	}
+
+	public boolean isUnencryptedPDF()
+	{
+		return isUnencryptedPDF;
+	}
+
+	public boolean wasOpenedFromBuffer()
+	{
+		return wasOpenedFromBuffer;
 	}
 
 	private synchronized int countPagesSynchronized() {
@@ -152,16 +197,18 @@ public class MuPDFCore
 	public synchronized void drawPage(Bitmap bm, int page,
 			int pageW, int pageH,
 			int patchX, int patchY,
-			int patchW, int patchH) {
+			int patchW, int patchH,
+			MuPDFCore.Cookie cookie) {
 		gotoPage(page);
-		drawPage(bm, pageW, pageH, patchX, patchY, patchW, patchH);
+		drawPage(bm, pageW, pageH, patchX, patchY, patchW, patchH, cookie.cookiePtr);
 	}
 
 	public synchronized void updatePage(Bitmap bm, int page,
 			int pageW, int pageH,
 			int patchX, int patchY,
-			int patchW, int patchH) {
-		updatePageInternal(bm, page, pageW, pageH, patchX, patchY, patchW, patchH);
+			int patchW, int patchH,
+			MuPDFCore.Cookie cookie) {
+		updatePageInternal(bm, page, pageW, pageH, patchX, patchY, patchW, patchH, cookie.cookiePtr);
 	}
 
 	public synchronized PassClickResult passClickEvent(int page, float x, float y) {

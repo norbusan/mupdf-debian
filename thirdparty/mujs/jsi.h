@@ -20,6 +20,7 @@
 #define inline __inline
 #define snprintf _snprintf
 #define vsnprintf _vsnprintf
+#if _MSC_VER < 1800
 #define round(x) floor((x) < 0 ? (x) - 0.5 : (x) + 0.5)
 #define isnan(x) _isnan(x)
 #define isinf(x) (!_finite(x))
@@ -27,6 +28,7 @@
 static __inline int signbit(double x) {union{double d;__int64 i;}u;u.d=x;return u.i>>63;}
 #define INFINITY (DBL_MAX+DBL_MAX)
 #define NAN (INFINITY-INFINITY)
+#endif /* old MSVC */
 #endif
 
 #define nelem(a) (sizeof (a) / sizeof (a)[0])
@@ -47,6 +49,7 @@ typedef struct js_Jumpbuf js_Jumpbuf;
 /* Limits */
 
 #define JS_STACKSIZE 256	/* value stack size */
+#define JS_ENVLIMIT 64		/* environment stack size */
 #define JS_TRYLIMIT 64		/* exception stack size */
 #define JS_GCLIMIT 10000	/* run gc cycle every N allocations */
 
@@ -55,6 +58,12 @@ typedef struct js_Jumpbuf js_Jumpbuf;
 const char *js_intern(js_State *J, const char *s);
 void jsS_dumpstrings(js_State *J);
 void jsS_freestrings(js_State *J);
+
+/* Portable strtod and printf float formatting */
+
+void js_fmtexp(char *p, int e);
+void js_dtoa(double f, char *digits, int *exp, int *neg, int *ndigits);
+double js_strtod(const char *as, char **aas);
 
 /* Private stack functions */
 
@@ -84,6 +93,7 @@ struct js_Jumpbuf
 {
 	jmp_buf buf;
 	js_Environment *E;
+	int envtop;
 	int top, bot;
 	short *pc;
 };
@@ -164,6 +174,10 @@ struct js_State
 	js_Environment *gcenv;
 	js_Function *gcfun;
 	js_Object *gcobj;
+
+	/* environments on the call stack but currently not in scope */
+	int envtop;
+	js_Environment *envstack[JS_ENVLIMIT];
 
 	/* exception stack */
 	int trylen;

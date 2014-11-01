@@ -7,9 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		968E1E411779A54F0050CEA3 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 968E1E401779A54F0050CEA3 /* UIKit.framework */; };
-		968E1E431779A54F0050CEA3 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 968E1E421779A54F0050CEA3 /* Foundation.framework */; };
-		968E1E451779A54F0050CEA3 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 968E1E441779A54F0050CEA3 /* CoreGraphics.framework */; };
 		968E1E531779A54F0050CEA3 /* Default.png in Resources */ = {isa = PBXBuildFile; fileRef = 968E1E521779A54F0050CEA3 /* Default.png */; };
 		968E1E551779A54F0050CEA3 /* Default@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 968E1E541779A54F0050CEA3 /* Default@2x.png */; };
 		968E1E571779A54F0050CEA3 /* Default-568h@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 968E1E561779A54F0050CEA3 /* Default-568h@2x.png */; };
@@ -63,7 +60,6 @@
 		DAD72802183E53F0005C14FA /* MuAnnotSelectView.m in Sources */ = {isa = PBXBuildFile; fileRef = DAD72801183E53F0005C14FA /* MuAnnotSelectView.m */; };
 		DAD72804183E6F33005C14FA /* ic_trash.png in Resources */ = {isa = PBXBuildFile; fileRef = DAD72803183E6F33005C14FA /* ic_trash.png */; };
 		DADF824D1905242800855662 /* ic_share.png in Resources */ = {isa = PBXBuildFile; fileRef = DADF824C1905241900855662 /* ic_share.png */; };
-		DAF81D5B18800D1800B0F028 /* TapImage.m in Sources */ = {isa = PBXBuildFile; fileRef = DAF81D5A18800D1800B0F028 /* TapImage.m */; };
 		DAFDB695191A32ED003956EF /* Icon-76.png in Resources */ = {isa = PBXBuildFile; fileRef = DAFDB692191A32ED003956EF /* Icon-76.png */; };
 		DAFDB696191A32ED003956EF /* Icon-76@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = DAFDB693191A32ED003956EF /* Icon-76@2x.png */; };
 		DAFDB697191A32ED003956EF /* Icon-120.png in Resources */ = {isa = PBXBuildFile; fileRef = DAFDB694191A32ED003956EF /* Icon-120.png */; };
@@ -83,9 +79,6 @@
 
 /* Begin PBXFileReference section */
 		968E1E3D1779A54F0050CEA3 /* MuPDF.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MuPDF.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		968E1E401779A54F0050CEA3 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
-		968E1E421779A54F0050CEA3 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
-		968E1E441779A54F0050CEA3 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		968E1E481779A54F0050CEA3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		968E1E521779A54F0050CEA3 /* Default.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Default.png; sourceTree = "<group>"; };
 		968E1E541779A54F0050CEA3 /* Default@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Default@2x.png"; sourceTree = "<group>"; };
@@ -122,7 +115,6 @@
 		DA1C68A917E864CB0061F586 /* MuAppDelegate.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = MuAppDelegate.m; path = Classes/MuAppDelegate.m; sourceTree = "<group>"; };
 		DA1C68C217E8968C0061F586 /* common.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = common.h; sourceTree = "<group>"; };
 		DA1C68C317E8969C0061F586 /* common.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = common.m; sourceTree = "<group>"; };
-		DA300CA31847A64C004F92BB /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS7.0.sdk/System/Library/Frameworks/JavaScriptCore.framework; sourceTree = DEVELOPER_DIR; };
 		DA32FC7218E33CC7001D7902 /* ic_print.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = ic_print.png; path = "../android/res/drawable-ldpi/ic_print.png"; sourceTree = "<group>"; };
 		DA442E2C183B796F008EF49B /* ic_pen.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = ic_pen.png; path = "../android/res/drawable-ldpi/ic_pen.png"; sourceTree = "<group>"; };
 		DA442E2E183B9F13008EF49B /* MuInkView.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = MuInkView.h; path = Classes/MuInkView.h; sourceTree = "<group>"; };
@@ -161,8 +153,6 @@
 		DAD72803183E6F33005C14FA /* ic_trash.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = ic_trash.png; path = "../android/res/drawable-ldpi/ic_trash.png"; sourceTree = "<group>"; };
 		DADD8D6917EB24C000C49E0B /* MuPageView.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = MuPageView.h; path = Classes/MuPageView.h; sourceTree = "<group>"; };
 		DADF824C1905241900855662 /* ic_share.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = ic_share.png; path = "../android/res/drawable-ldpi/ic_share.png"; sourceTree = "<group>"; };
-		DAF81D5918800D1800B0F028 /* TapImage.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = TapImage.h; path = Classes/TapImage.h; sourceTree = "<group>"; };
-		DAF81D5A18800D1800B0F028 /* TapImage.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = TapImage.m; path = Classes/TapImage.m; sourceTree = "<group>"; };
 		DAFDB692191A32ED003956EF /* Icon-76.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon-76.png"; sourceTree = "<group>"; };
 		DAFDB693191A32ED003956EF /* Icon-76@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon-76@2x.png"; sourceTree = "<group>"; };
 		DAFDB694191A32ED003956EF /* Icon-120.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon-120.png"; sourceTree = "<group>"; };
@@ -176,9 +166,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				968E1E411779A54F0050CEA3 /* UIKit.framework in Frameworks */,
-				968E1E431779A54F0050CEA3 /* Foundation.framework in Frameworks */,
-				968E1E451779A54F0050CEA3 /* CoreGraphics.framework in Frameworks */,
 				96C8ED1C1779A9AF00A30AF4 /* libmupdf.a in Frameworks */,
 				96C8ED1B1779A9AF00A30AF4 /* libmujs.a in Frameworks */,
 				96C8ED181779A9AE00A30AF4 /* libfreetype.a in Frameworks */,
@@ -204,6 +191,7 @@
 				968E1E3E1779A54F0050CEA3 /* Products */,
 			);
 			sourceTree = "<group>";
+			usesTabs = 1;
 		};
 		968E1E3E1779A54F0050CEA3 /* Products */ = {
 			isa = PBXGroup;
@@ -223,10 +211,6 @@
 		968E1E3F1779A54F0050CEA3 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				DA300CA31847A64C004F92BB /* JavaScriptCore.framework */,
-				968E1E401779A54F0050CEA3 /* UIKit.framework */,
-				968E1E421779A54F0050CEA3 /* Foundation.framework */,
-				968E1E441779A54F0050CEA3 /* CoreGraphics.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -308,8 +292,6 @@
 				DAFF9978187C12430081C756 /* MuChoiceFieldController.h */,
 				DAFF9979187C12430081C756 /* MuChoiceFieldController.m */,
 				DAFF997A187C12430081C756 /* MuChoiceFieldController.xib */,
-				DAF81D5918800D1800B0F028 /* TapImage.h */,
-				DAF81D5A18800D1800B0F028 /* TapImage.m */,
 				DA012CA218803D1C00E47712 /* MuUpdater.h */,
 				DA0354E918FFF48400EE31BA /* MuPrintPageRenderer.h */,
 				DA0354EA18FFF48400EE31BA /* MuPrintPageRenderer.m */,
@@ -345,6 +327,7 @@
 				968E1E391779A54F0050CEA3 /* Sources */,
 				968E1E3A1779A54F0050CEA3 /* Frameworks */,
 				968E1E3B1779A54F0050CEA3 /* Resources */,
+				C9E0CC68196EE93F006EB94D /* ShellScript */,
 			);
 			buildRules = (
 			);
@@ -367,7 +350,7 @@
 				ORGANIZATIONNAME = "Artifex Software, Inc";
 				TargetAttributes = {
 					968E1E3C1779A54F0050CEA3 = {
-						DevelopmentTeam = M2AA22CUFZ;
+						DevelopmentTeam = 7M9658FA5G;
 					};
 				};
 			};
@@ -452,6 +435,19 @@
 			shellPath = /bin/sh;
 			shellScript = "bash build_libs.sh";
 		};
+		C9E0CC68196EE93F006EB94D /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"$COMMAND_LINE_POSTBUILD_SCRIPT\" != \"\" ] ;\nthen\n    exec bash $COMMAND_LINE_POSTBUILD_SCRIPT\nfi\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -461,7 +457,6 @@
 			files = (
 				DAA6E56F17F03F96002B1E4E /* MuPageViewReflow.m in Sources */,
 				DA1C68AB17E86A500061F586 /* MuLibraryController.m in Sources */,
-				DAF81D5B18800D1800B0F028 /* TapImage.m in Sources */,
 				DA1C68AD17E86A500061F586 /* MuOutlineController.m in Sources */,
 				DA1C68AF17E86A500061F586 /* MuHitView.m in Sources */,
 				DA1C68B117E86A500061F586 /* MuPageViewNormal.m in Sources */,
@@ -512,15 +507,31 @@
 		968E1E581779A54F0050CEA3 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_MODULES_AUTOLINK = YES;
+				COMMAND_LINE_DEFINES = "";
+				COMMAND_LINE_FRAMEWORK_SEARCH_PATHS = "";
+				COMMAND_LINE_LINKER_FLAGS = "";
+				FRAMEWORK_SEARCH_PATHS = "$(COMMAND_LINE_FRAMEWORKS_SEARCH_PATH)";
+				GCC_PREPROCESSOR_DEFINITIONS = "$(COMMAND_LINE_DEFINES)";
 				IPHONEOS_DEPLOYMENT_TARGET = 6.1;
 				ONLY_ACTIVE_ARCH = YES;
+				OTHER_LDFLAGS = "$(COMMAND_LINE_LINKER_FLAGS)";
 			};
 			name = Debug;
 		};
 		968E1E591779A54F0050CEA3 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_MODULES_AUTOLINK = YES;
+				COMMAND_LINE_DEFINES = "";
+				COMMAND_LINE_FRAMEWORK_SEARCH_PATHS = "";
+				COMMAND_LINE_LINKER_FLAGS = "";
+				FRAMEWORK_SEARCH_PATHS = "$(COMMAND_LINE_FRAMEWORKS_SEARCH_PATH)";
+				GCC_PREPROCESSOR_DEFINITIONS = "$(COMMAND_LINE_DEFINES)";
 				IPHONEOS_DEPLOYMENT_TARGET = 6.1;
+				OTHER_LDFLAGS = "$(COMMAND_LINE_LINKER_FLAGS)";
 			};
 			name = Release;
 		};

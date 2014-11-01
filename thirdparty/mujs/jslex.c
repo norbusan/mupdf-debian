@@ -239,6 +239,8 @@ static double lexhex(js_State *J)
 	return n;
 }
 
+#if 0
+
 static double lexinteger(js_State *J)
 {
 	double n = 0;
@@ -277,7 +279,6 @@ static double lexexponent(js_State *J)
 
 static int lexnumber(js_State *J)
 {
-	const char *s = J->source - 1;
 	double n;
 	double e;
 
@@ -310,9 +311,57 @@ static int lexnumber(js_State *J)
 	if (jsY_isidentifierstart(PEEK))
 		jsY_error(J, "number with letter suffix");
 
-	J->number = strtod(s, NULL);
+	J->number = n;
 	return TK_NUMBER;
 }
+
+#else
+
+static int lexnumber(js_State *J)
+{
+	const char *s = J->source - 1;
+
+	if (ACCEPT('0')) {
+		if (ACCEPT('x') || ACCEPT('X')) {
+			J->number = lexhex(J);
+			return TK_NUMBER;
+		}
+		if (jsY_isdec(PEEK))
+			jsY_error(J, "number with leading zero");
+		if (ACCEPT('.')) {
+			while (jsY_isdec(PEEK))
+				NEXT();
+		}
+	} else if (ACCEPT('.')) {
+		if (!jsY_isdec(PEEK))
+			return '.';
+		while (jsY_isdec(PEEK))
+			NEXT();
+	} else {
+		while (jsY_isdec(PEEK))
+			NEXT();
+		if (ACCEPT('.')) {
+			while (jsY_isdec(PEEK))
+				NEXT();
+		}
+	}
+
+	if (ACCEPT('e') || ACCEPT('E')) {
+		if (PEEK == '-' || PEEK == '+')
+			NEXT();
+		while (jsY_isdec(PEEK))
+			NEXT();
+	}
+
+	if (jsY_isidentifierstart(PEEK))
+		jsY_error(J, "number with letter suffix");
+
+	J->number = js_strtod(s, NULL);
+	return TK_NUMBER;
+
+}
+
+#endif
 
 static int lexescape(js_State *J)
 {
@@ -415,11 +464,15 @@ static int lexregexp(js_State *J)
 		if (PEEK == 0 || PEEK == '\n') {
 			jsY_error(J, "regular expression not terminated");
 		} else if (ACCEPT('\\')) {
-			textpush(J, '\\');
-			if (PEEK == 0 || PEEK == '\n')
-				jsY_error(J, "regular expression not terminated");
-			textpush(J, PEEK);
-			NEXT();
+			if (ACCEPT('/')) {
+				textpush(J, '/');
+			} else {
+				textpush(J, '\\');
+				if (PEEK == 0 || PEEK == '\n')
+					jsY_error(J, "regular expression not terminated");
+				textpush(J, PEEK);
+				NEXT();
+			}
 		} else {
 			textpush(J, PEEK);
 			NEXT();

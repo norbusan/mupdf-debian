@@ -280,7 +280,7 @@ xps_parse_metadata_imp(xps_document *doc, fz_xml *item, xps_fixdoc *fixdoc)
 {
 	while (item)
 	{
-		if (!strcmp(fz_xml_tag(item), "Relationship"))
+		if (fz_xml_is_tag(item, "Relationship"))
 		{
 			char *target = fz_xml_att(item, "Target");
 			char *type = fz_xml_att(item, "Type");
@@ -297,7 +297,7 @@ xps_parse_metadata_imp(xps_document *doc, fz_xml *item, xps_fixdoc *fixdoc)
 			}
 		}
 
-		if (!strcmp(fz_xml_tag(item), "DocumentReference"))
+		if (fz_xml_is_tag(item, "DocumentReference"))
 		{
 			char *source = fz_xml_att(item, "Source");
 			if (source)
@@ -308,7 +308,7 @@ xps_parse_metadata_imp(xps_document *doc, fz_xml *item, xps_fixdoc *fixdoc)
 			}
 		}
 
-		if (!strcmp(fz_xml_tag(item), "PageContent"))
+		if (fz_xml_is_tag(item, "PageContent"))
 		{
 			char *source = fz_xml_att(item, "Source");
 			char *width_att = fz_xml_att(item, "Width");
@@ -323,7 +323,7 @@ xps_parse_metadata_imp(xps_document *doc, fz_xml *item, xps_fixdoc *fixdoc)
 			}
 		}
 
-		if (!strcmp(fz_xml_tag(item), "LinkTarget"))
+		if (fz_xml_is_tag(item, "LinkTarget"))
 		{
 			char *name = fz_xml_att(item, "Name");
 			if (name)
@@ -360,7 +360,7 @@ xps_parse_metadata(xps_document *doc, xps_part *part, xps_fixdoc *fixdoc)
 	doc->base_uri = buf;
 	doc->part_uri = part->name;
 
-	root = fz_parse_xml(doc->ctx, part->data, part->size);
+	root = fz_parse_xml(doc->ctx, part->data, part->size, 0);
 	xps_parse_metadata_imp(doc, root, fixdoc);
 	fz_free_xml(doc->ctx, root);
 
@@ -439,7 +439,7 @@ xps_load_fixed_page(xps_document *doc, xps_page *page)
 	part = xps_read_part(doc, page->name);
 	fz_try(ctx)
 	{
-		root = fz_parse_xml(doc->ctx, part->data, part->size);
+		root = fz_parse_xml(doc->ctx, part->data, part->size, 0);
 	}
 	fz_always(ctx)
 	{
@@ -453,7 +453,7 @@ xps_load_fixed_page(xps_document *doc, xps_page *page)
 	if (!root)
 		fz_throw(doc->ctx, FZ_ERROR_GENERIC, "FixedPage missing root element");
 
-	if (!strcmp(fz_xml_tag(root), "AlternateContent"))
+	if (fz_xml_is_tag(root, "AlternateContent"))
 	{
 		fz_xml *node = xps_lookup_alternate_content(root);
 		if (!node)
@@ -544,6 +544,7 @@ xps_recognize(fz_context *doc, const char *magic)
 	}
 	if (!strcmp(magic, "xps") || !strcmp(magic, "oxps") ||
 		!strcmp(magic, "application/vnd.ms-xpsdocument") ||
+		!strcmp(magic, "application/xps") ||
 		!strcmp(magic, "application/oxps"))
 		return 100;
 
