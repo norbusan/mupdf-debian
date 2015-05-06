@@ -1,4 +1,4 @@
 version=3
-opts=uversionmangle=s/(\db?)[\._\-](windows)/$1~$2/;s/(\db?)[_\-\.](sources?)$/$1/ \
+opts=repacksuffix=+ds1,dversionmangle=s/\+ds\d*$//,uversionmangle=s/(\db?)[\._\-](windows)/$1~$2/;s/(\db?)[_\-\.](sources?)$/$1/ \
 http://mupdf.com/download/ \
 (?:.*/|.*=|)mupdf[\-\._]?(\d\S*)\.(?:tar\.xz|txz|tar\.bz2|tbz2|tar\.gz|tgz|zip|7z|jar)
