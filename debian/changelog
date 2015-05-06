@@ -7,6 +7,7 @@ mupdf (1.7-1) unstable; urgency=medium
     + "mutool clean" now has correct exit status. (Closes: #781746)
   * Refresh patches
   * Remove generated file in clean target
+  * debian/control: Add that MuPDF also reads XPS, OpenXPS and ePub.
   * debian/watch: Use repacksuffix and dversionmangle
   * Move mupdf-x11 out of /usr/bin.
     Thanks to Mathieu Malaterre for the patch (Closes: #752207)
