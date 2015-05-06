@@ -37,6 +37,7 @@ override_dh_auto_install:
 override_dh_auto_clean:
 	-rm -rf build
 	-rm -rf generated
+	-rm -f include/mupdf/pdf/name-table.h source/pdf/pdf-name-table.h
 
 %:
 	dh $@
