@@ -20,7 +20,7 @@
 set -e
 
 file=""
-cmd="mupdf-x11"
+cmd="/usr/lib/mupdf/mupdf-x11"
 while [ "$#" -gt "0" ]; do
     case "$1" in
     -p|-r|-b)
