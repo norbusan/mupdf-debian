@@ -56,39 +56,21 @@ fz_new_store_context(fz_context *ctx, unsigned int max)
 void *
 fz_keep_storable(fz_context *ctx, fz_storable *s)
 {
-	if (s == NULL)
-		return NULL;
-	fz_lock(ctx, FZ_LOCK_ALLOC);
-	if (s->refs > 0)
-		s->refs++;
-	fz_unlock(ctx, FZ_LOCK_ALLOC);
-	return s;
+	return fz_keep_imp(ctx, s, &s->refs);
 }
 
 void
 fz_drop_storable(fz_context *ctx, fz_storable *s)
 {
-	int do_free = 0;
-
-	if (s == NULL)
-		return;
-	fz_lock(ctx, FZ_LOCK_ALLOC);
-	if (s->refs < 0)
-	{
-		/* It's a static object. Dropping does nothing. */
-	}
-	else if (--s->refs == 0)
-	{
-		/* If we are dropping the last reference to an object, then
-		 * it cannot possibly be in the store (as the store always
-		 * keeps a ref to everything in it, and doesn't drop via
-		 * this method. So we can simply drop the storable object
-		 * itself without any operations on the fz_store. */
-		do_free = 1;
-	}
-	fz_unlock(ctx, FZ_LOCK_ALLOC);
-	if (do_free)
-		s->free(ctx, s);
+	/*
+		If we are dropping the last reference to an object, then
+		it cannot possibly be in the store (as the store always
+		keeps a ref to everything in it, and doesn't drop via
+		this method. So we can simply drop the storable object
+		itself without any operations on the fz_store.
+	 */
+	if (fz_drop_imp(ctx, s, &s->refs))
+		s->drop(ctx, s);
 }
 
 static void
@@ -113,14 +95,14 @@ evict(fz_context *ctx, fz_item *item)
 	if (item->type->make_hash_key)
 	{
 		fz_store_hash hash = { NULL };
-		hash.free = item->val->free;
-		if (item->type->make_hash_key(&hash, item->key))
+		hash.drop = item->val->drop;
+		if (item->type->make_hash_key(ctx, &hash, item->key))
 			fz_hash_remove(ctx, store->hash, &hash);
 	}
 	fz_unlock(ctx, FZ_LOCK_ALLOC);
 	if (drop)
-		item->val->free(ctx, item->val);
-	/* Always drops the key and free the item */
+		item->val->drop(ctx, item->val);
+	/* Always drops the key and drop the item */
 	item->type->drop_key(ctx, item->key);
 	fz_free(ctx, item);
 	fz_lock(ctx, FZ_LOCK_ALLOC);
@@ -250,8 +232,8 @@ fz_store_item(fz_context *ctx, void *key, void *val_, unsigned int itemsize, fz_
 
 	if (type->make_hash_key)
 	{
-		hash.free = val->free;
-		use_hash = type->make_hash_key(&hash, key);
+		hash.drop = val->drop;
+		use_hash = type->make_hash_key(ctx, &hash, key);
 	}
 
 	type->keep_key(ctx, key);
@@ -347,7 +329,7 @@ fz_store_item(fz_context *ctx, void *key, void *val_, unsigned int itemsize, fz_
 }
 
 void *
-fz_find_item(fz_context *ctx, fz_store_free_fn *free, void *key, fz_store_type *type)
+fz_find_item(fz_context *ctx, fz_store_drop_fn *drop, void *key, fz_store_type *type)
 {
 	fz_item *item;
 	fz_store *store = ctx->store;
@@ -362,8 +344,8 @@ fz_find_item(fz_context *ctx, fz_store_free_fn *free, void *key, fz_store_type *
 
 	if (type->make_hash_key)
 	{
-		hash.free = free;
-		use_hash = type->make_hash_key(&hash, key);
+		hash.drop = drop;
+		use_hash = type->make_hash_key(ctx, &hash, key);
 	}
 
 	fz_lock(ctx, FZ_LOCK_ALLOC);
@@ -377,7 +359,7 @@ fz_find_item(fz_context *ctx, fz_store_free_fn *free, void *key, fz_store_type *
 		/* Others we have to hunt for slowly */
 		for (item = store->head; item; item = item->next)
 		{
-			if (item->val->free == free && !type->cmp_key(item->key, key))
+			if (item->val->drop == drop && !type->cmp_key(ctx, item->key, key))
 				break;
 		}
 	}
@@ -400,18 +382,18 @@ fz_find_item(fz_context *ctx, fz_store_free_fn *free, void *key, fz_store_type *
 }
 
 void
-fz_remove_item(fz_context *ctx, fz_store_free_fn *free, void *key, fz_store_type *type)
+fz_remove_item(fz_context *ctx, fz_store_drop_fn *drop, void *key, fz_store_type *type)
 {
 	fz_item *item;
 	fz_store *store = ctx->store;
-	int drop;
+	int dodrop;
 	fz_store_hash hash = { NULL };
 	int use_hash = 0;
 
 	if (type->make_hash_key)
 	{
-		hash.free = free;
-		use_hash = type->make_hash_key(&hash, key);
+		hash.drop = drop;
+		use_hash = type->make_hash_key(ctx, &hash, key);
 	}
 
 	fz_lock(ctx, FZ_LOCK_ALLOC);
@@ -426,7 +408,7 @@ fz_remove_item(fz_context *ctx, fz_store_free_fn *free, void *key, fz_store_type
 	{
 		/* Others we have to hunt for slowly */
 		for (item = store->head; item; item = item->next)
-			if (item->val->free == free && !type->cmp_key(item->key, key))
+			if (item->val->drop == drop && !type->cmp_key(ctx, item->key, key))
 				break;
 	}
 	if (item)
@@ -445,10 +427,10 @@ fz_remove_item(fz_context *ctx, fz_store_free_fn *free, void *key, fz_store_type
 			else
 				store->head = item->next;
 		}
-		drop = (item->val->refs > 0 && --item->val->refs == 0);
+		dodrop = (item->val->refs > 0 && --item->val->refs == 0);
 		fz_unlock(ctx, FZ_LOCK_ALLOC);
-		if (drop)
-			item->val->free(ctx, item->val);
+		if (dodrop)
+			item->val->drop(ctx, item->val);
 		type->drop_key(ctx, item->key);
 		fz_free(ctx, item);
 	}
@@ -497,7 +479,7 @@ fz_drop_store_context(fz_context *ctx)
 		return;
 
 	fz_empty_store(ctx);
-	fz_free_hash(ctx, ctx->store->hash);
+	fz_drop_hash(ctx, ctx->store->hash);
 	fz_free(ctx, ctx->store);
 	ctx->store = NULL;
 }
@@ -527,7 +509,7 @@ fz_print_store_locked(fz_context *ctx, FILE *out)
 			next->val->refs++;
 		fprintf(out, "store[*][refs=%d][size=%d] ", item->val->refs, item->size);
 		fz_unlock(ctx, FZ_LOCK_ALLOC);
-		item->type->debug(out, item->key);
+		item->type->debug(ctx, out, item->key);
 		fprintf(out, " = %p\n", item->val);
 		fflush(out);
 		fz_lock(ctx, FZ_LOCK_ALLOC);
@@ -671,4 +653,3 @@ fz_shrink_store(fz_context *ctx, unsigned int percent)
 
 	return success;
 }
-

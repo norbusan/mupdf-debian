@@ -12,7 +12,8 @@ enum js_OpCode
 
 	OP_NUMBER_0,	/* -- 0 */
 	OP_NUMBER_1,	/* -- 1 */
-	OP_NUMBER_N,	/* -K- K */
+	OP_NUMBER_POS,	/* -K- K */
+	OP_NUMBER_NEG,	/* -K- -K */
 
 	OP_NUMBER,	/* -N- <number> */
 	OP_STRING,	/* -S- <string> */
@@ -46,9 +47,6 @@ enum js_OpCode
 	OP_IN,		/* <name> <obj> -- <exists?> */
 
 	OP_INITPROP,	/* <obj> <key> <val> -- <obj> */
-	OP_INITPROP_N,	/* <obj> <val> -- <obj> */
-	OP_INITPROP_S,	/* <obj> <val> -- <obj> */
-
 	OP_INITGETTER,	/* <obj> <key> <closure> -- <obj> */
 	OP_INITSETTER,	/* <obj> <key> <closure> -- <obj> */
 
@@ -62,6 +60,7 @@ enum js_OpCode
 	OP_ITERATOR,	/* <obj> -- <iobj> */
 	OP_NEXTITER,	/* <iobj> -- ( <iobj> <name> true | false ) */
 
+	OP_EVAL,	/* <args...> -(numargs)- <returnvalue> */
 	OP_CALL,	/* <closure> <this> <args...> -(numargs)- <returnvalue> */
 	OP_NEW,		/* <closure> <args...> -(numargs)- <returnvalue> */
 
@@ -114,6 +113,8 @@ enum js_OpCode
 	OP_JTRUE,
 	OP_JFALSE,
 	OP_RETURN,
+
+	OP_LINE,	/* -K- */
 };
 
 struct js_Function
@@ -124,7 +125,7 @@ struct js_Function
 	unsigned int arguments;
 	unsigned int numparams;
 
-	short *code;
+	js_Instruction *code;
 	unsigned int codecap, codelen;
 
 	js_Function **funtab;
@@ -140,7 +141,7 @@ struct js_Function
 	unsigned int varcap, varlen;
 
 	const char *filename;
-	int line;
+	int line, lastline;
 
 	js_Function *gcnext;
 	int gcmark;

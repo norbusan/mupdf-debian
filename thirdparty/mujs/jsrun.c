@@ -15,16 +15,16 @@ static void jsR_run(js_State *J, js_Function *F);
 
 static void js_stackoverflow(js_State *J)
 {
-	STACK[TOP].type = JS_TSTRING;
-	STACK[TOP].u.string = "stack overflow";
+	STACK[TOP].type = JS_TLITSTR;
+	STACK[TOP].u.litstr = "stack overflow";
 	++TOP;
 	js_throw(J);
 }
 
 static void js_outofmemory(js_State *J)
 {
-	STACK[TOP].type = JS_TSTRING;
-	STACK[TOP].u.string = "out of memory";
+	STACK[TOP].type = JS_TLITSTR;
+	STACK[TOP].u.litstr = "out of memory";
 	++TOP;
 	js_throw(J);
 }
@@ -48,6 +48,18 @@ void *js_realloc(js_State *J, void *ptr, unsigned int size)
 void js_free(js_State *J, void *ptr)
 {
 	J->alloc(J->actx, ptr, 0);
+}
+
+js_String *jsV_newmemstring(js_State *J, const char *s, int n)
+{
+	js_String *v = js_malloc(J, offsetof(js_String, p) + n + 1);
+	memcpy(v->p, s, n);
+	v->p[n] = 0;
+	v->gcmark = 0;
+	v->gcnext = J->gcstr;
+	J->gcstr = v;
+	++J->gccounter;
+	return v;
 }
 
 #define CHECKSTACK(n) if (TOP + n >= JS_STACKSIZE) js_stackoverflow(J)
@@ -91,38 +103,40 @@ void js_pushnumber(js_State *J, double v)
 
 void js_pushstring(js_State *J, const char *v)
 {
+	unsigned int n = strlen(v);
 	CHECKSTACK(1);
-	STACK[TOP].type = JS_TSTRING;
-	STACK[TOP].u.string = js_intern(J, v);
+	if (n <= offsetof(js_Value, type)) {
+		char *s = STACK[TOP].u.shrstr;
+		while (n--) *s++ = *v++;
+		*s = 0;
+		STACK[TOP].type = JS_TSHRSTR;
+	} else {
+		STACK[TOP].type = JS_TMEMSTR;
+		STACK[TOP].u.memstr = jsV_newmemstring(J, v, n);
+	}
 	++TOP;
 }
 
 void js_pushlstring(js_State *J, const char *v, unsigned int n)
 {
-	char buf[256];
-	if (n + 1 < sizeof buf) {
-		memcpy(buf, v, n);
-		buf[n] = 0;
-		js_pushstring(J, buf);
+	CHECKSTACK(1);
+	if (n <= offsetof(js_Value, type)) {
+		char *s = STACK[TOP].u.shrstr;
+		while (n--) *s++ = *v++;
+		*s = 0;
+		STACK[TOP].type = JS_TSHRSTR;
 	} else {
-		char *s = js_malloc(J, n + 1);
-		memcpy(s, v, n);
-		s[n] = 0;
-		if (js_try(J)) {
-			js_free(J, s);
-			js_throw(J);
-		}
-		js_pushstring(J, s);
-		js_endtry(J);
-		js_free(J, s);
+		STACK[TOP].type = JS_TMEMSTR;
+		STACK[TOP].u.memstr = jsV_newmemstring(J, v, n);
 	}
+	++TOP;
 }
 
 void js_pushliteral(js_State *J, const char *v)
 {
 	CHECKSTACK(1);
-	STACK[TOP].type = JS_TSTRING;
-	STACK[TOP].u.string = v;
+	STACK[TOP].type = JS_TLITSTR;
+	STACK[TOP].u.litstr = v;
 	++TOP;
 }
 
@@ -139,6 +153,14 @@ void js_pushglobal(js_State *J)
 	js_pushobject(J, J->G);
 }
 
+void js_pushundefinedthis(js_State *J)
+{
+	if (J->strict)
+		js_pushundefined(J);
+	else
+		js_pushobject(J, J->G);
+}
+
 void js_currentfunction(js_State *J)
 {
 	CHECKSTACK(1);
@@ -148,13 +170,18 @@ void js_currentfunction(js_State *J)
 
 /* Read values from stack */
 
-static const js_Value *stackidx(js_State *J, int idx)
+static js_Value *stackidx(js_State *J, int idx)
 {
-	static js_Value undefined = { JS_TUNDEFINED, { 0 } };
+	static js_Value undefined = { {0}, {0}, JS_TUNDEFINED };
 	idx = idx < 0 ? TOP + idx : BOT + idx;
 	if (idx < 0 || idx >= TOP)
 		return &undefined;
 	return STACK + idx;
+}
+
+js_Value *js_tovalue(js_State *J, int idx)
+{
+	return stackidx(J, idx);
 }
 
 int js_isdefined(js_State *J, int idx) { return stackidx(J, idx)->type != JS_TUNDEFINED; }
@@ -162,13 +189,13 @@ int js_isundefined(js_State *J, int idx) { return stackidx(J, idx)->type == JS_T
 int js_isnull(js_State *J, int idx) { return stackidx(J, idx)->type == JS_TNULL; }
 int js_isboolean(js_State *J, int idx) { return stackidx(J, idx)->type == JS_TBOOLEAN; }
 int js_isnumber(js_State *J, int idx) { return stackidx(J, idx)->type == JS_TNUMBER; }
-int js_isstring(js_State *J, int idx) { return stackidx(J, idx)->type == JS_TSTRING; }
+int js_isstring(js_State *J, int idx) { enum js_Type t = stackidx(J, idx)->type; return t == JS_TSHRSTR || t == JS_TLITSTR || t == JS_TMEMSTR; }
 int js_isprimitive(js_State *J, int idx) { return stackidx(J, idx)->type != JS_TOBJECT; }
 int js_isobject(js_State *J, int idx) { return stackidx(J, idx)->type == JS_TOBJECT; }
 
 int js_iscallable(js_State *J, int idx)
 {
-	const js_Value *v = stackidx(J, idx);
+	js_Value *v = stackidx(J, idx);
 	if (v->type == JS_TOBJECT)
 		return v->u.object->type == JS_CFUNCTION ||
 			v->u.object->type == JS_CSCRIPT ||
@@ -178,25 +205,19 @@ int js_iscallable(js_State *J, int idx)
 
 int js_isarray(js_State *J, int idx)
 {
-	const js_Value *v = stackidx(J, idx);
+	js_Value *v = stackidx(J, idx);
 	return v->type == JS_TOBJECT && v->u.object->type == JS_CARRAY;
 }
 
 int js_isregexp(js_State *J, int idx)
 {
-	const js_Value *v = stackidx(J, idx);
+	js_Value *v = stackidx(J, idx);
 	return v->type == JS_TOBJECT && v->u.object->type == JS_CREGEXP;
-}
-
-int js_isiterator(js_State *J, int idx)
-{
-	const js_Value *v = stackidx(J, idx);
-	return v->type == JS_TOBJECT && v->u.object->type == JS_CITERATOR;
 }
 
 int js_isuserdata(js_State *J, int idx, const char *tag)
 {
-	const js_Value *v = stackidx(J, idx);
+	js_Value *v = stackidx(J, idx);
 	if (v->type == JS_TOBJECT && v->u.object->type == JS_CUSERDATA)
 		return !strcmp(tag, v->u.object->u.user.tag);
 	return 0;
@@ -204,24 +225,21 @@ int js_isuserdata(js_State *J, int idx, const char *tag)
 
 static const char *js_typeof(js_State *J, int idx)
 {
-	const js_Value *v = stackidx(J, idx);
+	js_Value *v = stackidx(J, idx);
 	switch (v->type) {
 	default:
+	case JS_TSHRSTR: return "string";
 	case JS_TUNDEFINED: return "undefined";
 	case JS_TNULL: return "object";
 	case JS_TBOOLEAN: return "boolean";
 	case JS_TNUMBER: return "number";
-	case JS_TSTRING: return "string";
+	case JS_TLITSTR: return "string";
+	case JS_TMEMSTR: return "string";
 	case JS_TOBJECT:
 		if (v->u.object->type == JS_CFUNCTION || v->u.object->type == JS_CCFUNCTION)
 			return "function";
 		return "object";
 	}
-}
-
-js_Value js_tovalue(js_State *J, int idx)
-{
-	return *stackidx(J, idx);
 }
 
 int js_toboolean(js_State *J, int idx)
@@ -269,14 +287,14 @@ js_Object *js_toobject(js_State *J, int idx)
 	return jsV_toobject(J, stackidx(J, idx));
 }
 
-js_Value js_toprimitive(js_State *J, int idx, int hint)
+void js_toprimitive(js_State *J, int idx, int hint)
 {
-	return jsV_toprimitive(J, stackidx(J, idx), hint);
+	jsV_toprimitive(J, stackidx(J, idx), hint);
 }
 
 js_Regexp *js_toregexp(js_State *J, int idx)
 {
-	const js_Value *v = stackidx(J, idx);
+	js_Value *v = stackidx(J, idx);
 	if (v->type == JS_TOBJECT && v->u.object->type == JS_CREGEXP)
 		return &v->u.object->u.r;
 	js_typeerror(J, "not a regexp");
@@ -284,7 +302,7 @@ js_Regexp *js_toregexp(js_State *J, int idx)
 
 void *js_touserdata(js_State *J, int idx, const char *tag)
 {
-	const js_Value *v = stackidx(J, idx);
+	js_Value *v = stackidx(J, idx);
 	if (v->type == JS_TOBJECT && v->u.object->type == JS_CUSERDATA)
 		if (!strcmp(tag, v->u.object->u.user.tag))
 			return v->u.object->u.user.data;
@@ -293,7 +311,7 @@ void *js_touserdata(js_State *J, int idx, const char *tag)
 
 static js_Object *jsR_tofunction(js_State *J, int idx)
 {
-	const js_Value *v = stackidx(J, idx);
+	js_Value *v = stackidx(J, idx);
 	if (v->type == JS_TUNDEFINED || v->type == JS_TNULL)
 		return NULL;
 	if (v->type == JS_TOBJECT)
@@ -489,7 +507,7 @@ static void jsR_getproperty(js_State *J, js_Object *obj, const char *name)
 		js_pushundefined(J);
 }
 
-static void jsR_setproperty(js_State *J, js_Object *obj, const char *name, const js_Value *value)
+static void jsR_setproperty(js_State *J, js_Object *obj, const char *name, js_Value *value)
 {
 	js_Property *ref;
 	unsigned int k;
@@ -511,17 +529,17 @@ static void jsR_setproperty(js_State *J, js_Object *obj, const char *name, const
 
 	if (obj->type == JS_CSTRING) {
 		if (!strcmp(name, "length"))
-			return;
+			goto readonly;
 		if (js_isarrayindex(J, name, &k))
 			if (js_runeat(J, obj->u.s.string, k))
-				return;
+				goto readonly;
 	}
 
 	if (obj->type == JS_CREGEXP) {
-		if (!strcmp(name, "source")) return;
-		if (!strcmp(name, "global")) return;
-		if (!strcmp(name, "ignoreCase")) return;
-		if (!strcmp(name, "multiline")) return;
+		if (!strcmp(name, "source")) goto readonly;
+		if (!strcmp(name, "global")) goto readonly;
+		if (!strcmp(name, "ignoreCase")) goto readonly;
+		if (!strcmp(name, "multiline")) goto readonly;
 		if (!strcmp(name, "lastIndex")) {
 			obj->u.r.last = jsV_tointeger(J, value);
 			return;
@@ -543,46 +561,74 @@ static void jsR_setproperty(js_State *J, js_Object *obj, const char *name, const
 	if (!ref || !own)
 		ref = jsV_setproperty(J, obj, name);
 
-	if (ref && !(ref->atts & JS_READONLY))
-		ref->value = *value;
+	if (ref) {
+		if (!(ref->atts & JS_READONLY))
+			ref->value = *value;
+		else
+			goto readonly;
+	}
+
+	return;
+
+readonly:
+	if (J->strict)
+		js_typeerror(J, "'%s' is read-only", name);
 }
 
 static void jsR_defproperty(js_State *J, js_Object *obj, const char *name,
-	int atts, const js_Value *value, js_Object *getter, js_Object *setter)
+	int atts, js_Value *value, js_Object *getter, js_Object *setter)
 {
 	js_Property *ref;
 	unsigned int k;
 
 	if (obj->type == JS_CARRAY)
 		if (!strcmp(name, "length"))
-			return;
+			goto readonly;
 
 	if (obj->type == JS_CSTRING) {
 		if (!strcmp(name, "length"))
-			return;
+			goto readonly;
 		if (js_isarrayindex(J, name, &k))
 			if (js_runeat(J, obj->u.s.string, k))
-				return;
+				goto readonly;
 	}
 
 	if (obj->type == JS_CREGEXP) {
-		if (!strcmp(name, "source")) return;
-		if (!strcmp(name, "global")) return;
-		if (!strcmp(name, "ignoreCase")) return;
-		if (!strcmp(name, "multiline")) return;
-		if (!strcmp(name, "lastIndex")) return;
+		if (!strcmp(name, "source")) goto readonly;
+		if (!strcmp(name, "global")) goto readonly;
+		if (!strcmp(name, "ignoreCase")) goto readonly;
+		if (!strcmp(name, "multiline")) goto readonly;
+		if (!strcmp(name, "lastIndex")) goto readonly;
 	}
 
 	ref = jsV_setproperty(J, obj, name);
 	if (ref) {
-		if (value && !(ref->atts & JS_READONLY))
-			ref->value = *value;
-		if (getter && !(ref->atts & JS_DONTCONF))
-			ref->getter = getter;
-		if (setter && !(ref->atts & JS_DONTCONF))
-			ref->setter = setter;
+		if (value) {
+			if (!(ref->atts & JS_READONLY))
+				ref->value = *value;
+			else if (J->strict)
+				js_typeerror(J, "'%s' is read-only", name);
+		}
+		if (getter) {
+			if (!(ref->atts & JS_DONTCONF))
+				ref->getter = getter;
+			else if (J->strict)
+				js_typeerror(J, "'%s' is non-configurable", name);
+		}
+		if (setter) {
+			if (!(ref->atts & JS_DONTCONF))
+				ref->setter = setter;
+			else if (J->strict)
+				js_typeerror(J, "'%s' is non-configurable", name);
+		}
 		ref->atts |= atts;
 	}
+
+	return;
+
+readonly:
+	if (J->strict)
+		js_typeerror(J, "'%s' is read-only or non-configurable", name);
 }
 
 static int jsR_delproperty(js_State *J, js_Object *obj, const char *name)
@@ -591,38 +637,44 @@ static int jsR_delproperty(js_State *J, js_Object *obj, const char *name)
 	unsigned int k;
 
 	if (obj->type == JS_CARRAY)
-		if (!strcmp(name, "length")) return 0;
+		if (!strcmp(name, "length"))
+			goto dontconf;
 
 	if (obj->type == JS_CSTRING) {
 		if (!strcmp(name, "length"))
-			return 0;
+			goto dontconf;
 		if (js_isarrayindex(J, name, &k))
 			if (js_runeat(J, obj->u.s.string, k))
-				return 0;
+				goto dontconf;
 	}
 
 	if (obj->type == JS_CREGEXP) {
-		if (!strcmp(name, "source")) return 0;
-		if (!strcmp(name, "global")) return 0;
-		if (!strcmp(name, "ignoreCase")) return 0;
-		if (!strcmp(name, "multiline")) return 0;
-		if (!strcmp(name, "lastIndex")) return 0;
+		if (!strcmp(name, "source")) goto dontconf;
+		if (!strcmp(name, "global")) goto dontconf;
+		if (!strcmp(name, "ignoreCase")) goto dontconf;
+		if (!strcmp(name, "multiline")) goto dontconf;
+		if (!strcmp(name, "lastIndex")) goto dontconf;
 	}
 
 	ref = jsV_getownproperty(J, obj, name);
 	if (ref) {
 		if (ref->atts & JS_DONTCONF)
-			return 0;
+			goto dontconf;
 		jsV_delproperty(J, obj, name);
 	}
 	return 1;
+
+dontconf:
+	if (J->strict)
+		js_typeerror(J, "'%s' is non-configurable", name);
+	return 0;
 }
 
 /* Registry, global and object property accessors */
 
 const char *js_ref(js_State *J)
 {
-	const js_Value *v = stackidx(J, -1);
+	js_Value *v = stackidx(J, -1);
 	const char *s;
 	char buf[32];
 	switch (v->type) {
@@ -715,6 +767,18 @@ int js_hasproperty(js_State *J, int idx, const char *name)
 	return jsR_hasproperty(J, js_toobject(J, idx), name);
 }
 
+/* Iterator */
+
+void js_pushiterator(js_State *J, int idx, int own)
+{
+	js_pushobject(J, jsV_newiterator(J, js_toobject(J, idx), own));
+}
+
+const char *js_nextiterator(js_State *J, int idx)
+{
+	return jsV_nextiterator(J, js_toobject(J, idx));
+}
+
 /* Environment records */
 
 js_Environment *jsR_newenvironment(js_State *J, js_Object *vars, js_Environment *outer)
@@ -775,11 +839,15 @@ static void js_setvar(js_State *J, const char *name)
 				return;
 			}
 			if (!(ref->atts & JS_READONLY))
-				ref->value = js_tovalue(J, -1);
+				ref->value = *stackidx(J, -1);
+			else if (J->strict)
+				js_typeerror(J, "'%s' is read-only", name);
 			return;
 		}
 		E = E->outer;
 	} while (E);
+	if (J->strict)
+		js_referenceerror(J, "assignment to undeclared variable '%s'", name);
 	jsR_setproperty(J, J->G, name, stackidx(J, -1));
 }
 
@@ -789,8 +857,11 @@ static int js_delvar(js_State *J, const char *name)
 	do {
 		js_Property *ref = jsV_getownproperty(J, E->variables, name);
 		if (ref) {
-			if (ref->atts & JS_DONTCONF)
+			if (ref->atts & JS_DONTCONF) {
+				if (J->strict)
+					js_typeerror(J, "'%s' is non-configurable", name);
 				return 0;
+			}
 			jsV_delproperty(J, E->variables, name);
 			return 1;
 		}
@@ -829,7 +900,7 @@ static void jsR_calllwfunction(js_State *J, unsigned int n, js_Function *F, js_E
 		js_pushundefined(J);
 
 	jsR_run(J, F);
-	v = js_tovalue(J, -1);
+	v = *stackidx(J, -1);
 	TOP = --BOT; /* clear stack */
 	js_pushvalue(J, v);
 
@@ -847,8 +918,10 @@ static void jsR_callfunction(js_State *J, unsigned int n, js_Function *F, js_Env
 
 	if (F->arguments) {
 		js_newobject(J);
-		js_currentfunction(J);
-		js_defproperty(J, -2, "callee", JS_DONTENUM);
+		if (!J->strict) {
+			js_currentfunction(J);
+			js_defproperty(J, -2, "callee", JS_DONTENUM);
+		}
 		js_pushnumber(J, n);
 		js_defproperty(J, -2, "length", JS_DONTENUM);
 		for (i = 0; i < n; ++i) {
@@ -871,21 +944,28 @@ static void jsR_callfunction(js_State *J, unsigned int n, js_Function *F, js_Env
 	js_pop(J, n);
 
 	jsR_run(J, F);
-	v = js_tovalue(J, -1);
+	v = *stackidx(J, -1);
 	TOP = --BOT; /* clear stack */
 	js_pushvalue(J, v);
 
 	jsR_restorescope(J);
 }
 
-static void jsR_callscript(js_State *J, unsigned int n, js_Function *F)
+static void jsR_callscript(js_State *J, unsigned int n, js_Function *F, js_Environment *scope)
 {
 	js_Value v;
+
+	if (scope)
+		jsR_savescope(J, scope);
+
 	js_pop(J, n);
 	jsR_run(J, F);
-	v = js_tovalue(J, -1);
+	v = *stackidx(J, -1);
 	TOP = --BOT; /* clear stack */
 	js_pushvalue(J, v);
+
+	if (scope)
+		jsR_restorescope(J);
 }
 
 static void jsR_callcfunction(js_State *J, unsigned int n, unsigned int min, js_CFunction F)
@@ -897,9 +977,18 @@ static void jsR_callcfunction(js_State *J, unsigned int n, unsigned int min, js_
 		js_pushundefined(J);
 
 	F(J);
-	v = js_tovalue(J, -1);
+	v = *stackidx(J, -1);
 	TOP = --BOT; /* clear stack */
 	js_pushvalue(J, v);
+}
+
+static void jsR_pushtrace(js_State *J, const char *name, const char *file, int line)
+{
+	if (++J->tracetop == JS_ENVLIMIT)
+		js_error(J, "call stack overflow");
+	J->trace[J->tracetop].name = name;
+	J->trace[J->tracetop].file = file;
+	J->trace[J->tracetop].line = line;
 }
 
 void js_call(js_State *J, int n)
@@ -916,14 +1005,21 @@ void js_call(js_State *J, int n)
 	BOT = TOP - n - 1;
 
 	if (obj->type == JS_CFUNCTION) {
+		jsR_pushtrace(J, obj->u.f.function->name, obj->u.f.function->filename, obj->u.f.function->line);
 		if (obj->u.f.function->lightweight)
 			jsR_calllwfunction(J, n, obj->u.f.function, obj->u.f.scope);
 		else
 			jsR_callfunction(J, n, obj->u.f.function, obj->u.f.scope);
-	} else if (obj->type == JS_CSCRIPT)
-		jsR_callscript(J, n, obj->u.f.function);
-	else if (obj->type == JS_CCFUNCTION)
+		--J->tracetop;
+	} else if (obj->type == JS_CSCRIPT) {
+		jsR_pushtrace(J, obj->u.f.function->name, obj->u.f.function->filename, obj->u.f.function->line);
+		jsR_callscript(J, n, obj->u.f.function, obj->u.f.scope);
+		--J->tracetop;
+	} else if (obj->type == JS_CCFUNCTION) {
+		jsR_pushtrace(J, obj->u.c.name, "[C]", 0);
 		jsR_callcfunction(J, n, obj->u.c.length, obj->u.c.function);
+		--J->tracetop;
+	}
 
 	BOT = savebot;
 }
@@ -946,7 +1042,11 @@ void js_construct(js_State *J, int n)
 		if (n > 0)
 			js_rot(J, n + 1);
 		BOT = TOP - n - 1;
+
+		jsR_pushtrace(J, obj->u.c.name, "[C]", 0);
 		jsR_callcfunction(J, n, obj->u.c.length, obj->u.c.constructor);
+		--J->tracetop;
+
 		BOT = savebot;
 		return;
 	}
@@ -975,6 +1075,16 @@ void js_construct(js_State *J, int n)
 	}
 }
 
+void js_eval(js_State *J)
+{
+	if (!js_isstring(J, -1))
+		return;
+	js_loadeval(J, "(eval)", js_tostring(J, -1));
+	js_rot2pop1(J);
+	js_copy(J, 0); /* copy 'this' */
+	js_call(J, 0);
+}
+
 int js_pconstruct(js_State *J, int n)
 {
 	if (js_try(J))
@@ -995,28 +1105,30 @@ int js_pcall(js_State *J, int n)
 
 /* Exceptions */
 
-void js_savetry(js_State *J, short *pc)
+void js_savetry(js_State *J, js_Instruction *pc)
 {
-	if (J->trylen == JS_TRYLIMIT)
+	if (J->trytop == JS_TRYLIMIT)
 		js_error(J, "try: exception stack overflow");
-	J->trybuf[J->trylen].E = J->E;
-	J->trybuf[J->trylen].envtop = J->envtop;
-	J->trybuf[J->trylen].top = J->top;
-	J->trybuf[J->trylen].bot = J->bot;
-	J->trybuf[J->trylen].pc = pc;
+	J->trybuf[J->trytop].E = J->E;
+	J->trybuf[J->trytop].envtop = J->envtop;
+	J->trybuf[J->trytop].tracetop = J->tracetop;
+	J->trybuf[J->trytop].top = J->top;
+	J->trybuf[J->trytop].bot = J->bot;
+	J->trybuf[J->trytop].pc = pc;
 }
 
 void js_throw(js_State *J)
 {
-	if (J->trylen > 0) {
-		js_Value v = js_tovalue(J, -1);
-		--J->trylen;
-		J->E = J->trybuf[J->trylen].E;
-		J->envtop = J->trybuf[J->trylen].envtop;
-		J->top = J->trybuf[J->trylen].top;
-		J->bot = J->trybuf[J->trylen].bot;
+	if (J->trytop > 0) {
+		js_Value v = *stackidx(J, -1);
+		--J->trytop;
+		J->E = J->trybuf[J->trytop].E;
+		J->envtop = J->trybuf[J->trytop].envtop;
+		J->tracetop = J->trybuf[J->trytop].tracetop;
+		J->top = J->trybuf[J->trytop].top;
+		J->bot = J->trybuf[J->trytop].bot;
 		js_pushvalue(J, v);
-		longjmp(J->trybuf[J->trylen].buf, 1);
+		longjmp(J->trybuf[J->trytop].buf, 1);
 	}
 	if (J->panic)
 		J->panic(J);
@@ -1025,7 +1137,7 @@ void js_throw(js_State *J)
 
 /* Main interpreter loop */
 
-void jsR_dumpstack(js_State *J)
+static void jsR_dumpstack(js_State *J)
 {
 	int i;
 	printf("stack {\n");
@@ -1038,7 +1150,7 @@ void jsR_dumpstack(js_State *J)
 	printf("}\n");
 }
 
-void jsR_dumpenvironment(js_State *J, js_Environment *E, int d)
+static void jsR_dumpenvironment(js_State *J, js_Environment *E, int d)
 {
 	printf("scope %d ", d);
 	js_dumpobject(J, E->variables);
@@ -1046,13 +1158,31 @@ void jsR_dumpenvironment(js_State *J, js_Environment *E, int d)
 		jsR_dumpenvironment(J, E->outer, d+1);
 }
 
+void js_stacktrace(js_State *J)
+{
+	int n;
+	printf("stack trace:\n");
+	for (n = J->tracetop; n >= 0; --n) {
+		const char *name = J->trace[n].name;
+		const char *file = J->trace[n].file;
+		int line = J->trace[n].line;
+		if (line > 0)
+			printf("\t%s:%d: in function '%s'\n", file, line, name);
+		else
+			printf("\t%s: in function '%s'\n", file, name);
+	}
+}
+
 void js_trap(js_State *J, int pc)
 {
-	js_Function *F = STACK[BOT-1].u.object->u.f.function;
-	printf("trap at %d in function ", pc);
-	jsC_dumpfunction(J, F);
+	if (pc > 0) {
+		js_Function *F = STACK[BOT-1].u.object->u.f.function;
+		printf("trap at %d in function ", pc);
+		jsC_dumpfunction(J, F);
+	}
 	jsR_dumpstack(J);
 	jsR_dumpenvironment(J, J->E, 0);
+	js_stacktrace(J);
 }
 
 static void jsR_run(js_State *J, js_Function *F)
@@ -1060,8 +1190,8 @@ static void jsR_run(js_State *J, js_Function *F)
 	js_Function **FT = F->funtab;
 	double *NT = F->numtab;
 	const char **ST = F->strtab;
-	short *pcstart = F->code;
-	short *pc = F->code;
+	js_Instruction *pcstart = F->code;
+	js_Instruction *pc = F->code;
 	enum js_OpCode opcode;
 	int offset;
 
@@ -1089,7 +1219,8 @@ static void jsR_run(js_State *J, js_Function *F)
 
 		case OP_NUMBER_0: js_pushnumber(J, 0); break;
 		case OP_NUMBER_1: js_pushnumber(J, 1); break;
-		case OP_NUMBER_N: js_pushnumber(J, *pc++); break;
+		case OP_NUMBER_POS: js_pushnumber(J, *pc++); break;
+		case OP_NUMBER_NEG: js_pushnumber(J, -(*pc++)); break;
 		case OP_NUMBER: js_pushnumber(J, NT[*pc++]); break;
 		case OP_STRING: js_pushliteral(J, ST[*pc++]); break;
 
@@ -1137,7 +1268,7 @@ static void jsR_run(js_State *J, js_Function *F)
 		case OP_GETVAR:
 			str = ST[*pc++];
 			if (!js_hasvar(J, str))
-				js_referenceerror(J, "%s is not defined", str);
+				js_referenceerror(J, "'%s' is not defined", str);
 			break;
 
 		case OP_HASVAR:
@@ -1163,6 +1294,13 @@ static void jsR_run(js_State *J, js_Function *F)
 			js_pushboolean(J, b);
 			break;
 
+		case OP_INITPROP:
+			obj = js_toobject(J, -3);
+			str = js_tostring(J, -2);
+			jsR_setproperty(J, obj, str, stackidx(J, -1));
+			js_pop(J, 2);
+			break;
+
 		case OP_INITGETTER:
 			obj = js_toobject(J, -3);
 			str = js_tostring(J, -2);
@@ -1175,27 +1313,6 @@ static void jsR_run(js_State *J, js_Function *F)
 			str = js_tostring(J, -2);
 			jsR_defproperty(J, obj, str, 0, NULL, NULL, jsR_tofunction(J, -1));
 			js_pop(J, 2);
-			break;
-
-		case OP_INITPROP:
-			str = js_tostring(J, -2);
-			obj = js_toobject(J, -3);
-			jsR_setproperty(J, obj, str, stackidx(J, -1));
-			js_pop(J, 2);
-			break;
-
-		case OP_INITPROP_S:
-			str = ST[*pc++];
-			obj = js_toobject(J, -2);
-			jsR_setproperty(J, obj, str, stackidx(J, -1));
-			js_pop(J, 1);
-			break;
-
-		case OP_INITPROP_N:
-			str = jsV_numbertostring(J, *pc++);
-			obj = js_toobject(J, -2);
-			jsR_setproperty(J, obj, str, stackidx(J, -1));
-			js_pop(J, 1);
 			break;
 
 		case OP_GETPROP:
@@ -1251,16 +1368,11 @@ static void jsR_run(js_State *J, js_Function *F)
 			break;
 
 		case OP_NEXTITER:
-			if (js_isiterator(J, -1)) {
-				obj = js_toobject(J, -1);
-				str = jsV_nextiterator(J, obj);
-				if (str) {
-					js_pushliteral(J, str);
-					js_pushboolean(J, 1);
-				} else {
-					js_pop(J, 1);
-					js_pushboolean(J, 0);
-				}
+			obj = js_toobject(J, -1);
+			str = jsV_nextiterator(J, obj);
+			if (str) {
+				js_pushliteral(J, str);
+				js_pushboolean(J, 1);
 			} else {
 				js_pop(J, 1);
 				js_pushboolean(J, 0);
@@ -1268,6 +1380,10 @@ static void jsR_run(js_State *J, js_Function *F)
 			break;
 
 		/* Function calls */
+
+		case OP_EVAL:
+			js_eval(J);
+			break;
 
 		case OP_CALL:
 			js_call(J, *pc++);
@@ -1456,7 +1572,7 @@ static void jsR_run(js_State *J, js_Function *F)
 		case OP_TRY:
 			offset = *pc++;
 			if (js_trypc(J, pc)) {
-				pc = J->trybuf[J->trylen].pc;
+				pc = J->trybuf[J->trytop].pc;
 			} else {
 				pc = pcstart + offset;
 			}
@@ -1520,6 +1636,10 @@ static void jsR_run(js_State *J, js_Function *F)
 
 		case OP_RETURN:
 			return;
+
+		case OP_LINE:
+			J->trace[J->tracetop].line = *pc++;
+			break;
 		}
 	}
 }

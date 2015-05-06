@@ -4,7 +4,7 @@
 
 static void Math_abs(js_State *J)
 {
-	js_pushnumber(J, abs(js_tonumber(J, 1)));
+	js_pushnumber(J, fabs(js_tonumber(J, 1)));
 }
 
 static void Math_acos(js_State *J)
@@ -24,7 +24,9 @@ static void Math_atan(js_State *J)
 
 static void Math_atan2(js_State *J)
 {
-	js_pushnumber(J, atan2(js_tonumber(J, 1), js_tonumber(J, 2)));
+	double y = js_tonumber(J, 1);
+	double x = js_tonumber(J, 2);
+	js_pushnumber(J, atan2(y, x));
 }
 
 static void Math_ceil(js_State *J)
@@ -54,17 +56,27 @@ static void Math_log(js_State *J)
 
 static void Math_pow(js_State *J)
 {
-	js_pushnumber(J, pow(js_tonumber(J, 1), js_tonumber(J, 2)));
+	double x = js_tonumber(J, 1);
+	double y = js_tonumber(J, 2);
+	if (!isfinite(y) && fabs(x) == 1)
+		js_pushnumber(J, NAN);
+	else
+		js_pushnumber(J, pow(x,y));
 }
 
 static void Math_random(js_State *J)
 {
-	js_pushnumber(J, (double)rand() / (RAND_MAX - 1));
+	js_pushnumber(J, rand() / (RAND_MAX + 1.0));
 }
 
 static void Math_round(js_State *J)
 {
-	js_pushnumber(J, round(js_tonumber(J, 1)));
+	double x = js_tonumber(J, 1);
+	double r = round(x);
+	if (r - x == -0.5)
+		js_pushnumber(J, x == -0.5 ? -0.0 : r + 1.0);
+	else
+		js_pushnumber(J, r);
 }
 
 static void Math_sin(js_State *J)
@@ -85,10 +97,17 @@ static void Math_tan(js_State *J)
 static void Math_max(js_State *J)
 {
 	unsigned int i, n = js_gettop(J);
-	double x = js_tonumber(J, 1);
-	for (i = 2; i < n; ++i) {
+	double x = -INFINITY;
+	for (i = 1; i < n; ++i) {
 		double y = js_tonumber(J, i);
-		x = x > y ? x : y;
+		if (isnan(y)) {
+			x = y;
+			break;
+		}
+		if (signbit(x) == signbit(y))
+			x = x > y ? x : y;
+		else if (signbit(x))
+			x = y;
 	}
 	js_pushnumber(J, x);
 }
@@ -96,10 +115,17 @@ static void Math_max(js_State *J)
 static void Math_min(js_State *J)
 {
 	unsigned int i, n = js_gettop(J);
-	double x = js_tonumber(J, 1);
-	for (i = 2; i < n; ++i) {
+	double x = INFINITY;
+	for (i = 1; i < n; ++i) {
 		double y = js_tonumber(J, i);
-		x = x < y ? x : y;
+		if (isnan(y)) {
+			x = y;
+			break;
+		}
+		if (signbit(x) == signbit(y))
+			x = x < y ? x : y;
+		else if (signbit(y))
+			x = y;
 	}
 	js_pushnumber(J, x);
 }
@@ -127,8 +153,8 @@ void jsB_initmath(js_State *J)
 		jsB_propf(J, "exp", Math_exp, 1);
 		jsB_propf(J, "floor", Math_floor, 1);
 		jsB_propf(J, "log", Math_log, 1);
-		jsB_propf(J, "max", Math_max, 2);
-		jsB_propf(J, "min", Math_min, 2);
+		jsB_propf(J, "max", Math_max, 0);
+		jsB_propf(J, "min", Math_min, 0);
 		jsB_propf(J, "pow", Math_pow, 2);
 		jsB_propf(J, "random", Math_random, 0);
 		jsB_propf(J, "round", Math_round, 1);

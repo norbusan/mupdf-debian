@@ -1,5 +1,7 @@
 #include "mupdf/fitz.h"
 
+#define SANE_DPI 72.0f
+
 fz_pixmap *
 fz_new_pixmap_from_image(fz_context *ctx, fz_image *image, int w, int h)
 {
@@ -29,10 +31,9 @@ struct fz_image_key_s {
 };
 
 static int
-fz_make_hash_image_key(fz_store_hash *hash, void *key_)
+fz_make_hash_image_key(fz_context *ctx, fz_store_hash *hash, void *key_)
 {
 	fz_image_key *key = (fz_image_key *)key_;
-
 	hash->u.pi.ptr = key->image;
 	hash->u.pi.i = key->l2factor;
 	return 1;
@@ -42,26 +43,14 @@ static void *
 fz_keep_image_key(fz_context *ctx, void *key_)
 {
 	fz_image_key *key = (fz_image_key *)key_;
-
-	fz_lock(ctx, FZ_LOCK_ALLOC);
-	key->refs++;
-	fz_unlock(ctx, FZ_LOCK_ALLOC);
-
-	return (void *)key;
+	return fz_keep_imp(ctx, key, &key->refs);
 }
 
 static void
 fz_drop_image_key(fz_context *ctx, void *key_)
 {
 	fz_image_key *key = (fz_image_key *)key_;
-	int drop;
-
-	if (key == NULL)
-		return;
-	fz_lock(ctx, FZ_LOCK_ALLOC);
-	drop = --key->refs;
-	fz_unlock(ctx, FZ_LOCK_ALLOC);
-	if (drop == 0)
+	if (fz_drop_imp(ctx, key, &key->refs))
 	{
 		fz_drop_image(ctx, key->image);
 		fz_free(ctx, key);
@@ -69,17 +58,16 @@ fz_drop_image_key(fz_context *ctx, void *key_)
 }
 
 static int
-fz_cmp_image_key(void *k0_, void *k1_)
+fz_cmp_image_key(fz_context *ctx, void *k0_, void *k1_)
 {
 	fz_image_key *k0 = (fz_image_key *)k0_;
 	fz_image_key *k1 = (fz_image_key *)k1_;
-
 	return k0->image == k1->image && k0->l2factor == k1->l2factor;
 }
 
 #ifndef NDEBUG
 static void
-fz_debug_image(FILE *out, void *key_)
+fz_debug_image(fz_context *ctx, FILE *out, void *key_)
 {
 	fz_image_key *key = (fz_image_key *)key_;
 
@@ -167,7 +155,7 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, in
 
 		samples = fz_malloc_array(ctx, h, stride);
 
-		len = fz_read(stm, samples, h * stride);
+		len = fz_read(ctx, stm, samples, h * stride);
 
 		/* Pad truncated images */
 		if (len < stride * h)
@@ -186,7 +174,7 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, in
 				p[i] = ~p[i];
 		}
 
-		fz_unpack_tile(tile, samples, image->n, image->bpc, stride, indexed);
+		fz_unpack_tile(ctx, tile, samples, image->n, image->bpc, stride, indexed);
 
 		fz_free(ctx, samples);
 		samples = NULL;
@@ -198,14 +186,14 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, in
 		if (indexed)
 		{
 			fz_pixmap *conv;
-			fz_decode_indexed_tile(tile, image->decode, (1 << image->bpc) - 1);
+			fz_decode_indexed_tile(ctx, tile, image->decode, (1 << image->bpc) - 1);
 			conv = fz_expand_indexed_pixmap(ctx, tile);
 			fz_drop_pixmap(ctx, tile);
 			tile = conv;
 		}
 		else
 		{
-			fz_decode_tile(tile, image->decode);
+			fz_decode_tile(ctx, tile, image->decode);
 		}
 
 		/* pre-blended matte color */
@@ -214,7 +202,7 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, in
 	}
 	fz_always(ctx)
 	{
-		fz_close(stm);
+		fz_drop_stream(ctx, stm);
 	}
 	fz_catch(ctx)
 	{
@@ -237,14 +225,14 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, in
 }
 
 void
-fz_free_image(fz_context *ctx, fz_storable *image_)
+fz_drop_image_imp(fz_context *ctx, fz_storable *image_)
 {
 	fz_image *image = (fz_image *)image_;
 
 	if (image == NULL)
 		return;
 	fz_drop_pixmap(ctx, image->tile);
-	fz_free_compressed_buffer(ctx, image->buffer);
+	fz_drop_compressed_buffer(ctx, image->buffer);
 	fz_drop_colorspace(ctx, image->colorspace);
 	fz_drop_image(ctx, image->mask);
 	fz_free(ctx, image);
@@ -291,7 +279,7 @@ fz_image_get_pixmap(fz_context *ctx, fz_image *image, int w, int h)
 	key.l2factor = l2factor;
 	do
 	{
-		tile = fz_find_item(ctx, fz_free_pixmap_imp, &key, &fz_image_store_type);
+		tile = fz_find_item(ctx, fz_drop_pixmap_imp, &key, &fz_image_store_type);
 		if (tile)
 			return tile;
 		key.l2factor--;
@@ -334,7 +322,7 @@ fz_image_get_pixmap(fz_context *ctx, fz_image *image, int w, int h)
 		native_l2factor = l2factor;
 		stm = fz_open_image_decomp_stream_from_buffer(ctx, image->buffer, &native_l2factor);
 
-		indexed = fz_colorspace_is_indexed(image->colorspace);
+		indexed = fz_colorspace_is_indexed(ctx, image->colorspace);
 		tile = fz_decomp_image_from_stream(ctx, stm, image, indexed, l2factor, native_l2factor);
 
 		/* CMYK JPEGs in XPS documents have to be inverted */
@@ -391,7 +379,7 @@ fz_new_image_from_pixmap(fz_context *ctx, fz_pixmap *pixmap, fz_image *mask)
 	fz_try(ctx)
 	{
 		image = fz_malloc_struct(ctx, fz_image);
-		FZ_INIT_STORABLE(image, 1, fz_free_image);
+		FZ_INIT_STORABLE(image, 1, fz_drop_image_imp);
 		image->w = pixmap->w;
 		image->h = pixmap->h;
 		image->n = pixmap->n;
@@ -401,12 +389,11 @@ fz_new_image_from_pixmap(fz_context *ctx, fz_pixmap *pixmap, fz_image *mask)
 		image->get_pixmap = fz_image_get_pixmap;
 		image->xres = pixmap->xres;
 		image->yres = pixmap->yres;
-		image->tile = pixmap;
+		image->tile = fz_keep_pixmap(ctx, pixmap);
 		image->mask = mask;
 	}
 	fz_catch(ctx)
 	{
-		fz_drop_pixmap(ctx, pixmap);
 		fz_drop_image(ctx, mask);
 		fz_rethrow(ctx);
 	}
@@ -425,7 +412,7 @@ fz_new_image(fz_context *ctx, int w, int h, int bpc, fz_colorspace *colorspace,
 	fz_try(ctx)
 	{
 		image = fz_malloc_struct(ctx, fz_image);
-		FZ_INIT_STORABLE(image, 1, fz_free_image);
+		FZ_INIT_STORABLE(image, 1, fz_drop_image_imp);
 		image->get_pixmap = fz_image_get_pixmap;
 		image->w = w;
 		image->h = h;
@@ -443,7 +430,7 @@ fz_new_image(fz_context *ctx, int w, int h, int bpc, fz_colorspace *colorspace,
 			memcpy(image->decode, decode, sizeof(float)*image->n*2);
 		else
 		{
-			float maxval = fz_colorspace_is_indexed(colorspace) ? (1 << bpc) - 1 : 1;
+			float maxval = fz_colorspace_is_indexed(ctx, colorspace) ? (1 << bpc) - 1 : 1;
 			int i;
 			for (i = 0; i < image->n; i++)
 			{
@@ -456,7 +443,7 @@ fz_new_image(fz_context *ctx, int w, int h, int bpc, fz_colorspace *colorspace,
 	}
 	fz_catch(ctx)
 	{
-		fz_free_compressed_buffer(ctx, buffer);
+		fz_drop_compressed_buffer(ctx, buffer);
 		fz_rethrow(ctx);
 	}
 
@@ -536,9 +523,49 @@ fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer)
 	}
 	fz_catch(ctx)
 	{
-		fz_free_compressed_buffer(ctx, bc);
+		fz_drop_compressed_buffer(ctx, bc);
 		fz_rethrow(ctx);
 	}
 
 	return fz_new_image(ctx, w, h, 8, cspace, xres, yres, 0, 0, NULL, NULL, bc, NULL);
+}
+
+void
+fz_image_get_sanitised_res(fz_image *image, int *xres, int *yres)
+{
+	*xres = image->xres;
+	*yres = image->yres;
+	if (*xres < 0 || *yres < 0 || (*xres == 0 && *yres == 0))
+	{
+		/* If neither xres or yres is sane, pick a sane value */
+		*xres = SANE_DPI; *yres = SANE_DPI;
+	}
+	else if (*xres == 0)
+	{
+		*xres = *yres;
+	}
+	else if (*yres == 0)
+	{
+		*yres = *xres;
+	}
+
+	/* Scale xres and yres up until we get beleivable values */
+	if (*xres < SANE_DPI || *yres < SANE_DPI)
+	{
+		if (*xres == *yres)
+		{
+			*xres = SANE_DPI;
+			*yres = SANE_DPI;
+		}
+		else if (*xres < *yres)
+		{
+			*yres = *yres * SANE_DPI / *xres;
+			*xres = SANE_DPI;
+		}
+		else
+		{
+			*xres = *xres * SANE_DPI / *yres;
+			*yres = SANE_DPI;
+		}
+	}
 }

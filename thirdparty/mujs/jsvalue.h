@@ -1,5 +1,5 @@
-#ifndef js_object_h
-#define js_object_h
+#ifndef js_value_h
+#define js_value_h
 
 typedef struct js_Property js_Property;
 typedef struct js_Iterator js_Iterator;
@@ -12,11 +12,13 @@ enum {
 };
 
 enum js_Type {
+	JS_TSHRSTR, /* type tag doubles as string zero-terminator */
 	JS_TUNDEFINED,
 	JS_TNULL,
 	JS_TBOOLEAN,
 	JS_TNUMBER,
-	JS_TSTRING,
+	JS_TLITSTR,
+	JS_TMEMSTR,
 	JS_TOBJECT,
 };
 
@@ -38,15 +40,32 @@ enum js_Class {
 	JS_CUSERDATA,
 };
 
+/*
+	Short strings abuse the js_Value struct. By putting the type tag in the
+	last byte, and using 0 as the tag for short strings, we can use the
+	entire js_Value as string storage by letting the type tag serve double
+	purpose as the string zero terminator.
+*/
+
 struct js_Value
 {
-	enum js_Type type;
 	union {
 		int boolean;
 		double number;
-		const char *string;
+		char shrstr[8];
+		const char *litstr;
+		js_String *memstr;
 		js_Object *object;
 	} u;
+	char pad[7]; /* extra storage for shrstr */
+	char type; /* type tag and zero terminator for shrstr */
+};
+
+struct js_String
+{
+	js_String *gcnext;
+	char gcmark;
+	char p[1];
 };
 
 struct js_Regexp
@@ -62,7 +81,8 @@ struct js_Object
 	enum js_Class type;
 	int extensible;
 	js_Property *properties;
-	js_Property *head, *tail; /* for enumeration */
+	js_Property *head, **tailp; /* for enumeration */
+	unsigned int count; /* number of properties, for array sparseness check */
 	js_Object *prototype;
 	union {
 		int boolean;
@@ -79,6 +99,7 @@ struct js_Object
 			js_Environment *scope;
 		} f;
 		struct {
+			const char *name;
 			js_CFunction function;
 			js_CFunction constructor;
 			unsigned int length;
@@ -91,6 +112,7 @@ struct js_Object
 		struct {
 			const char *tag;
 			void *data;
+			js_Finalize finalize;
 		} user;
 	} u;
 	js_Object *gcnext;
@@ -101,7 +123,7 @@ struct js_Property
 {
 	const char *name;
 	js_Property *left, *right;
-	js_Property **prevp, *next; /* for enumeration */
+	js_Property *next, **prevp; /* for enumeration */
 	int level;
 	int atts;
 	js_Value value;
@@ -116,27 +138,29 @@ struct js_Iterator
 };
 
 /* jsrun.c */
-js_Value js_tovalue(js_State *J, int idx);
-js_Value js_toprimitive(js_State *J, int idx, int hint);
+js_String *jsV_newmemstring(js_State *J, const char *s, int n);
+js_Value *js_tovalue(js_State *J, int idx);
+void js_toprimitive(js_State *J, int idx, int hint);
 js_Object *js_toobject(js_State *J, int idx);
 void js_pushvalue(js_State *J, js_Value v);
 void js_pushobject(js_State *J, js_Object *v);
 
 /* jsvalue.c */
-int jsV_toboolean(js_State *J, const js_Value *v);
-double jsV_tonumber(js_State *J, const js_Value *v);
-double jsV_tointeger(js_State *J, const js_Value *v);
-const char *jsV_tostring(js_State *J, const js_Value *v);
-js_Object *jsV_toobject(js_State *J, const js_Value *v);
-js_Value jsV_toprimitive(js_State *J, const js_Value *v, int preferred);
+int jsV_toboolean(js_State *J, js_Value *v);
+double jsV_tonumber(js_State *J, js_Value *v);
+double jsV_tointeger(js_State *J, js_Value *v);
+const char *jsV_tostring(js_State *J, js_Value *v);
+js_Object *jsV_toobject(js_State *J, js_Value *v);
+void jsV_toprimitive(js_State *J, js_Value *v, int preferred);
 
+const char *js_itoa(char buf[32], unsigned int a);
 double js_stringtofloat(const char *s, char **ep);
 double jsV_numbertointeger(double n);
 int jsV_numbertoint32(double n);
 unsigned int jsV_numbertouint32(double n);
 short jsV_numbertoint16(double n);
 unsigned short jsV_numbertouint16(double n);
-const char *jsV_numbertostring(js_State *J, double number);
+const char *jsV_numbertostring(js_State *J, char buf[32], double number);
 double jsV_stringtonumber(js_State *J, const char *string);
 
 /* jsproperty.c */

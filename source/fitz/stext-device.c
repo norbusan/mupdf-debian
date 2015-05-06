@@ -25,6 +25,7 @@ typedef struct span_soup_s span_soup;
 
 struct fz_text_device_s
 {
+	fz_device super;
 	fz_text_sheet *sheet;
 	fz_text_page *page;
 	span_soup *spans;
@@ -47,7 +48,7 @@ add_point_to_rect(fz_rect *a, const fz_point *p)
 }
 
 fz_rect *
-fz_text_char_bbox(fz_rect *bbox, fz_text_span *span, int i)
+fz_text_char_bbox(fz_context *ctx, fz_rect *bbox, fz_text_span *span, int i)
 {
 	fz_point a, d;
 	const fz_point *max;
@@ -63,11 +64,21 @@ fz_text_char_bbox(fz_rect *bbox, fz_text_span *span, int i)
 		max = &span->max;
 	else
 		max = &span->text[i+1].p;
-	a.x = 0;
-	a.y = span->ascender_max;
+	if (span->wmode == 0)
+	{
+		a.x = 0;
+		a.y = span->ascender_max;
+		d.x = 0;
+		d.y = span->descender_min;
+	}
+	else
+	{
+		a.x = span->ascender_max;
+		a.y = 0;
+		d.x = span->descender_min;
+		d.y = 0;
+	}
 	fz_transform_vector(&a, &span->transform);
-	d.x = 0;
-	d.y = span->descender_min;
 	fz_transform_vector(&d, &span->transform);
 	bbox->x0 = bbox->x1 = ch->p.x + a.x;
 	bbox->y0 = bbox->y1 = ch->p.y + a.y;
@@ -91,11 +102,21 @@ add_bbox_to_span(fz_text_span *span)
 
 	if (!span)
 		return;
-	a.x = 0;
-	a.y = span->ascender_max;
+	if (span->wmode == 0)
+	{
+		a.x = 0;
+		a.y = span->ascender_max;
+		d.x = 0;
+		d.y = span->descender_min;
+	}
+	else
+	{
+		a.x = span->ascender_max;
+		a.y = 0;
+		d.x = span->descender_min;
+		d.y = 0;
+	}
 	fz_transform_vector(&a, &span->transform);
-	d.x = 0;
-	d.y = span->descender_min;
 	fz_transform_vector(&d, &span->transform);
 	bbox->x0 = bbox->x1 = span->min.x + a.x;
 	bbox->y0 = bbox->y1 = span->min.y + a.y;
@@ -112,7 +133,6 @@ add_bbox_to_span(fz_text_span *span)
 
 struct span_soup_s
 {
-	fz_context *ctx;
 	int len, cap;
 	fz_text_span **spans;
 };
@@ -121,7 +141,6 @@ static span_soup *
 new_span_soup(fz_context *ctx)
 {
 	span_soup *soup = fz_malloc_struct(ctx, span_soup);
-	soup->ctx = ctx;
 	soup->len = 0;
 	soup->cap = 0;
 	soup->spans = NULL;
@@ -129,7 +148,7 @@ new_span_soup(fz_context *ctx)
 }
 
 static void
-free_span_soup(span_soup *soup)
+free_span_soup(fz_context *ctx, span_soup *soup)
 {
 	int i;
 
@@ -137,21 +156,21 @@ free_span_soup(span_soup *soup)
 		return;
 	for (i = 0; i < soup->len; i++)
 	{
-		fz_free(soup->ctx, soup->spans[i]);
+		fz_free(ctx, soup->spans[i]);
 	}
-	fz_free(soup->ctx, soup->spans);
-	fz_free(soup->ctx, soup);
+	fz_free(ctx, soup->spans);
+	fz_free(ctx, soup);
 }
 
 static void
-add_span_to_soup(span_soup *soup, fz_text_span *span)
+add_span_to_soup(fz_context *ctx, span_soup *soup, fz_text_span *span)
 {
 	if (span == NULL)
 		return;
 	if (soup->len == soup->cap)
 	{
 		int newcap = (soup->cap ? soup->cap * 2 : 16);
-		soup->spans = fz_resize_array(soup->ctx, soup->spans, newcap, sizeof(*soup->spans));
+		soup->spans = fz_resize_array(ctx, soup->spans, newcap, sizeof(*soup->spans));
 		soup->cap = newcap;
 	}
 	add_bbox_to_span(span);
@@ -266,6 +285,9 @@ strain_soup(fz_context *ctx, fz_text_device *tdev)
 	fz_text_span *last_span = NULL;
 	int span_num;
 
+	if (soup == NULL)
+		return;
+
 	/* Really dumb implementation to match what we had before */
 	for (span_num=0; span_num < soup->len; span_num++)
 	{
@@ -368,7 +390,7 @@ fz_new_text_sheet(fz_context *ctx)
 }
 
 void
-fz_free_text_sheet(fz_context *ctx, fz_text_sheet *sheet)
+fz_drop_text_sheet(fz_context *ctx, fz_text_sheet *sheet)
 {
 	fz_text_style *style;
 
@@ -447,7 +469,7 @@ fz_new_text_page(fz_context *ctx)
 }
 
 static void
-fz_free_text_line_contents(fz_context *ctx, fz_text_line *line)
+fz_drop_text_line_contents(fz_context *ctx, fz_text_line *line)
 {
 	fz_text_span *span, *next;
 	for (span = line->first_span; span; span=next)
@@ -459,19 +481,19 @@ fz_free_text_line_contents(fz_context *ctx, fz_text_line *line)
 }
 
 static void
-fz_free_text_block(fz_context *ctx, fz_text_block *block)
+fz_drop_text_block(fz_context *ctx, fz_text_block *block)
 {
 	fz_text_line *line;
 	if (block == NULL)
 		return;
 	for (line = block->lines; line < block->lines + block->len; line++)
-		fz_free_text_line_contents(ctx, line);
+		fz_drop_text_line_contents(ctx, line);
 	fz_free(ctx, block->lines);
 	fz_free(ctx, block);
 }
 
 static void
-fz_free_image_block(fz_context *ctx, fz_image_block *block)
+fz_drop_image_block(fz_context *ctx, fz_image_block *block)
 {
 	if (block == NULL)
 		return;
@@ -481,7 +503,7 @@ fz_free_image_block(fz_context *ctx, fz_image_block *block)
 }
 
 void
-fz_free_text_page(fz_context *ctx, fz_text_page *page)
+fz_drop_text_page(fz_context *ctx, fz_text_page *page)
 {
 	fz_page_block *block;
 	if (page == NULL)
@@ -491,10 +513,10 @@ fz_free_text_page(fz_context *ctx, fz_text_page *page)
 		switch (block->type)
 		{
 		case FZ_PAGE_BLOCK_TEXT:
-			fz_free_text_block(ctx, block->u.text);
+			fz_drop_text_block(ctx, block->u.text);
 			break;
 		case FZ_PAGE_BLOCK_IMAGE:
-			fz_free_image_block(ctx, block->u.image);
+			fz_drop_image_block(ctx, block->u.image);
 			break;
 		}
 	}
@@ -550,7 +572,7 @@ fz_add_text_char_imp(fz_context *ctx, fz_text_device *dev, fz_text_style *style,
 {
 	int can_append = 1;
 	int add_space = 0;
-	fz_point dir, ndir, p, q;
+	fz_point dir, ndir, p, q, r;
 	float size;
 	fz_point delta;
 	float spacing = 0;
@@ -564,7 +586,7 @@ fz_add_text_char_imp(fz_context *ctx, fz_text_device *dev, fz_text_style *style,
 	else
 	{
 		dir.x = 0;
-		dir.y = 1;
+		dir.y = -1;
 	}
 	fz_transform_vector(&dir, trm);
 	ndir = dir;
@@ -573,14 +595,45 @@ fz_add_text_char_imp(fz_context *ctx, fz_text_device *dev, fz_text_style *style,
 
 	size = fz_matrix_expansion(trm);
 
+	/* We need to identify where glyphs 'start' (p) and 'stop' (q).
+	 * Each glyph holds it's 'start' position, and the next glyph in the
+	 * span (or span->max if there is no next glyph) holds it's 'end'
+	 * position.
+	 *
+	 * For both horizontal and vertical motion, trm->{e,f} gives the
+	 * bottom left corner of the glyph.
+	 *
+	 * In horizontal mode:
+	 *   + p is bottom left.
+	 *   + q is the bottom right
+	 * In vertical mode:
+	 *   + p is top left (where it advanced from)
+	 *   + q is bottom left
+	 */
+	if (wmode == 0)
+	{
+		p.x = trm->e;
+		p.y = trm->f;
+		q.x = trm->e + adv * dir.x;
+		q.y = trm->f + adv * dir.y;
+	}
+	else
+	{
+		p.x = trm->e - adv * dir.x;
+		p.y = trm->f - adv * dir.y;
+		q.x = trm->e;
+		q.y = trm->f;
+	}
+
 	if (dev->cur_span == NULL ||
 		trm->a != dev->cur_span->transform.a || trm->b != dev->cur_span->transform.b ||
-		trm->c != dev->cur_span->transform.c || trm->d != dev->cur_span->transform.d)
+		trm->c != dev->cur_span->transform.c || trm->d != dev->cur_span->transform.d ||
+		dev->cur_span->wmode != wmode)
 	{
-		/* If the matrix has changed (or if we don't have a span at
-		 * all), then we can't append. */
+		/* If the matrix has changed, or the wmode is different (or
+		 * if we don't have a span at all), then we can't append. */
 #ifdef DEBUG_SPANS
-		printf("Transform changed\n");
+		printf("Transform/WMode changed\n");
 #endif
 		can_append = 0;
 	}
@@ -588,8 +641,8 @@ fz_add_text_char_imp(fz_context *ctx, fz_text_device *dev, fz_text_style *style,
 	{
 		/* Calculate how far we've moved since the end of the current
 		 * span. */
-		delta.x = trm->e - dev->cur_span->max.x;
-		delta.y = trm->f - dev->cur_span->max.y;
+		delta.x = p.x - dev->cur_span->max.x;
+		delta.y = p.y - dev->cur_span->max.y;
 
 		/* The transform has not changed, so we know we're in the same
 		 * direction. Calculate 2 distances; how far off the previous
@@ -633,26 +686,21 @@ fz_add_text_char_imp(fz_context *ctx, fz_text_device *dev, fz_text_style *style,
 	printf("%c%c append=%d space=%d size=%g spacing=%g base_offset=%g\n", dev->lastchar, c, can_append, add_space, size, spacing, base_offset);
 #endif
 
-	p.x = trm->e;
-	p.y = trm->f;
 	if (can_append == 0)
 	{
 		/* Start a new span */
-		add_span_to_soup(dev->spans, dev->cur_span);
+		add_span_to_soup(ctx, dev->spans, dev->cur_span);
 		dev->cur_span = NULL;
 		dev->cur_span = fz_new_text_span(ctx, &p, wmode, trm);
 		dev->cur_span->spacing = 0;
 	}
 	if (add_space)
 	{
-		q.x = - 0.2f;
-		q.y = 0;
-		fz_transform_point(&q, trm);
-		add_char_to_span(ctx, dev->cur_span, ' ', &p, &q, style);
+		r.x = - 0.2f;
+		r.y = 0;
+		fz_transform_point(&r, trm);
+		add_char_to_span(ctx, dev->cur_span, ' ', &p, &r, style);
 	}
-	/* Advance the matrix */
-	q.x = trm->e += adv * dir.x;
-	q.y = trm->f += adv * dir.y;
 	add_char_to_span(ctx, dev->cur_span, c, &p, &q, style);
 }
 
@@ -712,20 +760,28 @@ fz_text_extract(fz_context *ctx, fz_text_device *dev, fz_text *text, const fz_ma
 	if (text->len == 0)
 		return;
 
-	if (font->ft_face)
+	if (style->wmode == 0)
 	{
-		fz_lock(ctx, FZ_LOCK_FREETYPE);
-		err = FT_Set_Char_Size(font->ft_face, 64, 64, 72, 72);
-		if (err)
-			fz_warn(ctx, "freetype set character size: %s", ft_error_string(err));
-		ascender = (float)face->ascender / face->units_per_EM;
-		descender = (float)face->descender / face->units_per_EM;
-		fz_unlock(ctx, FZ_LOCK_FREETYPE);
+		if (font->ft_face)
+		{
+			fz_lock(ctx, FZ_LOCK_FREETYPE);
+			err = FT_Set_Char_Size(font->ft_face, 64, 64, 72, 72);
+			if (err)
+				fz_warn(ctx, "freetype set character size: %s", ft_error_string(err));
+			ascender = (float)face->ascender / face->units_per_EM;
+			descender = (float)face->descender / face->units_per_EM;
+			fz_unlock(ctx, FZ_LOCK_FREETYPE);
+		}
+		else if (font->t3procs && !fz_is_empty_rect(&font->bbox))
+		{
+			ascender = font->bbox.y1;
+			descender = font->bbox.y0;
+		}
 	}
-	else if (font->t3procs && !fz_is_empty_rect(&font->bbox))
+	else
 	{
-		ascender = font->bbox.y1;
-		descender = font->bbox.y0;
+		ascender = font->bbox.x1;
+		descender = font->bbox.x0;
 	}
 	style->ascender = ascender;
 	style->descender = descender;
@@ -742,26 +798,7 @@ fz_text_extract(fz_context *ctx, fz_text_device *dev, fz_text *text, const fz_ma
 		fz_concat(&trm, &tm, ctm);
 
 		/* Calculate bounding box and new pen position based on font metrics */
-		if (font->ft_face)
-		{
-			FT_Fixed ftadv = 0;
-			int mask = FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING | FT_LOAD_IGNORE_TRANSFORM;
-
-			/* TODO: freetype returns broken vertical metrics */
-			/* if (text->wmode) mask |= FT_LOAD_VERTICAL_LAYOUT; */
-
-			fz_lock(ctx, FZ_LOCK_FREETYPE);
-			err = FT_Set_Char_Size(font->ft_face, 64, 64, 72, 72);
-			if (err)
-				fz_warn(ctx, "freetype set character size: %s", ft_error_string(err));
-			FT_Get_Advance(font->ft_face, text->items[i].gid, mask, &ftadv);
-			adv = ftadv / 65536.0f;
-			fz_unlock(ctx, FZ_LOCK_FREETYPE);
-		}
-		else
-		{
-			adv = font->t3widths[text->items[i].gid];
-		}
+		adv = fz_advance_glyph(ctx, font, text->items[i].gid);
 
 		/* Check for one glyph to many char mapping */
 		for (j = i + 1; j < text->len; j++)
@@ -787,60 +824,59 @@ fz_text_extract(fz_context *ctx, fz_text_device *dev, fz_text *text, const fz_ma
 }
 
 static void
-fz_text_fill_text(fz_device *dev, fz_text *text, const fz_matrix *ctm,
+fz_text_fill_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matrix *ctm,
 	fz_colorspace *colorspace, float *color, float alpha)
 {
-	fz_text_device *tdev = dev->user;
+	fz_text_device *tdev = (fz_text_device*)dev;
 	fz_text_style *style;
-	style = fz_lookup_text_style(dev->ctx, tdev->sheet, text, ctm, colorspace, color, alpha, NULL);
-	fz_text_extract(dev->ctx, tdev, text, ctm, style);
+	style = fz_lookup_text_style(ctx, tdev->sheet, text, ctm, colorspace, color, alpha, NULL);
+	fz_text_extract(ctx, tdev, text, ctm, style);
 }
 
 static void
-fz_text_stroke_text(fz_device *dev, fz_text *text, fz_stroke_state *stroke, const fz_matrix *ctm,
+fz_text_stroke_text(fz_context *ctx, fz_device *dev, fz_text *text, fz_stroke_state *stroke, const fz_matrix *ctm,
 	fz_colorspace *colorspace, float *color, float alpha)
 {
-	fz_text_device *tdev = dev->user;
+	fz_text_device *tdev = (fz_text_device*)dev;
 	fz_text_style *style;
-	style = fz_lookup_text_style(dev->ctx, tdev->sheet, text, ctm, colorspace, color, alpha, stroke);
-	fz_text_extract(dev->ctx, tdev, text, ctm, style);
+	style = fz_lookup_text_style(ctx, tdev->sheet, text, ctm, colorspace, color, alpha, stroke);
+	fz_text_extract(ctx, tdev, text, ctm, style);
 }
 
 static void
-fz_text_clip_text(fz_device *dev, fz_text *text, const fz_matrix *ctm, int accumulate)
+fz_text_clip_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matrix *ctm, int accumulate)
 {
-	fz_text_device *tdev = dev->user;
+	fz_text_device *tdev = (fz_text_device*)dev;
 	fz_text_style *style;
-	style = fz_lookup_text_style(dev->ctx, tdev->sheet, text, ctm, NULL, NULL, 0, NULL);
-	fz_text_extract(dev->ctx, tdev, text, ctm, style);
+	style = fz_lookup_text_style(ctx, tdev->sheet, text, ctm, NULL, NULL, 0, NULL);
+	fz_text_extract(ctx, tdev, text, ctm, style);
 }
 
 static void
-fz_text_clip_stroke_text(fz_device *dev, fz_text *text, fz_stroke_state *stroke, const fz_matrix *ctm)
+fz_text_clip_stroke_text(fz_context *ctx, fz_device *dev, fz_text *text, fz_stroke_state *stroke, const fz_matrix *ctm)
 {
-	fz_text_device *tdev = dev->user;
+	fz_text_device *tdev = (fz_text_device*)dev;
 	fz_text_style *style;
-	style = fz_lookup_text_style(dev->ctx, tdev->sheet, text, ctm, NULL, NULL, 0, stroke);
-	fz_text_extract(dev->ctx, tdev, text, ctm, style);
+	style = fz_lookup_text_style(ctx, tdev->sheet, text, ctm, NULL, NULL, 0, stroke);
+	fz_text_extract(ctx, tdev, text, ctm, style);
 }
 
 static void
-fz_text_ignore_text(fz_device *dev, fz_text *text, const fz_matrix *ctm)
+fz_text_ignore_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matrix *ctm)
 {
-	fz_text_device *tdev = dev->user;
+	fz_text_device *tdev = (fz_text_device*)dev;
 	fz_text_style *style;
-	style = fz_lookup_text_style(dev->ctx, tdev->sheet, text, ctm, NULL, NULL, 0, NULL);
-	fz_text_extract(dev->ctx, tdev, text, ctm, style);
+	style = fz_lookup_text_style(ctx, tdev->sheet, text, ctm, NULL, NULL, 0, NULL);
+	fz_text_extract(ctx, tdev, text, ctm, style);
 }
 
 static void
-fz_text_fill_image_mask(fz_device *dev, fz_image *img, const fz_matrix *ctm,
+fz_text_fill_image_mask(fz_context *ctx, fz_device *dev, fz_image *img, const fz_matrix *ctm,
 		fz_colorspace *cspace, float *color, float alpha)
 {
-	fz_text_device *tdev = dev->user;
+	fz_text_device *tdev = (fz_text_device*)dev;
 	fz_text_page *page = tdev->page;
 	fz_image_block *block;
-	fz_context *ctx = dev->ctx;
 
 	/* If the alpha is less than 50% then it's probably a watermark or
 	 * effect or something. Skip it */
@@ -861,13 +897,19 @@ fz_text_fill_image_mask(fz_device *dev, fz_image *img, const fz_matrix *ctm,
 	block->cspace = fz_keep_colorspace(ctx, cspace);
 	if (cspace)
 		memcpy(block->colors, color, sizeof(block->colors[0])*cspace->n);
+	block->mat = *ctm;
+	block->bbox.x0 = 0;
+	block->bbox.y0 = 0;
+	block->bbox.x1 = 1;
+	block->bbox.y1 = 1;
+	fz_transform_rect(&block->bbox, ctm);
 	page->len++;
 }
 
 static void
-fz_text_fill_image(fz_device *dev, fz_image *img, const fz_matrix *ctm, float alpha)
+fz_text_fill_image(fz_context *ctx, fz_device *dev, fz_image *img, const fz_matrix *ctm, float alpha)
 {
-	fz_text_fill_image_mask(dev, img, ctm, NULL, NULL, alpha);
+	fz_text_fill_image_mask(ctx, dev, img, ctm, NULL, NULL, alpha);
 }
 
 static int
@@ -957,10 +999,9 @@ fz_bidi_reorder_text_page(fz_context *ctx, fz_text_page *page)
 }
 
 static void
-fz_text_begin_page(fz_device *dev, const fz_rect *mediabox, const fz_matrix *ctm)
+fz_text_begin_page(fz_context *ctx, fz_device *dev, const fz_rect *mediabox, const fz_matrix *ctm)
 {
-	fz_context *ctx = dev->ctx;
-	fz_text_device *tdev = dev->user;
+	fz_text_device *tdev = (fz_text_device*)dev;
 
 	if (tdev->page->len)
 	{
@@ -975,16 +1016,15 @@ fz_text_begin_page(fz_device *dev, const fz_rect *mediabox, const fz_matrix *ctm
 }
 
 static void
-fz_text_end_page(fz_device *dev)
+fz_text_end_page(fz_context *ctx, fz_device *dev)
 {
-	fz_context *ctx = dev->ctx;
-	fz_text_device *tdev = dev->user;
+	fz_text_device *tdev = (fz_text_device*)dev;
 
-	add_span_to_soup(tdev->spans, tdev->cur_span);
+	add_span_to_soup(ctx, tdev->spans, tdev->cur_span);
 	tdev->cur_span = NULL;
 
 	strain_soup(ctx, tdev);
-	free_span_soup(tdev->spans);
+	free_span_soup(ctx, tdev->spans);
 	tdev->spans = NULL;
 
 	/* TODO: smart sorting of blocks in reading order */
@@ -994,37 +1034,35 @@ fz_text_end_page(fz_device *dev)
 }
 
 static void
-fz_text_free_user(fz_device *dev)
+fz_text_drop_imp(fz_context *ctx, fz_device *dev)
 {
-	fz_text_device *tdev = dev->user;
-	free_span_soup(tdev->spans);
-	fz_free(dev->ctx, tdev);
+	fz_text_device *tdev = (fz_text_device*)dev;
+	free_span_soup(ctx, tdev->spans);
 }
 
 fz_device *
 fz_new_text_device(fz_context *ctx, fz_text_sheet *sheet, fz_text_page *page)
 {
-	fz_device *dev;
+	fz_text_device *dev = fz_new_device(ctx, sizeof *dev);
 
-	fz_text_device *tdev = fz_malloc_struct(ctx, fz_text_device);
-	tdev->sheet = sheet;
-	tdev->page = page;
-	tdev->spans = NULL;
-	tdev->cur_span = NULL;
-	tdev->lastchar = ' ';
+	dev->super.hints = FZ_IGNORE_IMAGE | FZ_IGNORE_SHADE;
 
-	dev = fz_new_device(ctx, tdev);
-	dev->hints = FZ_IGNORE_IMAGE | FZ_IGNORE_SHADE;
-	dev->begin_page = fz_text_begin_page;
-	dev->end_page = fz_text_end_page;
-	dev->free_user = fz_text_free_user;
-	dev->fill_text = fz_text_fill_text;
-	dev->stroke_text = fz_text_stroke_text;
-	dev->clip_text = fz_text_clip_text;
-	dev->clip_stroke_text = fz_text_clip_stroke_text;
-	dev->ignore_text = fz_text_ignore_text;
-	dev->fill_image = fz_text_fill_image;
-	dev->fill_image_mask = fz_text_fill_image_mask;
+	dev->super.drop_imp = fz_text_drop_imp;
+	dev->super.begin_page = fz_text_begin_page;
+	dev->super.end_page = fz_text_end_page;
+	dev->super.fill_text = fz_text_fill_text;
+	dev->super.stroke_text = fz_text_stroke_text;
+	dev->super.clip_text = fz_text_clip_text;
+	dev->super.clip_stroke_text = fz_text_clip_stroke_text;
+	dev->super.ignore_text = fz_text_ignore_text;
+	dev->super.fill_image = fz_text_fill_image;
+	dev->super.fill_image_mask = fz_text_fill_image_mask;
 
-	return dev;
+	dev->sheet = sheet;
+	dev->page = page;
+	dev->spans = NULL;
+	dev->cur_span = NULL;
+	dev->lastchar = ' ';
+
+	return (fz_device*)dev;
 }

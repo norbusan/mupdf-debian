@@ -53,6 +53,19 @@ int fz_strlcpy(char *dst, const char *src, int n);
 int fz_strlcat(char *dst, const char *src, int n);
 
 /*
+	fz_dirname: extract the directory component from a path.
+*/
+void fz_dirname(char *dir, const char *path, int dirsize);
+
+/*
+	fz_cleanname: rewrite path to the shortest string that names the same path.
+
+	Eliminates multiple and trailing slashes, interprets "." and "..".
+	Overwrites the string in place.
+*/
+char *fz_cleanname(char *name);
+
+/*
 	fz_chartorune: UTF8 decode a single rune from a sequence of chars.
 
 	rune: Pointer to an int to assign the decoded 'rune' to.
@@ -90,12 +103,11 @@ int fz_runelen(int rune);
 double fz_strtod(const char *s, char **es);
 
 /*
-	fz_dtoa: Compute decimal integer m, exp such that:
+	fz_ftoa: Compute decimal integer m, exp such that:
 		f = m * 10^exp
 		m is as short as possible without losing exactness
 	Assumes special cases (NaN, +Inf, -Inf) have been handled.
 */
-void fz_dtoa(double f, char *s, int *exp, int *neg, int *ns);
 void fz_ftoa(float f, char *s, int *exp, int *neg, int *ns);
 
 #endif

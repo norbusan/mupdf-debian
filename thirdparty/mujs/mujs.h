@@ -29,9 +29,12 @@ typedef struct js_State js_State;
 typedef void *(*js_Alloc)(void *memctx, void *ptr, unsigned int size);
 typedef void (*js_Panic)(js_State *J);
 typedef void (*js_CFunction)(js_State *J);
+typedef void (*js_Finalize)(js_State *J, void *p);
 
 /* Basic functions */
-js_State *js_newstate(js_Alloc alloc, void *actx);
+js_State *js_newstate(js_Alloc alloc, void *actx, int flags);
+void js_setcontext(js_State *J, void *uctx);
+void *js_getcontext(js_State *J);
 js_Panic js_atpanic(js_State *J, js_Panic panic);
 void js_freestate(js_State *J);
 void js_gc(js_State *J, int report);
@@ -42,6 +45,11 @@ int js_ploadstring(js_State *J, const char *filename, const char *source);
 int js_ploadfile(js_State *J, const char *filename);
 int js_pcall(js_State *J, int n);
 int js_pconstruct(js_State *J, int n);
+
+/* State constructor flags */
+enum {
+	JS_STRICT = 1,
+};
 
 /* RegExp flags */
 enum {
@@ -77,6 +85,7 @@ JS_NORETURN void js_throw(js_State *J);
 void js_loadstring(js_State *J, const char *filename, const char *source);
 void js_loadfile(js_State *J, const char *filename);
 
+void js_eval(js_State *J);
 void js_call(js_State *J, int n);
 void js_construct(js_State *J, int n);
 
@@ -120,11 +129,13 @@ void js_newarray(js_State *J);
 void js_newboolean(js_State *J, int v);
 void js_newnumber(js_State *J, double v);
 void js_newstring(js_State *J, const char *v);
-void js_newerror(js_State *J, const char *message);
-void js_newcfunction(js_State *J, js_CFunction fun, unsigned int length);
-void js_newcconstructor(js_State *J, js_CFunction fun, js_CFunction con, unsigned int length);
-void js_newuserdata(js_State *J, const char *tag, void *data);
+void js_newcfunction(js_State *J, js_CFunction fun, const char *name, unsigned int length);
+void js_newcconstructor(js_State *J, js_CFunction fun, js_CFunction con, const char *name, unsigned int length);
+void js_newuserdata(js_State *J, const char *tag, void *data, js_Finalize finalize);
 void js_newregexp(js_State *J, const char *pattern, int flags);
+
+void js_pushiterator(js_State *J, int idx, int own);
+const char *js_nextiterator(js_State *J, int idx);
 
 int js_isdefined(js_State *J, int idx);
 int js_isundefined(js_State *J, int idx);

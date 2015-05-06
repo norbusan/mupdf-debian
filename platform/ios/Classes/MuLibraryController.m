@@ -15,10 +15,18 @@ static void showAlert(NSString *msg, NSString *filename)
 }
 
 @implementation MuLibraryController
+{
+	NSArray *files;
+	NSTimer *timer;
+	MuDocRef *doc;
+	NSString *_filename;
+	char *_filePath;
+}
 
 - (void) viewWillAppear: (BOOL)animated
 {
-	[self setTitle: @"PDF, XPS and CBZ Documents"];
+	[super viewWillAppear:animated];
+	[self setTitle: @"PDF, XPS, CBZ and EPUB Documents"];
 	[self reload];
 	printf("library viewWillAppear (starting reload timer)\n");
 	timer = [NSTimer timerWithTimeInterval: 3
@@ -29,6 +37,7 @@ static void showAlert(NSString *msg, NSString *filename)
 
 - (void) viewWillDisappear: (BOOL)animated
 {
+	[super viewWillDisappear:animated];
 	printf("library viewWillDisappear (stopping reload timer)\n");
 	[timer invalidate];
 	timer = nil;
@@ -86,7 +95,7 @@ static void showAlert(NSString *msg, NSString *filename)
 	if (buttonIndex == [actionSheet destructiveButtonIndex])
 	{
 		char filename[PATH_MAX];
-		int row = [actionSheet tag];
+		NSInteger row = [actionSheet tag];
 
 		dispatch_sync(queue, ^{});
 
@@ -104,7 +113,7 @@ static void showAlert(NSString *msg, NSString *filename)
 
 - (void) onTapDelete: (UIControl*)sender
 {
-	int row = [sender tag];
+	NSInteger row = [sender tag];
 	NSString *title = [NSString stringWithFormat: @"Delete %@?", [files objectAtIndex:row]];
 	UIActionSheet *sheet = [[UIActionSheet alloc]
 							initWithTitle: title
@@ -123,7 +132,7 @@ static void showAlert(NSString *msg, NSString *filename)
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier: cellid];
 	if (!cell)
 		cell = [[[UITableViewCell alloc] initWithStyle: UITableViewCellStyleDefault reuseIdentifier: cellid] autorelease];
-	int row = [indexPath row];
+	NSInteger row = [indexPath row];
 	[[cell textLabel] setText: [files objectAtIndex: row]];
 	[[cell textLabel] setFont: [UIFont systemFontOfSize: 20]];
 
@@ -139,7 +148,7 @@ static void showAlert(NSString *msg, NSString *filename)
 
 - (void) tableView: (UITableView*)tableView didSelectRowAtIndexPath: (NSIndexPath*)indexPath
 {
-	int row = [indexPath row];
+	NSInteger row = [indexPath row];
 	[self openDocument: [files objectAtIndex: row]];
 }
 
@@ -203,7 +212,7 @@ static NSString *moveOutOfInbox(NSString *docpath)
 		return;
 	}
 
-	if (fz_needs_password(doc->doc))
+	if (fz_needs_password(ctx, doc->doc))
 		[self askForPassword: @"'%@' needs a password:"];
 	else
 		[self onPasswordOkay];
@@ -227,7 +236,7 @@ static NSString *moveOutOfInbox(NSString *docpath)
 	char *password = (char*) [[[alertView textFieldAtIndex: 0] text] UTF8String];
 	[alertView dismissWithClickedButtonIndex: buttonIndex animated: TRUE];
 	if (buttonIndex == 1) {
-		if (fz_authenticate_password(doc->doc, password))
+		if (fz_authenticate_password(ctx, doc->doc, password))
 			[self onPasswordOkay];
 		else
 			[self askForPassword: @"Wrong password for '%@'. Try again:"];

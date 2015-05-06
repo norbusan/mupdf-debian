@@ -27,46 +27,65 @@ fz_trace_color(fz_colorspace *colorspace, float *color, float alpha)
 }
 
 static void
-fz_trace_path(fz_path *path, int indent)
+trace_moveto(fz_context *ctx, void *arg, float x, float y)
 {
-	float x, y;
-	int i = 0, k = 0, n;
-	while (i < path->cmd_len)
-	{
-		for (n = 0; n < indent; n++)
-			putchar(' ');
-		switch (path->cmds[i++])
-		{
-		case FZ_MOVETO:
-			x = path->coords[k++];
-			y = path->coords[k++];
-			printf("<moveto x=\"%g\" y=\"%g\"/>\n", x, y);
-			break;
-		case FZ_LINETO:
-			x = path->coords[k++];
-			y = path->coords[k++];
-			printf("<lineto x=\"%g\" y=\"%g\"/>\n", x, y);
-			break;
-		case FZ_CURVETO:
-			x = path->coords[k++];
-			y = path->coords[k++];
-			printf("<curveto x1=\"%g\" y1=\"%g\"", x, y);
-			x = path->coords[k++];
-			y = path->coords[k++];
-			printf(" x2=\"%g\" y2=\"%g\"", x, y);
-			x = path->coords[k++];
-			y = path->coords[k++];
-			printf(" x3=\"%g\" y3=\"%g\"/>\n", x, y);
-			break;
-		case FZ_CLOSE_PATH:
-			printf("<closepath/>\n");
-			break;
-		}
-	}
+	int indent = (int)(intptr_t)arg;
+	int n;
+
+	for (n = 0; n < indent; n++)
+		putchar(' ');
+	printf("<moveto x=\"%g\" y=\"%g\"/>\n", x, y);
 }
 
 static void
-fz_trace_begin_page(fz_device *dev, const fz_rect *rect, const fz_matrix *ctm)
+trace_lineto(fz_context *ctx, void *arg, float x, float y)
+{
+	int indent = (int)(intptr_t)arg;
+	int n;
+
+	for (n = 0; n < indent; n++)
+		putchar(' ');
+	printf("<lineto x=\"%g\" y=\"%g\"/>\n", x, y);
+}
+
+static void
+trace_curveto(fz_context *ctx, void *arg, float x1, float y1, float x2, float y2, float x3, float y3)
+{
+	int indent = (int)(intptr_t)arg;
+	int n;
+
+	for (n = 0; n < indent; n++)
+		putchar(' ');
+	printf("<curveto x1=\"%g\" y1=\"%g\" x2=\"%g\" y2=\"%g\" x3=\"%g\" y3=\"%g\"/>\n", x1, y1, x2, y2, x3, y3);
+}
+
+static void
+trace_close(fz_context *ctx, void *arg)
+{
+	int indent = (int)(intptr_t)arg;
+	int n;
+
+	for (n = 0; n < indent; n++)
+		putchar(' ');
+	printf("<closepath/>\n");
+}
+
+static const fz_path_processor trace_path_proc =
+{
+	trace_moveto,
+	trace_lineto,
+	trace_curveto,
+	trace_close
+};
+
+static void
+fz_trace_path(fz_context *ctx, fz_path *path, int indent)
+{
+	fz_process_path(ctx, &trace_path_proc, (void *)(intptr_t)indent, path);
+}
+
+static void
+fz_trace_begin_page(fz_context *ctx, fz_device *dev, const fz_rect *rect, const fz_matrix *ctm)
 {
 	printf("<page mediabox=\"%g %g %g %g\"", rect->x0, rect->y0, rect->x1, rect->y1);
 	fz_trace_matrix(ctm);
@@ -74,13 +93,13 @@ fz_trace_begin_page(fz_device *dev, const fz_rect *rect, const fz_matrix *ctm)
 }
 
 static void
-fz_trace_end_page(fz_device *dev)
+fz_trace_end_page(fz_context *ctx, fz_device *dev)
 {
 	printf("</page>\n");
 }
 
 static void
-fz_trace_fill_path(fz_device *dev, fz_path *path, int even_odd, const fz_matrix *ctm,
+fz_trace_fill_path(fz_context *ctx, fz_device *dev, fz_path *path, int even_odd, const fz_matrix *ctm,
 	fz_colorspace *colorspace, float *color, float alpha)
 {
 	printf("<fill_path");
@@ -91,12 +110,12 @@ fz_trace_fill_path(fz_device *dev, fz_path *path, int even_odd, const fz_matrix 
 	fz_trace_color(colorspace, color, alpha);
 	fz_trace_matrix(ctm);
 	printf(">\n");
-	fz_trace_path(path, 0);
+	fz_trace_path(ctx, path, 0);
 	printf("</fill_path>\n");
 }
 
 static void
-fz_trace_stroke_path(fz_device *dev, fz_path *path, fz_stroke_state *stroke, const fz_matrix *ctm,
+fz_trace_stroke_path(fz_context *ctx, fz_device *dev, fz_path *path, fz_stroke_state *stroke, const fz_matrix *ctm,
 	fz_colorspace *colorspace, float *color, float alpha)
 {
 	int i;
@@ -119,13 +138,13 @@ fz_trace_stroke_path(fz_device *dev, fz_path *path, fz_stroke_state *stroke, con
 	fz_trace_matrix(ctm);
 	printf(">\n");
 
-	fz_trace_path(path, 0);
+	fz_trace_path(ctx, path, 0);
 
 	printf("</stroke_path>\n");
 }
 
 static void
-fz_trace_clip_path(fz_device *dev, fz_path *path, const fz_rect *rect, int even_odd, const fz_matrix *ctm)
+fz_trace_clip_path(fz_context *ctx, fz_device *dev, fz_path *path, const fz_rect *rect, int even_odd, const fz_matrix *ctm)
 {
 	printf("<clip_path");
 	if (even_odd)
@@ -137,22 +156,22 @@ fz_trace_clip_path(fz_device *dev, fz_path *path, const fz_rect *rect, int even_
 		printf(" contentbbox=\"%g %g %g %g\">\n", rect->x0, rect->y0, rect->x1, rect->y1);
 	else
 		printf(">\n");
-	fz_trace_path(path, 0);
+	fz_trace_path(ctx, path, 0);
 	printf("</clip_path>\n");
 }
 
 static void
-fz_trace_clip_stroke_path(fz_device *dev, fz_path *path, const fz_rect *rect, fz_stroke_state *stroke, const fz_matrix *ctm)
+fz_trace_clip_stroke_path(fz_context *ctx, fz_device *dev, fz_path *path, const fz_rect *rect, fz_stroke_state *stroke, const fz_matrix *ctm)
 {
 	printf("<clip_stroke_path");
 	fz_trace_matrix(ctm);
 	printf(">\n");
-	fz_trace_path(path, 0);
+	fz_trace_path(ctx, path, 0);
 	printf("</clip_stroke_path>\n");
 }
 
 static void
-fz_trace_fill_text(fz_device *dev, fz_text *text, const fz_matrix *ctm,
+fz_trace_fill_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matrix *ctm,
 	fz_colorspace *colorspace, float *color, float alpha)
 {
 	printf("<fill_text font=\"%s\" wmode=\"%d\"", text->font->name, text->wmode);
@@ -160,12 +179,12 @@ fz_trace_fill_text(fz_device *dev, fz_text *text, const fz_matrix *ctm,
 	fz_trace_matrix(ctm);
 	fz_trace_trm(&text->trm);
 	printf(">\n");
-	fz_print_text(dev->ctx, stdout, text);
+	fz_print_text(ctx, stdout, text);
 	printf("</fill_text>\n");
 }
 
 static void
-fz_trace_stroke_text(fz_device *dev, fz_text *text, fz_stroke_state *stroke, const fz_matrix *ctm,
+fz_trace_stroke_text(fz_context *ctx, fz_device *dev, fz_text *text, fz_stroke_state *stroke, const fz_matrix *ctm,
 	fz_colorspace *colorspace, float *color, float alpha)
 {
 	printf("<stroke_text font=\"%s\" wmode=\"%d\"", text->font->name, text->wmode);
@@ -173,46 +192,46 @@ fz_trace_stroke_text(fz_device *dev, fz_text *text, fz_stroke_state *stroke, con
 	fz_trace_matrix(ctm);
 	fz_trace_trm(&text->trm);
 	printf(">\n");
-	fz_print_text(dev->ctx, stdout, text);
+	fz_print_text(ctx, stdout, text);
 	printf("</stroke_text>\n");
 }
 
 static void
-fz_trace_clip_text(fz_device *dev, fz_text *text, const fz_matrix *ctm, int accumulate)
+fz_trace_clip_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matrix *ctm, int accumulate)
 {
 	printf("<clip_text font=\"%s\" wmode=\"%d\"", text->font->name, text->wmode);
 	printf(" accumulate=\"%d\"", accumulate);
 	fz_trace_matrix(ctm);
 	fz_trace_trm(&text->trm);
 	printf(">\n");
-	fz_print_text(dev->ctx, stdout, text);
+	fz_print_text(ctx, stdout, text);
 	printf("</clip_text>\n");
 }
 
 static void
-fz_trace_clip_stroke_text(fz_device *dev, fz_text *text, fz_stroke_state *stroke, const fz_matrix *ctm)
+fz_trace_clip_stroke_text(fz_context *ctx, fz_device *dev, fz_text *text, fz_stroke_state *stroke, const fz_matrix *ctm)
 {
 	printf("<clip_stroke_text font=\"%s\" wmode=\"%d\"", text->font->name, text->wmode);
 	fz_trace_matrix(ctm);
 	fz_trace_trm(&text->trm);
 	printf(">\n");
-	fz_print_text(dev->ctx, stdout, text);
+	fz_print_text(ctx, stdout, text);
 	printf("</clip_stroke_text>\n");
 }
 
 static void
-fz_trace_ignore_text(fz_device *dev, fz_text *text, const fz_matrix *ctm)
+fz_trace_ignore_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matrix *ctm)
 {
 	printf("<ignore_text font=\"%s\" wmode=\"%d\"", text->font->name, text->wmode);
 	fz_trace_matrix(ctm);
 	fz_trace_trm(&text->trm);
 	printf(">\n");
-	fz_print_text(dev->ctx, stdout, text);
+	fz_print_text(ctx, stdout, text);
 	printf("</ignore_text>\n");
 }
 
 static void
-fz_trace_fill_image(fz_device *dev, fz_image *image, const fz_matrix *ctm, float alpha)
+fz_trace_fill_image(fz_context *ctx, fz_device *dev, fz_image *image, const fz_matrix *ctm, float alpha)
 {
 	printf("<fill_image alpha=\"%g\"", alpha);
 	fz_trace_matrix(ctm);
@@ -221,7 +240,7 @@ fz_trace_fill_image(fz_device *dev, fz_image *image, const fz_matrix *ctm, float
 }
 
 static void
-fz_trace_fill_shade(fz_device *dev, fz_shade *shade, const fz_matrix *ctm, float alpha)
+fz_trace_fill_shade(fz_context *ctx, fz_device *dev, fz_shade *shade, const fz_matrix *ctm, float alpha)
 {
 	printf("<fill_shade alpha=\"%g\"", alpha);
 	fz_trace_matrix(ctm);
@@ -229,7 +248,7 @@ fz_trace_fill_shade(fz_device *dev, fz_shade *shade, const fz_matrix *ctm, float
 }
 
 static void
-fz_trace_fill_image_mask(fz_device *dev, fz_image *image, const fz_matrix *ctm,
+fz_trace_fill_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, const fz_matrix *ctm,
 fz_colorspace *colorspace, float *color, float alpha)
 {
 	printf("<fill_image_mask");
@@ -240,7 +259,7 @@ fz_colorspace *colorspace, float *color, float alpha)
 }
 
 static void
-fz_trace_clip_image_mask(fz_device *dev, fz_image *image, const fz_rect *rect, const fz_matrix *ctm)
+fz_trace_clip_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, const fz_rect *rect, const fz_matrix *ctm)
 {
 	printf("<clip_image_mask");
 	fz_trace_matrix(ctm);
@@ -249,13 +268,13 @@ fz_trace_clip_image_mask(fz_device *dev, fz_image *image, const fz_rect *rect, c
 }
 
 static void
-fz_trace_pop_clip(fz_device *dev)
+fz_trace_pop_clip(fz_context *ctx, fz_device *dev)
 {
 	printf("<pop_clip/>\n");
 }
 
 static void
-fz_trace_begin_mask(fz_device *dev, const fz_rect *bbox, int luminosity, fz_colorspace *colorspace, float *color)
+fz_trace_begin_mask(fz_context *ctx, fz_device *dev, const fz_rect *bbox, int luminosity, fz_colorspace *colorspace, float *color)
 {
 	printf("<mask bbox=\"%g %g %g %g\" s=\"%s\"",
 		bbox->x0, bbox->y0, bbox->x1, bbox->y1,
@@ -264,13 +283,13 @@ fz_trace_begin_mask(fz_device *dev, const fz_rect *bbox, int luminosity, fz_colo
 }
 
 static void
-fz_trace_end_mask(fz_device *dev)
+fz_trace_end_mask(fz_context *ctx, fz_device *dev)
 {
 	printf("</mask>\n");
 }
 
 static void
-fz_trace_begin_group(fz_device *dev, const fz_rect *bbox, int isolated, int knockout, int blendmode, float alpha)
+fz_trace_begin_group(fz_context *ctx, fz_device *dev, const fz_rect *bbox, int isolated, int knockout, int blendmode, float alpha)
 {
 	printf("<group bbox=\"%g %g %g %g\" isolated=\"%d\" knockout=\"%d\" blendmode=\"%s\" alpha=\"%g\">\n",
 		bbox->x0, bbox->y0, bbox->x1, bbox->y1,
@@ -278,13 +297,13 @@ fz_trace_begin_group(fz_device *dev, const fz_rect *bbox, int isolated, int knoc
 }
 
 static void
-fz_trace_end_group(fz_device *dev)
+fz_trace_end_group(fz_context *ctx, fz_device *dev)
 {
 	printf("</group>\n");
 }
 
 static int
-fz_trace_begin_tile(fz_device *dev, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *ctm, int id)
+fz_trace_begin_tile(fz_context *ctx, fz_device *dev, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *ctm, int id)
 {
 	printf("<tile");
 	printf(" area=\"%g %g %g %g\"", area->x0, area->y0, area->x1, area->y1);
@@ -296,14 +315,14 @@ fz_trace_begin_tile(fz_device *dev, const fz_rect *area, const fz_rect *view, fl
 }
 
 static void
-fz_trace_end_tile(fz_device *dev)
+fz_trace_end_tile(fz_context *ctx, fz_device *dev)
 {
 	printf("</tile>\n");
 }
 
 fz_device *fz_new_trace_device(fz_context *ctx)
 {
-	fz_device *dev = fz_new_device(ctx, NULL);
+	fz_device *dev = fz_new_device(ctx, sizeof *dev);
 
 	dev->begin_page = fz_trace_begin_page;
 	dev->end_page = fz_trace_end_page;

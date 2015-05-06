@@ -6,13 +6,13 @@
 
 static void jsB_globalf(js_State *J, const char *name, js_CFunction cfun, int n)
 {
-	js_newcfunction(J, cfun, n);
+	js_newcfunction(J, cfun, name, n);
 	js_defglobal(J, name, JS_DONTENUM);
 }
 
 void jsB_propf(js_State *J, const char *name, js_CFunction cfun, int n)
 {
-	js_newcfunction(J, cfun, n);
+	js_newcfunction(J, cfun, name, n);
 	js_defproperty(J, -2, name, JS_DONTENUM);
 }
 
@@ -26,17 +26,6 @@ void jsB_props(js_State *J, const char *name, const char *string)
 {
 	js_pushliteral(J, string);
 	js_defproperty(J, -2, name, JS_DONTENUM);
-}
-
-static void jsB_eval(js_State *J)
-{
-	if (!js_isstring(J, -1)) {
-		js_copy(J, 1);
-		return;
-	}
-	js_loadstring(J, "(eval)", js_tostring(J, -1));
-	js_pushglobal(J);
-	js_call(J, 0);
 }
 
 static void jsB_parseInt(js_State *J)
@@ -228,7 +217,6 @@ void jsB_init(js_State *J)
 	js_pushundefined(J);
 	js_defglobal(J, "undefined", JS_READONLY | JS_DONTENUM | JS_DONTCONF);
 
-	jsB_globalf(J, "eval", jsB_eval, 1);
 	jsB_globalf(J, "parseInt", jsB_parseInt, 1);
 	jsB_globalf(J, "parseFloat", jsB_parseFloat, 1);
 	jsB_globalf(J, "isNaN", jsB_isNaN, 1);

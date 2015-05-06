@@ -49,6 +49,9 @@ struct fz_text_style_s
 	float size;
 	int wmode;
 	int script;
+	/* Ascender and Descender only have the conventional sense in
+	 * horizontal mode; in vertical mode they are rotated too - they are
+	 * the maximum and minimum bounds respectively. */
 	float ascender;
 	float descender;
 	/* etc... */
@@ -141,6 +144,9 @@ struct fz_text_span_s
 	fz_point max; /* Device space */
 	int wmode; /* 0 for horizontal, 1 for vertical */
 	fz_matrix transform; /* e and f are always 0 here */
+	/* Ascender_max and Descender_min only have the conventional sense in
+	 * horizontal mode; in vertical mode they are rotated too - they are
+	 * the maximum and minimum bounds respectively. */
 	float ascender_max; /* Document space */
 	float descender_min; /* Document space */
 	fz_rect bbox; /* Device space */
@@ -176,7 +182,7 @@ struct fz_char_and_box_s
 	fz_rect bbox;
 };
 
-fz_char_and_box *fz_text_char_at(fz_char_and_box *cab, fz_text_page *page, int idx);
+fz_char_and_box *fz_text_char_at(fz_context *ctx, fz_char_and_box *cab, fz_text_page *page, int idx);
 
 /*
 	fz_text_char_bbox: Return the bbox of a text char. Calculated from
@@ -192,7 +198,7 @@ fz_char_and_box *fz_text_char_at(fz_char_and_box *cab, fz_text_page *page, int i
 
 	Does not throw exceptions
 */
-fz_rect *fz_text_char_bbox(fz_rect *bbox, fz_text_span *span, int idx);
+fz_rect *fz_text_char_bbox(fz_context *ctx, fz_rect *bbox, fz_text_span *span, int idx);
 
 /*
 	fz_new_text_sheet: Create an empty style sheet.
@@ -202,7 +208,7 @@ fz_rect *fz_text_char_bbox(fz_rect *bbox, fz_text_span *span, int idx);
 	is used.
 */
 fz_text_sheet *fz_new_text_sheet(fz_context *ctx);
-void fz_free_text_sheet(fz_context *ctx, fz_text_sheet *sheet);
+void fz_drop_text_sheet(fz_context *ctx, fz_text_sheet *sheet);
 
 /*
 	fz_new_text_page: Create an empty text page.
@@ -211,7 +217,7 @@ void fz_free_text_sheet(fz_context *ctx, fz_text_sheet *sheet);
 	lines and spans of text on the page.
 */
 fz_text_page *fz_new_text_page(fz_context *ctx);
-void fz_free_text_page(fz_context *ctx, fz_text_page *page);
+void fz_drop_text_page(fz_context *ctx, fz_text_page *page);
 
 void fz_analyze_text(fz_context *ctx, fz_text_sheet *sheet, fz_text_page *page);
 

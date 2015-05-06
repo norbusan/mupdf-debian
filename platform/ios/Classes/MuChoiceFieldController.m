@@ -7,6 +7,11 @@
 @end
 
 @implementation MuChoiceFieldController
+{
+	void (^okayBlock)(NSArray *);
+	NSArray *choices;
+	NSInteger selected;
+}
 
 - (id)initWithChoices:(NSArray *)_choices okayAction:(void (^)(NSArray *))block
 {
@@ -26,12 +31,6 @@
 	_picker.dataSource = self;
 	_picker.delegate = self;
 	// Do any additional setup after loading the view from its nib.
-}
-
-- (void)didReceiveMemoryWarning
-{
-	[super didReceiveMemoryWarning];
-	// Dispose of any resources that can be recreated.
 }
 
 - (void)dealloc

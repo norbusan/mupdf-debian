@@ -55,7 +55,7 @@ static void jsB_new_String(js_State *J)
 
 static void jsB_String(js_State *J)
 {
-	js_pushliteral(J, js_gettop(J) > 1 ? js_tostring(J, 1) : "");
+	js_pushstring(J, js_gettop(J) > 1 ? js_tostring(J, 1) : "");
 }
 
 static void Sp_toString(js_State *J)
@@ -398,7 +398,7 @@ loop:
 
 	if (js_iscallable(J, 2)) {
 		js_copy(J, 2);
-		js_pushglobal(J);
+		js_pushundefinedthis(J);
 		for (x = 0; m.sub[x].sp; ++x) /* arg 0..x: substring and subexps that matched */
 			js_pushlstring(J, m.sub[x].sp, m.sub[x].ep - m.sub[x].sp);
 		js_pushnumber(J, s - source); /* arg x+2: offset within search string */
@@ -492,7 +492,7 @@ static void Sp_replace_string(js_State *J)
 
 	if (js_iscallable(J, 2)) {
 		js_copy(J, 2);
-		js_pushglobal(J);
+		js_pushundefinedthis(J);
 		js_pushlstring(J, s, n); /* arg 1: substring that matched */
 		js_pushnumber(J, s - source); /* arg 2: offset within search string */
 		js_copy(J, 0); /* arg 3: search string */
@@ -559,7 +559,7 @@ static void Sp_split_regexp(js_State *J)
 	e = text + strlen(text);
 
 	/* splitting the empty string */
-	if (e == 0) {
+	if (e == text) {
 		if (js_regexec(re->prog, text, &m, 0)) {
 			if (len == limit) return;
 			js_pushliteral(J, "");
@@ -679,7 +679,7 @@ void jsB_initstring(js_State *J)
 		/* ES5 */
 		jsB_propf(J, "trim", Sp_trim, 0);
 	}
-	js_newcconstructor(J, jsB_String, jsB_new_String, 1);
+	js_newcconstructor(J, jsB_String, jsB_new_String, "String", 1);
 	{
 		jsB_propf(J, "fromCharCode", S_fromCharCode, 1);
 	}

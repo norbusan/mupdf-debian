@@ -4,6 +4,13 @@ if not exist scripts/fontdump.c cd ../..
 if not exist scripts/fontdump.c goto usage
 if not exist generated mkdir generated
 
+cl /nologo -Iinclude scripts/namedump.c
+
+if not exist namedump.exe goto usage
+
+if not exist include/mupdf/pdf/name-table.h namedump.exe resources/pdf/names.txt include/mupdf/pdf/name-table.h source/pdf/pdf-name-table.h
+if not exist source/pdf/pdf-name-table.h namedump.exe resources/pdf/names.txt include/mupdf/pdf/name-table.h source/pdf/pdf-name-table.h
+
 cl /nologo -Iinclude scripts/fontdump.c setargv.obj
 cl /nologo -Iinclude scripts/cmapdump.c setargv.obj
 cl /nologo -Iinclude scripts/cquote.c setargv.obj
@@ -15,7 +22,6 @@ if not exist cquote.exe goto usage
 if not exist bin2hex.exe goto usage
 
 if not exist generated/gen_font_base14.h fontdump.exe generated/gen_font_base14.h resources/fonts/urw/*.cff
-if not exist generated/gen_font_droid.h fontdump.exe generated/gen_font_droid.h resources/fonts/droid/DroidSans.ttf resources/fonts/droid/DroidSansMono.ttf
 if not exist generated/gen_font_cjk.h fontdump.exe generated/gen_font_cjk.h resources/fonts/droid/DroidSansFallback.ttc
 if not exist generated/gen_font_cjk_full.h fontdump.exe generated/gen_font_cjk_full.h resources/fonts/droid/DroidSansFallbackFull.ttc
 

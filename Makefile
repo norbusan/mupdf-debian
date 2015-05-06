@@ -9,14 +9,14 @@ default: all
 
 # --- Configuration ---
 
+include Makerules
+include Makethird
+
 # Do not specify CFLAGS or LIBS on the make invocation line - specify
 # XCFLAGS or XLIBS instead. Make ignores any lines in the makefile that
 # set a variable that was set on the command line.
 CFLAGS += $(XCFLAGS) -Iinclude -I$(GEN)
 LIBS += $(XLIBS) -lm
-
-include Makerules
-include Makethird
 
 THIRD_LIBS += $(FREETYPE_LIB)
 THIRD_LIBS += $(JBIG2DEC_LIB)
@@ -66,6 +66,7 @@ ALL_DIR += $(OUT)/xps
 ALL_DIR += $(OUT)/cbz
 ALL_DIR += $(OUT)/img
 ALL_DIR += $(OUT)/tiff
+ALL_DIR += $(OUT)/html
 ALL_DIR += $(OUT)/tools
 ALL_DIR += $(OUT)/platform/x11
 ALL_DIR += $(OUT)/platform/x11/curl
@@ -73,29 +74,24 @@ ALL_DIR += $(OUT)/platform/x11/curl
 FITZ_HDR := include/mupdf/fitz.h $(wildcard include/mupdf/fitz/*.h)
 PDF_HDR := include/mupdf/pdf.h $(wildcard include/mupdf/pdf/*.h)
 XPS_HDR := include/mupdf/xps.h
-CBZ_HDR := include/mupdf/cbz.h
-IMG_HDR := include/mupdf/img.h
+HTML_HDR := include/mupdf/html.h
 
 FITZ_SRC := $(wildcard source/fitz/*.c)
 PDF_SRC := $(wildcard source/pdf/*.c)
 XPS_SRC := $(wildcard source/xps/*.c)
 CBZ_SRC := $(wildcard source/cbz/*.c)
-IMG_SRC := $(wildcard source/img/*.c)
-TIFF_SRC := $(wildcard source/tiff/*.c)
+HTML_SRC := $(wildcard source/html/*.c)
 
 FITZ_SRC_HDR := $(wildcard source/fitz/*.h)
-PDF_SRC_HDR := $(wildcard source/pdf/*.h)
+PDF_SRC_HDR := $(wildcard source/pdf/*.h) source/pdf/pdf-name-table.h
 XPS_SRC_HDR := $(wildcard source/xps/*.h)
-CBZ_SRC_HDR := $(wildcard source/cbz/*.h)
-IMG_SRC_HDR := $(wildcard source/img/*.h)
-TIFF_SRC_HDR := $(wildcard source/tiff/*.h)
+HTML_SRC_HDR := $(wildcard source/html/*.h)
 
 FITZ_OBJ := $(subst source/, $(OUT)/, $(addsuffix .o, $(basename $(FITZ_SRC))))
 PDF_OBJ := $(subst source/, $(OUT)/, $(addsuffix .o, $(basename $(PDF_SRC))))
 XPS_OBJ := $(subst source/, $(OUT)/, $(addsuffix .o, $(basename $(XPS_SRC))))
 CBZ_OBJ := $(subst source/, $(OUT)/, $(addsuffix .o, $(basename $(CBZ_SRC))))
-IMG_OBJ := $(subst source/, $(OUT)/, $(addsuffix .o, $(basename $(IMG_SRC))))
-TIFF_OBJ := $(subst source/, $(OUT)/, $(addsuffix .o, $(basename $(TIFF_SRC))))
+HTML_OBJ := $(subst source/, $(OUT)/, $(addsuffix .o, $(basename $(HTML_SRC))))
 
 # --- Choice of Javascript library ---
 
@@ -122,15 +118,14 @@ endif
 $(FITZ_OBJ) : $(FITZ_HDR) $(FITZ_SRC_HDR)
 $(PDF_OBJ) : $(FITZ_HDR) $(PDF_HDR) $(PDF_SRC_HDR)
 $(XPS_OBJ) : $(FITZ_HDR) $(XPS_HDR) $(XPS_SRC_HDR)
-$(CBZ_OBJ) : $(FITZ_HDR) $(CBZ_HDR) $(CBZ_SRC_HDR)
-$(IMG_OBJ) : $(FITZ_HDR) $(IMG_HDR) $(IMG_SRC_HDR)
-$(TIFF_OBJ) : $(FITZ_HDR) $(IMG_HDR) $(TIFF_SRC_HDR)
+$(CBZ_OBJ) : $(FITZ_HDR)
+$(HTML_OBJ) : $(FITZ_HDR) $(HTML_HDR) $(HTML_SRC_HDR)
 
 # --- Library ---
 
 MUPDF_LIB := $(OUT)/libmupdf.a
 
-$(MUPDF_LIB) : $(FITZ_OBJ) $(PDF_OBJ) $(XPS_OBJ) $(CBZ_OBJ) $(IMG_OBJ) $(TIFF_OBJ)
+$(MUPDF_LIB) : $(FITZ_OBJ) $(PDF_OBJ) $(XPS_OBJ) $(CBZ_OBJ) $(HTML_OBJ)
 
 INSTALL_LIBS := $(MUPDF_LIB)
 
@@ -159,6 +154,9 @@ $(OUT)/%.o : scripts/%.c | $(OUT)
 $(OUT)/platform/x11/%.o : platform/x11/%.c | $(ALL_DIR)
 	$(CC_CMD) $(X11_CFLAGS)
 
+$(OUT)/platform/x11/%.o: platform/x11/%.rc | $(OUT)
+	windres $< $@
+
 $(OUT)/platform/x11/curl/%.o : platform/x11/%.c | $(ALL_DIR)
 	$(CC_CMD) $(X11_CFLAGS) $(CURL_CFLAGS) -DHAVE_CURL
 
@@ -168,6 +166,7 @@ $(OUT)/platform/x11/curl/%.o : platform/x11/%.c | $(ALL_DIR)
 
 CMAPDUMP := $(OUT)/cmapdump
 FONTDUMP := $(OUT)/fontdump
+NAMEDUMP := $(OUT)/namedump
 CQUOTE := $(OUT)/cquote
 BIN2HEX := $(OUT)/bin2hex
 
@@ -177,7 +176,6 @@ CMAP_JAPAN_SRC := $(wildcard resources/cmaps/japan/*)
 CMAP_KOREA_SRC := $(wildcard resources/cmaps/korea/*)
 
 FONT_BASE14_SRC := $(wildcard resources/fonts/urw/*.cff)
-FONT_DROID_SRC := resources/fonts/droid/DroidSans.ttf resources/fonts/droid/DroidSansMono.ttf
 FONT_CJK_SRC := resources/fonts/droid/DroidSansFallback.ttc
 FONT_CJK_FULL_SRC := resources/fonts/droid/DroidSansFallbackFull.ttc
 
@@ -194,14 +192,17 @@ CMAP_GEN := $(addprefix $(GEN)/, gen_cmap_cns.h gen_cmap_gb.h gen_cmap_japan.h g
 
 $(GEN)/gen_font_base14.h : $(FONT_BASE14_SRC)
 	$(QUIET_GEN) $(FONTDUMP) $@ $(FONT_BASE14_SRC)
-$(GEN)/gen_font_droid.h : $(FONT_DROID_SRC)
-	$(QUIET_GEN) $(FONTDUMP) $@ $(FONT_DROID_SRC)
 $(GEN)/gen_font_cjk.h : $(FONT_CJK_SRC)
 	$(QUIET_GEN) $(FONTDUMP) $@ $(FONT_CJK_SRC)
 $(GEN)/gen_font_cjk_full.h : $(FONT_CJK_FULL_SRC)
 	$(QUIET_GEN) $(FONTDUMP) $@ $(FONT_CJK_FULL_SRC)
 
-FONT_GEN := $(GEN)/gen_font_base14.h $(GEN)/gen_font_droid.h $(GEN)/gen_font_cjk.h $(GEN)/gen_font_cjk_full.h
+FONT_GEN := $(GEN)/gen_font_base14.h $(GEN)/gen_font_cjk.h $(GEN)/gen_font_cjk_full.h
+
+include/mupdf/pdf.h : include/mupdf/pdf/name-table.h
+NAME_GEN := include/mupdf/pdf/name-table.h source/pdf/pdf-name-table.h
+$(NAME_GEN) : resources/pdf/names.txt
+	$(QUIET_GEN) $(NAMEDUMP) resources/pdf/names.txt $(NAME_GEN)
 
 JAVASCRIPT_SRC := source/pdf/js/pdf-util.js
 JAVASCRIPT_GEN := $(GEN)/gen_js_util.h
@@ -216,29 +217,31 @@ $(ADOBECA_GEN) : $(ADOBECA_SRC)
 ifneq "$(CROSSCOMPILE)" "yes"
 $(CMAP_GEN) : $(CMAPDUMP) | $(GEN)
 $(FONT_GEN) : $(FONTDUMP) | $(GEN)
+$(NAME_GEN) : $(NAMEDUMP) | $(GEN)
 $(JAVASCRIPT_GEN) : $(CQUOTE) | $(GEN)
 $(ADOBECA_GEN) : $(BIN2HEX) | $(GEN)
 endif
 
-generate: $(CMAP_GEN) $(FONT_GEN) $(JAVASCRIPT_GEN) $(ADOBECA_GEN)
+generate: $(CMAP_GEN) $(FONT_GEN) $(JAVASCRIPT_GEN) $(ADOBECA_GEN) $(NAME_GEN)
 
 $(OUT)/pdf/pdf-cmap-table.o : $(CMAP_GEN)
 $(OUT)/pdf/pdf-fontfile.o : $(FONT_GEN)
 $(OUT)/pdf/pdf-pkcs7.o : $(ADOBECA_GEN)
 $(OUT)/pdf/js/pdf-js.o : $(JAVASCRIPT_GEN)
-$(OUT)/cmapdump.o : include/mupdf/pdf/cmap.h source/pdf/pdf-cmap.c source/pdf/pdf-cmap-parse.c
+$(OUT)/pdf/pdf-object.o : source/pdf/pdf-name-table.h
+$(OUT)/cmapdump.o : include/mupdf/pdf/cmap.h source/pdf/pdf-cmap.c source/pdf/pdf-cmap-parse.c source/pdf/pdf-name-table.h
 
 # --- Tools and Apps ---
 
 MUDRAW := $(addprefix $(OUT)/, mudraw)
 MUDRAW_OBJ := $(addprefix $(OUT)/tools/, mudraw.o)
-$(MUDRAW_OBJ) : $(FITZ_HDR)
+$(MUDRAW_OBJ) : $(FITZ_HDR) $(PDF_HDR)
 $(MUDRAW) : $(MUPDF_LIB) $(THIRD_LIBS)
 $(MUDRAW) : $(MUDRAW_OBJ)
 	$(LINK_CMD)
 
 MUTOOL := $(addprefix $(OUT)/, mutool)
-MUTOOL_OBJ := $(addprefix $(OUT)/tools/, mutool.o pdfclean.o pdfextract.o pdfinfo.o pdfposter.o pdfshow.o)
+MUTOOL_OBJ := $(addprefix $(OUT)/tools/, mutool.o pdfclean.o pdfextract.o pdfinfo.o pdfposter.o pdfshow.o pdfpages.o)
 $(MUTOOL_OBJ): $(FITZ_HDR) $(PDF_HDR)
 $(MUTOOL) : $(MUPDF_LIB) $(THIRD_LIBS)
 $(MUTOOL) : $(MUTOOL_OBJ)
@@ -250,8 +253,10 @@ $(MJSGEN) : $(addprefix $(OUT)/tools/, mjsgen.o)
 	$(LINK_CMD)
 
 MUJSTEST := $(OUT)/mujstest
+MUJSTEST_OBJ := $(addprefix $(OUT)/platform/x11/, jstest_main.o pdfapp.o)
+$(MUJSTEST_OBJ) : $(FITZ_HDR) $(PDF_HDR)
 $(MUJSTEST) : $(MUPDF_LIB) $(THIRD_LIBS)
-$(MUJSTEST) : $(addprefix $(OUT)/platform/x11/, jstest_main.o pdfapp.o)
+$(MUJSTEST) : $(MUJSTEST_OBJ)
 	$(LINK_CMD)
 
 ifeq "$(HAVE_X11)" "yes"
@@ -272,10 +277,28 @@ $(MUVIEW_X11_CURL) : $(MUVIEW_X11_CURL_OBJ)
 endif
 endif
 
-MUVIEW := $(MUVIEW_X11)
-MUVIEW_CURL := $(MUVIEW_X11_CURL)
+ifeq "$(HAVE_WIN32)" "yes"
+MUVIEW_WIN32 := $(OUT)/mupdf
+MUVIEW_WIN32_OBJ := $(addprefix $(OUT)/platform/x11/, win_main.o pdfapp.o win_res.o)
+$(MUVIEW_WIN32_OBJ) : $(FITZ_HDR) $(PDF_HDR)
+$(MUVIEW_WIN32) : $(MUPDF_LIB) $(THIRD_LIBS)
+$(MUVIEW_WIN32) : $(MUVIEW_WIN32_OBJ)
+	$(LINK_CMD) $(WIN32_LIBS)
+endif
+
+MUVIEW := $(MUVIEW_X11) $(MUVIEW_WIN32)
+MUVIEW_CURL := $(MUVIEW_X11_CURL) $(MUVIEW_WIN32_CURL)
 
 INSTALL_APPS := $(MUDRAW) $(MUTOOL) $(MUVIEW) $(MUJSTEST) $(MUVIEW_CURL)
+
+# --- Examples ---
+
+examples: $(OUT)/example $(OUT)/multi-threaded
+
+$(OUT)/example: docs/example.c $(MUPDF_LIB) $(THIRD_LIBS)
+	$(LINK_CMD) $(CFLAGS)
+$(OUT)/multi-threaded: docs/multi-threaded.c $(MUPDF_LIB) $(THIRD_LIBS)
+	$(LINK_CMD) $(CFLAGS) -lpthread
 
 # --- Update version string header ---
 
@@ -346,6 +369,11 @@ all: libs apps
 clean:
 	rm -rf $(OUT)
 nuke:
-	rm -rf build/* $(GEN)
+	rm -rf build/* $(GEN) $(NAME_GEN)
+
+release:
+	$(MAKE) build=release
+debug:
+	$(MAKE) build=debug
 
 .PHONY: all clean nuke install third libs apps generate

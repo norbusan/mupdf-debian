@@ -14,35 +14,31 @@ unsigned int js_getlength(js_State *J, int idx)
 void js_setlength(js_State *J, int idx, unsigned int len)
 {
 	js_pushnumber(J, len);
-	js_setproperty(J, idx, "length");
+	js_setproperty(J, idx < 0 ? idx - 1: idx, "length");
 }
 
 int js_hasindex(js_State *J, int idx, unsigned int i)
 {
 	char buf[32];
-	sprintf(buf, "%u", i);
-	return js_hasproperty(J, idx, buf);
+	return js_hasproperty(J, idx, js_itoa(buf, i));
 }
 
 void js_getindex(js_State *J, int idx, unsigned int i)
 {
 	char buf[32];
-	sprintf(buf, "%u", i);
-	js_getproperty(J, idx, buf);
+	js_getproperty(J, idx, js_itoa(buf, i));
 }
 
 void js_setindex(js_State *J, int idx, unsigned int i)
 {
 	char buf[32];
-	sprintf(buf, "%u", i);
-	js_setproperty(J, idx, buf);
+	js_setproperty(J, idx, js_itoa(buf, i));
 }
 
 void js_delindex(js_State *J, int idx, unsigned int i)
 {
 	char buf[32];
-	sprintf(buf, "%u", i);
-	js_delproperty(J, idx, buf);
+	js_delproperty(J, idx, js_itoa(buf, i));
 }
 
 static void jsB_new_Array(js_State *J)
@@ -269,7 +265,7 @@ static int compare(js_State *J, unsigned int x, unsigned int y, int *hasx, int *
 
 		if (hasfn) {
 			js_copy(J, 1); /* copy function */
-			js_pushglobal(J); /* set this object */
+			js_pushundefinedthis(J); /* set this object */
 			js_copy(J, -4); /* copy x */
 			js_copy(J, -4); /* copy y */
 			js_call(J, 2);
@@ -338,6 +334,7 @@ static void Ap_splice(js_State *J)
 	for (k = 0; k < del; ++k)
 		if (js_hasindex(J, 0, start + k))
 			js_setindex(J, -2, k);
+	js_setlength(J, -1, del);
 
 	/* shift the tail to resize the hole left by deleted items */
 	add = top - 3;
@@ -346,7 +343,7 @@ static void Ap_splice(js_State *J)
 			if (js_hasindex(J, 0, k + del))
 				js_setindex(J, 0, k + add);
 			else
-				js_delindex(J, 0, k + del);
+				js_delindex(J, 0, k + add);
 		}
 		for (k = len; k > len - del + add; --k)
 			js_delindex(J, 0, k - 1);
@@ -712,7 +709,7 @@ void jsB_initarray(js_State *J)
 		jsB_propf(J, "reduce", Ap_reduce, 1);
 		jsB_propf(J, "reduceRight", Ap_reduceRight, 1);
 	}
-	js_newcconstructor(J, jsB_new_Array, jsB_new_Array, 1);
+	js_newcconstructor(J, jsB_new_Array, jsB_new_Array, "Array", 1);
 	{
 		/* ES5 */
 		jsB_propf(J, "isArray", A_isArray, 1);
