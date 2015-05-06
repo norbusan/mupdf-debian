@@ -1,3 +1,20 @@
+mupdf (1.7-1) unstable; urgency=medium
+
+  * New Upstream version 1.7
+    + Added missing section in mutool man page. (Closes: #775427)
+    + Set _NET_WM_NAME properly. (Closes: #780019)
+    + Support continuously scrolling. (Closes: #611221)
+    + "mutool clean" now has correct exit status. (Closes: #781746)
+  * Refresh patches
+  * Remove generated file in clean target
+  * debian/watch: Use repacksuffix and dversionmangle
+  * Move mupdf-x11 out of /usr/bin.
+    Thanks to Mathieu Malaterre for the patch (Closes: #752207)
+  * debian/patches/0008-Bigger-scaling.patch: Add more scale level.
+    Thanks to Thomas Prokosch for the patch (Closes: #769282)
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Thu, 07 May 2015 00:03:39 +0800
+
 mupdf (1.6-1) unstable; urgency=medium
 
   * New upstream release. (Closes: #767391)
