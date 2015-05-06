@@ -1,0 +1,51 @@
+---
+ source/fitz/output.c |   10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+--- a/source/fitz/output.c
++++ b/source/fitz/output.c
+@@ -3,7 +3,7 @@
+ struct fz_output_s
+ {
+ 	void *opaque;
+-	int (*printf)(fz_context *, void *opaque, const char *, va_list ap);
++	int (*printf_)(fz_context *, void *opaque, const char *, va_list ap);
+ 	int (*write)(fz_context *, void *opaque, const void *, int n);
+ 	void (*close)(fz_context *, void *opaque);
+ };
+@@ -34,7 +34,7 @@
+ {
+ 	fz_output *out = fz_malloc_struct(ctx, fz_output);
+ 	out->opaque = file;
+-	out->printf = file_printf;
++	out->printf_ = file_printf;
+ 	out->write = file_write;
+ 	out->close = close ? file_close : NULL;
+ 	return out;
+@@ -55,7 +55,7 @@
+ 	{
+ 		out = fz_malloc_struct(ctx, fz_output);
+ 		out->opaque = file;
+-		out->printf = file_printf;
++		out->printf_ = file_printf;
+ 		out->write = file_write;
+ 		out->close = file_close;
+ 	}
+@@ -87,7 +87,7 @@
+ 		return 0;
+ 
+ 	va_start(ap, fmt);
+-	ret = out->printf(ctx, out->opaque, fmt, ap);
++	ret = out->printf_(ctx, out->opaque, fmt, ap);
+ 	va_end(ap);
+ 
+ 	return ret;
+@@ -143,7 +143,7 @@
+ {
+ 	fz_output *out = fz_malloc_struct(ctx, fz_output);
+ 	out->opaque = fz_keep_buffer(ctx, buf);
+-	out->printf = buffer_printf;
++	out->printf_ = buffer_printf;
+ 	out->write = buffer_write;
+ 	out->close = buffer_close;
+ 	return out;

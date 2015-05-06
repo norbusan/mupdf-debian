@@ -4,16 +4,14 @@ Date: Sat, 20 Sep 2014 23:10:08 +0800
 Subject: Add mudraw -F command switch to man page
 
 ---
- docs/man/mudraw.1 | 4 ++++
+ docs/man/mudraw.1 |    4 ++++
  1 file changed, 4 insertions(+)
 
-diff --git a/docs/man/mudraw.1 b/docs/man/mudraw.1
-index 6964b04..047585d 100644
 --- a/docs/man/mudraw.1
 +++ b/docs/man/mudraw.1
-@@ -25,6 +25,10 @@ In no pages are specified all the pages will be rendered.
- The image format is deduced from the output file name.
- Embed %d in the name to indicate the page number (for example: "page%d.png").
+@@ -27,6 +27,10 @@
+ 
+ .SH OPTIONS
  .TP
 +.B \-F format
 +Output format (if no -F, -o will be examined)
