@@ -40,11 +40,13 @@ void js_free(js_State *J, void *ptr);
 typedef struct js_Regexp js_Regexp;
 typedef struct js_Value js_Value;
 typedef struct js_Object js_Object;
+typedef struct js_String js_String;
 typedef struct js_Ast js_Ast;
 typedef struct js_Function js_Function;
 typedef struct js_Environment js_Environment;
 typedef struct js_StringNode js_StringNode;
 typedef struct js_Jumpbuf js_Jumpbuf;
+typedef struct js_StackTrace js_StackTrace;
 
 /* Limits */
 
@@ -52,6 +54,9 @@ typedef struct js_Jumpbuf js_Jumpbuf;
 #define JS_ENVLIMIT 64		/* environment stack size */
 #define JS_TRYLIMIT 64		/* exception stack size */
 #define JS_GCLIMIT 10000	/* run gc cycle every N allocations */
+
+/* instruction size -- change to unsigned int if you get integer overflow syntax errors */
+typedef unsigned short js_Instruction;
 
 /* String interning */
 
@@ -68,7 +73,8 @@ double js_strtod(const char *as, char **aas);
 /* Private stack functions */
 
 void js_newfunction(js_State *J, js_Function *function, js_Environment *scope);
-void js_newscript(js_State *J, js_Function *function);
+void js_newscript(js_State *J, js_Function *function, js_Environment *scope);
+void js_loadeval(js_State *J, const char *filename, const char *source);
 
 js_Regexp *js_toregexp(js_State *J, int idx);
 int js_isarrayindex(js_State *J, const char *str, unsigned int *idx);
@@ -80,12 +86,24 @@ void js_dup(js_State *J);
 void js_dup2(js_State *J);
 void js_rot2(js_State *J);
 void js_rot3(js_State *J);
+void js_rot4(js_State *J);
 void js_rot2pop1(js_State *J);
 void js_rot3pop2(js_State *J);
 void js_dup1rot3(js_State *J);
 void js_dup1rot4(js_State *J);
 
+void js_pushundefinedthis(js_State *J); /* push 'global' if non-strict, undefined if strict */
+
 void js_RegExp_prototype_exec(js_State *J, js_Regexp *re, const char *text);
+
+void js_trap(js_State *J, int pc); /* dump stack and environment to stdout */
+
+struct js_StackTrace
+{
+	const char *name;
+	const char *file;
+	int line;
+};
 
 /* Exception handling */
 
@@ -94,30 +112,34 @@ struct js_Jumpbuf
 	jmp_buf buf;
 	js_Environment *E;
 	int envtop;
+	int tracetop;
 	int top, bot;
-	short *pc;
+	js_Instruction *pc;
 };
 
-void js_savetry(js_State *J, short *pc);
+void js_savetry(js_State *J, js_Instruction *pc);
 
 #define js_trypc(J, PC) \
-	(js_savetry(J, PC), setjmp(J->trybuf[J->trylen++].buf))
+	(js_savetry(J, PC), setjmp(J->trybuf[J->trytop++].buf))
 
 #define js_try(J) \
-	(js_savetry(J, NULL), setjmp(J->trybuf[J->trylen++].buf))
+	(js_savetry(J, NULL), setjmp(J->trybuf[J->trytop++].buf))
 
 #define js_endtry(J) \
-	(--J->trylen)
+	(--J->trytop)
 
 /* State struct */
 
 struct js_State
 {
 	void *actx;
+	void *uctx;
 	js_Alloc alloc;
 	js_Panic panic;
 
 	js_StringNode *strings;
+
+	int strict;
 
 	/* parser input source */
 	const char *filename;
@@ -132,13 +154,11 @@ struct js_State
 	int newline;
 
 	/* parser state */
+	int astline;
 	int lookahead;
 	const char *text;
 	double number;
 	js_Ast *gcast; /* list of allocated nodes to free after parsing */
-
-	/* compiler state */
-	int strict;
 
 	/* runtime environment */
 	js_Object *Object_prototype;
@@ -174,13 +194,19 @@ struct js_State
 	js_Environment *gcenv;
 	js_Function *gcfun;
 	js_Object *gcobj;
+	js_String *gcstr;
+
 
 	/* environments on the call stack but currently not in scope */
 	int envtop;
 	js_Environment *envstack[JS_ENVLIMIT];
 
+	/* debug info stack trace */
+	int tracetop;
+	js_StackTrace trace[JS_ENVLIMIT];
+
 	/* exception stack */
-	int trylen;
+	int trytop;
 	js_Jumpbuf trybuf[JS_TRYLIMIT];
 };
 

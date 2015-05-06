@@ -66,7 +66,6 @@ static const struct { const char *ent; int ucs; } html_entities[] = {
 struct parser
 {
 	fz_xml *head;
-	fz_context *ctx;
 	int preserve_white;
 	int depth;
 };
@@ -83,7 +82,7 @@ struct fz_xml_s
 	char name[40];
 	char *text;
 	struct attribute *atts;
-	fz_xml *up, *down, *prev, *next;
+	fz_xml *up, *down, *tail, *prev, *next;
 };
 
 static inline void indent(int n)
@@ -123,48 +122,75 @@ void fz_debug_xml(fz_xml *item, int level)
 
 fz_xml *fz_xml_prev(fz_xml *item)
 {
-	return item->prev;
+	return item ? item->prev : NULL;
 }
 
 fz_xml *fz_xml_next(fz_xml *item)
 {
-	return item->next;
+	return item ? item->next : NULL;
 }
 
 fz_xml *fz_xml_up(fz_xml *item)
 {
-	return item->up;
+	return item ? item->up : NULL;
 }
 
 fz_xml *fz_xml_down(fz_xml *item)
 {
-	return item->down;
+	return item ? item->down : NULL;
 }
 
 char *fz_xml_text(fz_xml *item)
 {
-	return item->text;
+	return item ? item->text : NULL;
 }
 
 char *fz_xml_tag(fz_xml *item)
 {
-	if (item->name[0])
-		return item->name;
-	return NULL;
+	return item && item->name[0] ? item->name : NULL;
 }
 
 int fz_xml_is_tag(fz_xml *item, const char *name)
 {
-	return item->name && !strcmp(item->name, name);
+	if (!item)
+		return 0;
+	return !strcmp(item->name, name);
 }
 
 char *fz_xml_att(fz_xml *item, const char *name)
 {
 	struct attribute *att;
+	if (!item)
+		return NULL;
 	for (att = item->atts; att; att = att->next)
 		if (!strcmp(att->name, name))
 			return att->value;
 	return NULL;
+}
+
+fz_xml *fz_xml_find(fz_xml *item, const char *tag)
+{
+	while (item)
+	{
+		if (!strcmp(item->name, tag))
+			return item;
+		item = item->next;
+	}
+	return NULL;
+}
+
+fz_xml *fz_xml_find_next(fz_xml *item, const char *tag)
+{
+	if (item)
+		item = item->next;
+	return fz_xml_find(item, tag);
+}
+
+fz_xml *fz_xml_find_down(fz_xml *item, const char *tag)
+{
+	if (item)
+		item = item->down;
+	return fz_xml_find(item, tag);
 }
 
 static void xml_free_attribute(fz_context *ctx, struct attribute *att)
@@ -178,7 +204,7 @@ static void xml_free_attribute(fz_context *ctx, struct attribute *att)
 	}
 }
 
-void fz_free_xml(fz_context *ctx, fz_xml *item)
+void fz_drop_xml(fz_context *ctx, fz_xml *item)
 {
 	while (item)
 	{
@@ -188,7 +214,7 @@ void fz_free_xml(fz_context *ctx, fz_xml *item)
 		if (item->atts)
 			xml_free_attribute(ctx, item->atts);
 		if (item->down)
-			fz_free_xml(ctx, item->down);
+			fz_drop_xml(ctx, item->down);
 		fz_free(ctx, item);
 		item = next;
 	}
@@ -260,7 +286,7 @@ static inline int iswhite(int c)
 	return c == ' ' || c == '\r' || c == '\n' || c == '\t';
 }
 
-static void xml_emit_open_tag(struct parser *parser, char *a, char *b)
+static void xml_emit_open_tag(fz_context *ctx, struct parser *parser, char *a, char *b)
 {
 	fz_xml *head, *tail;
 	char *ns;
@@ -270,7 +296,7 @@ static void xml_emit_open_tag(struct parser *parser, char *a, char *b)
 		if (*ns == ':')
 			a = ns + 1;
 
-	head = fz_malloc_struct(parser->ctx, fz_xml);
+	head = fz_malloc_struct(ctx, fz_xml);
 	if (b - a > sizeof(head->name) - 1)
 		b = a + sizeof(head->name) - 1;
 	memcpy(head->name, a, b - a);
@@ -285,25 +311,25 @@ static void xml_emit_open_tag(struct parser *parser, char *a, char *b)
 
 	if (!parser->head->down) {
 		parser->head->down = head;
+		parser->head->tail = head;
 	}
 	else {
-		tail = parser->head->down;
-		while (tail->next)
-			tail = tail->next;
+		tail = parser->head->tail;
 		tail->next = head;
 		head->prev = tail;
+		parser->head->tail = head;
 	}
 
 	parser->head = head;
 	parser->depth++;
 }
 
-static void xml_emit_att_name(struct parser *parser, char *a, char *b)
+static void xml_emit_att_name(fz_context *ctx, struct parser *parser, char *a, char *b)
 {
 	fz_xml *head = parser->head;
 	struct attribute *att;
 
-	att = fz_malloc_struct(parser->ctx, struct attribute);
+	att = fz_malloc_struct(ctx, struct attribute);
 	if (b - a > sizeof(att->name) - 1)
 		b = a + sizeof(att->name) - 1;
 	memcpy(att->name, a, b - a);
@@ -313,7 +339,7 @@ static void xml_emit_att_name(struct parser *parser, char *a, char *b)
 	head->atts = att;
 }
 
-static void xml_emit_att_value(struct parser *parser, char *a, char *b)
+static void xml_emit_att_value(fz_context *ctx, struct parser *parser, char *a, char *b)
 {
 	fz_xml *head = parser->head;
 	struct attribute *att = head->atts;
@@ -321,7 +347,7 @@ static void xml_emit_att_value(struct parser *parser, char *a, char *b)
 	int c;
 
 	/* entities are all longer than UTFmax so runetochar is safe */
-	s = att->value = fz_malloc(parser->ctx, b - a + 1);
+	s = att->value = fz_malloc(ctx, b - a + 1);
 	while (a < b) {
 		if (*a == '&') {
 			a += xml_parse_entity(&c, a);
@@ -334,14 +360,14 @@ static void xml_emit_att_value(struct parser *parser, char *a, char *b)
 	*s = 0;
 }
 
-static void xml_emit_close_tag(struct parser *parser)
+static void xml_emit_close_tag(fz_context *ctx, struct parser *parser)
 {
 	parser->depth--;
 	if (parser->head->up)
 		parser->head = parser->head->up;
 }
 
-static void xml_emit_text(struct parser *parser, char *a, char *b)
+static void xml_emit_text(fz_context *ctx, struct parser *parser, char *a, char *b)
 {
 	static char *empty = "";
 	fz_xml *head;
@@ -362,11 +388,11 @@ static void xml_emit_text(struct parser *parser, char *a, char *b)
 			return;
 	}
 
-	xml_emit_open_tag(parser, empty, empty);
+	xml_emit_open_tag(ctx, parser, empty, empty);
 	head = parser->head;
 
 	/* entities are all longer than UTFmax so runetochar is safe */
-	s = head->text = fz_malloc(parser->ctx, b - a + 1);
+	s = head->text = fz_malloc(ctx, b - a + 1);
 	while (a < b) {
 		if (*a == '&') {
 			a += xml_parse_entity(&c, a);
@@ -378,27 +404,27 @@ static void xml_emit_text(struct parser *parser, char *a, char *b)
 	}
 	*s = 0;
 
-	xml_emit_close_tag(parser);
+	xml_emit_close_tag(ctx, parser);
 }
 
-static void xml_emit_cdata(struct parser *parser, char *a, char *b)
+static void xml_emit_cdata(fz_context *ctx, struct parser *parser, char *a, char *b)
 {
 	static char *empty = "";
 	fz_xml *head;
 	char *s;
 
-	xml_emit_open_tag(parser, empty, empty);
+	xml_emit_open_tag(ctx, parser, empty, empty);
 	head = parser->head;
 
-	s = head->text = fz_malloc(parser->ctx, b - a + 1);
+	s = head->text = fz_malloc(ctx, b - a + 1);
 	while (a < b)
 		*s++ = *a++;
 	*s = 0;
 
-	xml_emit_close_tag(parser);
+	xml_emit_close_tag(ctx, parser);
 }
 
-static char *xml_parse_document_imp(struct parser *x, char *p)
+static char *xml_parse_document_imp(fz_context *ctx, struct parser *parser, char *p)
 {
 	char *mark;
 	int quote;
@@ -406,7 +432,7 @@ static char *xml_parse_document_imp(struct parser *x, char *p)
 parse_text:
 	mark = p;
 	while (*p && *p != '<') ++p;
-	xml_emit_text(x, mark, p);
+	if (mark != p) xml_emit_text(ctx, parser, mark, p);
 	if (*p == '<') { ++p; goto parse_element; }
 	return NULL;
 
@@ -444,7 +470,7 @@ parse_cdata:
 	mark = p;
 	while (*p) {
 		if (p[0] == ']' && p[1] == ']' && p[2] == '>') {
-			xml_emit_cdata(x, mark, p);
+			xml_emit_cdata(ctx, parser, mark, p);
 			p += 3;
 			goto parse_text;
 		}
@@ -468,17 +494,17 @@ parse_closing_element:
 	while (iswhite(*p)) ++p;
 	if (*p != '>')
 		return "syntax error in closing element";
-	xml_emit_close_tag(x);
+	xml_emit_close_tag(ctx, parser);
 	++p;
 	goto parse_text;
 
 parse_element_name:
 	mark = p;
 	while (isname(*p)) ++p;
-	xml_emit_open_tag(x, mark, p);
+	xml_emit_open_tag(ctx, parser, mark, p);
 	if (*p == '>') { ++p; goto parse_text; }
 	if (p[0] == '/' && p[1] == '>') {
-		xml_emit_close_tag(x);
+		xml_emit_close_tag(ctx, parser);
 		p += 2;
 		goto parse_text;
 	}
@@ -492,7 +518,7 @@ parse_attributes:
 		goto parse_attribute_name;
 	if (*p == '>') { ++p; goto parse_text; }
 	if (p[0] == '/' && p[1] == '>') {
-		xml_emit_close_tag(x);
+		xml_emit_close_tag(ctx, parser);
 		p += 2;
 		goto parse_text;
 	}
@@ -501,7 +527,7 @@ parse_attributes:
 parse_attribute_name:
 	mark = p;
 	while (isname(*p)) ++p;
-	xml_emit_att_name(x, mark, p);
+	xml_emit_att_name(ctx, parser, mark, p);
 	while (iswhite(*p)) ++p;
 	if (*p == '=') { ++p; goto parse_attribute_value; }
 	return "syntax error after attribute name";
@@ -514,7 +540,7 @@ parse_attribute_value:
 	mark = p;
 	while (*p && *p != quote) ++p;
 	if (*p == quote) {
-		xml_emit_att_value(x, mark, p++);
+		xml_emit_att_value(ctx, parser, mark, p++);
 		goto parse_attributes;
 	}
 	return "end of data in attribute value";
@@ -572,7 +598,6 @@ fz_parse_xml(fz_context *ctx, unsigned char *s, int n, int preserve_white)
 
 	memset(&root, 0, sizeof(root));
 	parser.head = &root;
-	parser.ctx = ctx;
 	parser.preserve_white = preserve_white;
 	parser.depth = 0;
 
@@ -580,7 +605,7 @@ fz_parse_xml(fz_context *ctx, unsigned char *s, int n, int preserve_white)
 
 	fz_try(ctx)
 	{
-		error = xml_parse_document_imp(&parser, p);
+		error = xml_parse_document_imp(ctx, &parser, p);
 		if (error)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "%s", error);
 	}
@@ -591,7 +616,7 @@ fz_parse_xml(fz_context *ctx, unsigned char *s, int n, int preserve_white)
 	}
 	fz_catch(ctx)
 	{
-		fz_free_xml(ctx, root.down);
+		fz_drop_xml(ctx, root.down);
 		fz_rethrow(ctx);
 	}
 

@@ -7,8 +7,14 @@
 #import <Crashlytics/Crashlytics.h>
 #endif
 
+@interface MuAppDelegate () <UINavigationControllerDelegate>
+@end
+
 @implementation MuAppDelegate
 {
+	UIWindow *window;
+	UINavigationController *navigator;
+	MuLibraryController *library;
 	BOOL _isInBackground;
 }
 

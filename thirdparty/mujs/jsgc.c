@@ -48,6 +48,8 @@ static void jsG_freeobject(js_State *J, js_Object *obj)
 		js_regfree(obj->u.r.prog);
 	if (obj->type == JS_CITERATOR)
 		jsG_freeiterator(J, obj->u.iter.head);
+	if (obj->type == JS_CUSERDATA && obj->u.user.finalize)
+		obj->u.user.finalize(J, obj->u.user.data);
 	js_free(J, obj);
 }
 
@@ -73,6 +75,8 @@ static void jsG_markenvironment(js_State *J, int mark, js_Environment *env)
 static void jsG_markproperty(js_State *J, int mark, js_Property *node)
 {
 	while (node) {
+		if (node->value.type == JS_TMEMSTR && node->value.u.memstr->gcmark != mark)
+			node->value.u.memstr->gcmark = mark;
 		if (node->value.type == JS_TOBJECT && node->value.u.object->gcmark != mark)
 			jsG_markobject(J, mark, node->value.u.object);
 		if (node->getter && node->getter->gcmark != mark)
@@ -106,6 +110,8 @@ static void jsG_markstack(js_State *J, int mark)
 	js_Value *v = J->stack;
 	int n = J->top;
 	while (n--) {
+		if (v->type == JS_TMEMSTR && v->u.memstr->gcmark != mark)
+			v->u.memstr->gcmark = mark;
 		if (v->type == JS_TOBJECT && v->u.object->gcmark != mark)
 			jsG_markobject(J, mark, v->u.object);
 		++v;
@@ -116,9 +122,10 @@ void js_gc(js_State *J, int report)
 {
 	js_Function *fun, *nextfun, **prevnextfun;
 	js_Object *obj, *nextobj, **prevnextobj;
+	js_String *str, *nextstr, **prevnextstr;
 	js_Environment *env, *nextenv, **prevnextenv;
-	int nenv = 0, nfun = 0, nobj = 0;
-	int genv = 0, gfun = 0, gobj = 0;
+	int nenv = 0, nfun = 0, nobj = 0, nstr = 0;
+	int genv = 0, gfun = 0, gobj = 0, gstr = 0;
 	int mark;
 	int i;
 
@@ -190,9 +197,22 @@ void js_gc(js_State *J, int report)
 		++nobj;
 	}
 
+	prevnextstr = &J->gcstr;
+	for (str = J->gcstr; str; str = nextstr) {
+		nextstr = str->gcnext;
+		if (str->gcmark != mark) {
+			*prevnextstr = nextstr;
+			js_free(J, str);
+			++gstr;
+		} else {
+			prevnextstr = &str->gcnext;
+		}
+		++nstr;
+	}
+
 	if (report)
-		printf("garbage collected: %d/%d envs, %d/%d funs, %d/%d objs\n",
-			genv, nenv, gfun, nfun, gobj, nobj);
+		printf("garbage collected: %d/%d envs, %d/%d funs, %d/%d objs, %d/%d strs\n",
+			genv, nenv, gfun, nfun, gobj, nobj, gstr, nstr);
 }
 
 void js_freestate(js_State *J)
@@ -200,6 +220,7 @@ void js_freestate(js_State *J)
 	js_Function *fun, *nextfun;
 	js_Object *obj, *nextobj;
 	js_Environment *env, *nextenv;
+	js_String *str, *nextstr;
 
 	for (env = J->gcenv; env; env = nextenv)
 		nextenv = env->gcnext, jsG_freeenvironment(J, env);
@@ -207,6 +228,8 @@ void js_freestate(js_State *J)
 		nextfun = fun->gcnext, jsG_freefunction(J, fun);
 	for (obj = J->gcobj; obj; obj = nextobj)
 		nextobj = obj->gcnext, jsG_freeobject(J, obj);
+	for (str = J->gcstr; str; str = nextstr)
+		nextstr = str->gcnext, js_free(J, str);
 
 	jsS_freestrings(J);
 

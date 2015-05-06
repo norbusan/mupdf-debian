@@ -207,7 +207,7 @@ void fz_tint_pixmap(fz_context *ctx, fz_pixmap *pix, int r, int g, int b);
 
 	Does not throw exceptions.
 */
-void fz_invert_pixmap_rect(fz_pixmap *image, const fz_irect *rect);
+void fz_invert_pixmap_rect(fz_context *ctx, fz_pixmap *image, const fz_irect *rect);
 
 /*
 	fz_gamma_pixmap: Apply gamma correction to a pixmap. All components
@@ -267,8 +267,7 @@ void fz_convert_pixmap(fz_context *ctx, fz_pixmap *dst, fz_pixmap *src);
 
 	free_samples: Is zero when an application has provided its own
 	buffer for pixel data through fz_new_pixmap_with_bbox_and_data.
-	If not zero the buffer will be freed when fz_drop_pixmap is
-	called for the pixmap.
+	If non-zero the buffer will be freed along with the the pixmap.
 */
 struct fz_pixmap_s
 {
@@ -281,7 +280,7 @@ struct fz_pixmap_s
 	int free_samples;
 };
 
-void fz_free_pixmap_imp(fz_context *ctx, fz_storable *pix);
+void fz_drop_pixmap_imp(fz_context *ctx, fz_storable *pix);
 
 void fz_copy_pixmap_rect(fz_context *ctx, fz_pixmap *dest, fz_pixmap *src, const fz_irect *r);
 void fz_premultiply_pixmap(fz_context *ctx, fz_pixmap *pix);
@@ -293,21 +292,21 @@ fz_pixmap *fz_scale_pixmap(fz_context *ctx, fz_pixmap *src, float x, float y, fl
 typedef struct fz_scale_cache_s fz_scale_cache;
 
 fz_scale_cache *fz_new_scale_cache(fz_context *ctx);
-void fz_free_scale_cache(fz_context *ctx, fz_scale_cache *cache);
+void fz_drop_scale_cache(fz_context *ctx, fz_scale_cache *cache);
 fz_pixmap *fz_scale_pixmap_cached(fz_context *ctx, fz_pixmap *src, float x, float y, float w, float h, const fz_irect *clip, fz_scale_cache *cache_x, fz_scale_cache *cache_y);
 
 void fz_subsample_pixmap(fz_context *ctx, fz_pixmap *tile, int factor);
 
 fz_irect *fz_pixmap_bbox_no_ctx(fz_pixmap *src, fz_irect *bbox);
 
-void fz_decode_tile(fz_pixmap *pix, float *decode);
-void fz_decode_indexed_tile(fz_pixmap *pix, float *decode, int maxval);
-void fz_unpack_tile(fz_pixmap *dst, unsigned char * restrict src, int n, int depth, int stride, int scale);
+void fz_decode_tile(fz_context *ctx, fz_pixmap *pix, float *decode);
+void fz_decode_indexed_tile(fz_context *ctx, fz_pixmap *pix, float *decode, int maxval);
+void fz_unpack_tile(fz_context *ctx, fz_pixmap *dst, unsigned char * restrict src, int n, int depth, int stride, int scale);
 
 /*
 	fz_md5_pixmap: Return the md5 digest for a pixmap
 */
-void fz_md5_pixmap(fz_pixmap *pixmap, unsigned char digest[16]);
+void fz_md5_pixmap(fz_context *ctx, fz_pixmap *pixmap, unsigned char digest[16]);
 
 fz_pixmap *fz_new_pixmap_from_8bpp_data(fz_context *ctx, int x, int y, int w, int h, unsigned char *sp, int span);
 fz_pixmap *fz_new_pixmap_from_1bpp_data(fz_context *ctx, int x, int y, int w, int h, unsigned char *sp, int span);

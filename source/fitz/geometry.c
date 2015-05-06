@@ -217,18 +217,26 @@ int
 fz_try_invert_matrix(fz_matrix *dst, const fz_matrix *src)
 {
 	/* Be careful to cope with dst == src */
-	float a = src->a;
-	float det = a * src->d - src->b * src->c;
-	if (det >= -FLT_EPSILON && det <= FLT_EPSILON)
+	double sa = (double)src->a;
+	double sb = (double)src->b;
+	double sc = (double)src->c;
+	double sd = (double)src->d;
+	double da, db, dc, dd;
+	double det = sa * sd - sb * sc;
+	if (det >= -DBL_EPSILON && det <= DBL_EPSILON)
 		return 1;
 	det = 1 / det;
-	dst->a = src->d * det;
-	dst->b = -src->b * det;
-	dst->c = -src->c * det;
-	dst->d = a * det;
-	a = -src->e * dst->a - src->f * dst->c;
-	dst->f = -src->e * dst->b - src->f * dst->d;
-	dst->e = a;
+	da = sd * det;
+	dst->a = (float)da;
+	db = -sb * det;
+	dst->b = (float)db;
+	dc = -sc * det;
+	dst->c = (float)dc;
+	dd = sa * det;
+	dst->d = (float)dd;
+	da = -src->e * da - src->f * dc;
+	dst->f = (float)(-src->e * db - src->f * dd);
+	dst->e = (float)da;
 	return 0;
 }
 
@@ -316,10 +324,20 @@ const fz_irect fz_unit_bbox = { 0, 0, 1, 1 };
 fz_irect *
 fz_irect_from_rect(fz_irect *restrict b, const fz_rect *restrict r)
 {
-	b->x0 = fz_clamp(floorf(r->x0), MIN_SAFE_INT, MAX_SAFE_INT);
-	b->y0 = fz_clamp(floorf(r->y0), MIN_SAFE_INT, MAX_SAFE_INT);
-	b->x1 = fz_clamp(ceilf(r->x1), MIN_SAFE_INT, MAX_SAFE_INT);
-	b->y1 = fz_clamp(ceilf(r->y1), MIN_SAFE_INT, MAX_SAFE_INT);
+	if (fz_is_empty_rect(r))
+	{
+		b->x0 = 0;
+		b->y0 = 0;
+		b->x1 = 0;
+		b->y1 = 0;
+	}
+	else
+	{
+		b->x0 = fz_clamp(floorf(r->x0), MIN_SAFE_INT, MAX_SAFE_INT);
+		b->y0 = fz_clamp(floorf(r->y0), MIN_SAFE_INT, MAX_SAFE_INT);
+		b->x1 = fz_clamp(ceilf(r->x1), MIN_SAFE_INT, MAX_SAFE_INT);
+		b->y1 = fz_clamp(ceilf(r->y1), MIN_SAFE_INT, MAX_SAFE_INT);
+	}
 	return b;
 }
 

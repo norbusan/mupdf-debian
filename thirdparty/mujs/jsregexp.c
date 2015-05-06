@@ -48,6 +48,10 @@ void js_RegExp_prototype_exec(js_State *J, js_Regexp *re, const char *text)
 
 	if (!js_regexec(re->prog, text, &m, opts)) {
 		js_newarray(J);
+		js_pushstring(J, text);
+		js_setproperty(J, -2, "input");
+		js_pushnumber(J, js_utfptrtoidx(text, m.sub[0].sp));
+		js_setproperty(J, -2, "index");
 		for (i = 0; i < m.nsub; ++i) {
 			js_pushlstring(J, m.sub[i].sp, m.sub[i].ep - m.sub[i].sp);
 			js_setindex(J, -2, i);
@@ -185,6 +189,6 @@ void jsB_initregexp(js_State *J)
 		jsB_propf(J, "test", Rp_test, 0);
 		jsB_propf(J, "exec", Rp_exec, 0);
 	}
-	js_newcconstructor(J, jsB_RegExp, jsB_new_RegExp, 1);
+	js_newcconstructor(J, jsB_RegExp, jsB_new_RegExp, "RegExp", 1);
 	js_defglobal(J, "RegExp", JS_DONTENUM);
 }

@@ -9,16 +9,10 @@ struct fz_id_context_s
 static void
 fz_drop_id_context(fz_context *ctx)
 {
-	int refs;
-	fz_id_context *id = ctx->id;
-
-	if (id == NULL)
+	if (!ctx)
 		return;
-	fz_lock(ctx, FZ_LOCK_ALLOC);
-	refs = --id->refs;
-	fz_unlock(ctx, FZ_LOCK_ALLOC);
-	if (refs == 0)
-		fz_free(ctx, id);
+	if (fz_drop_imp(ctx, ctx->id, &ctx->id->refs))
+		fz_free(ctx, ctx->id);
 }
 
 static void
@@ -32,18 +26,13 @@ fz_new_id_context(fz_context *ctx)
 static fz_id_context *
 fz_keep_id_context(fz_context *ctx)
 {
-	fz_id_context *id = ctx->id;
-
-	if (id == NULL)
+	if (!ctx)
 		return NULL;
-	fz_lock(ctx, FZ_LOCK_ALLOC);
-	++id->refs;
-	fz_unlock(ctx, FZ_LOCK_ALLOC);
-	return id;
+	return fz_keep_imp(ctx, ctx->id, &ctx->id->refs);
 }
 
 void
-fz_free_context(fz_context *ctx)
+fz_drop_context(fz_context *ctx)
 {
 	if (!ctx)
 		return;
@@ -52,7 +41,7 @@ fz_free_context(fz_context *ctx)
 	fz_drop_document_handler_context(ctx);
 	fz_drop_glyph_cache_context(ctx);
 	fz_drop_store_context(ctx);
-	fz_free_aa_context(ctx);
+	fz_drop_aa_context(ctx);
 	fz_drop_colorspace_context(ctx);
 	fz_drop_font_context(ctx);
 	fz_drop_id_context(ctx);
@@ -90,14 +79,14 @@ new_context_phase1(fz_alloc_context *alloc, fz_locks_context *locks)
 
 	ctx->glyph_cache = NULL;
 
-	ctx->error = fz_malloc_no_throw(ctx, sizeof(fz_error_context));
+	ctx->error = Memento_label(fz_malloc_no_throw(ctx, sizeof(fz_error_context)), "fz_error_context");
 	if (!ctx->error)
 		goto cleanup;
 	ctx->error->top = -1;
 	ctx->error->errcode = FZ_ERROR_NONE;
 	ctx->error->message[0] = 0;
 
-	ctx->warn = fz_malloc_no_throw(ctx, sizeof(fz_warn_context));
+	ctx->warn = Memento_label(fz_malloc_no_throw(ctx, sizeof(fz_warn_context)), "fz_warn_context");
 	if (!ctx->warn)
 		goto cleanup;
 	ctx->warn->message[0] = 0;
@@ -117,7 +106,7 @@ new_context_phase1(fz_alloc_context *alloc, fz_locks_context *locks)
 
 cleanup:
 	fprintf(stderr, "cannot create context (phase 1)\n");
-	fz_free_context(ctx);
+	fz_drop_context(ctx);
 	return NULL;
 }
 
@@ -155,7 +144,7 @@ fz_new_context_imp(fz_alloc_context *alloc, fz_locks_context *locks, unsigned in
 	fz_catch(ctx)
 	{
 		fprintf(stderr, "cannot create context (phase 2)\n");
-		fz_free_context(ctx);
+		fz_drop_context(ctx);
 		return NULL;
 	}
 	return ctx;
@@ -208,12 +197,9 @@ fz_gen_id(fz_context *ctx)
 {
 	int id;
 	fz_lock(ctx, FZ_LOCK_ALLOC);
-	/* We'll never wrap around in normal use, but if we *do*, then avoid
-	 * 0. */
+	/* We'll never wrap around in normal use, but if we do, then avoid 0. */
 	do
-	{
 		id = ++ctx->id->id;
-	}
 	while (id == 0);
 	fz_unlock(ctx, FZ_LOCK_ALLOC);
 	return id;

@@ -4,8 +4,10 @@
 -(void) switchCaseInternal:(void (^)(MuTapResultInternalLink *))internalLinkBlock caseExternal:(void (^)(MuTapResultExternalLink *))externalLinkBlock caseRemote:(void (^)(MuTapResultRemoteLink *))remoteLinkBlock caseWidget:(void (^)(MuTapResultWidget *))widgetBlock caseAnnotation:(void (^)(MuTapResultAnnotation *))annotationBlock {}
 @end
 
-
 @implementation MuTapResultInternalLink
+{
+	int pageNumber;
+}
 
 @synthesize pageNumber;
 
@@ -26,8 +28,10 @@
 
 @end
 
-
 @implementation MuTapResultExternalLink
+{
+	NSString *url;
+}
 
 @synthesize url;
 
@@ -54,8 +58,12 @@
 
 @end
 
-
 @implementation MuTapResultRemoteLink
+{
+	NSString *fileSpec;
+	int pageNumber;
+	BOOL newWindow;
+}
 
 @synthesize fileSpec, pageNumber, newWindow;
 
@@ -84,7 +92,6 @@
 
 @end
 
-
 @implementation MuTapResultWidget
 
 -(void) switchCaseInternal:(void (^)(MuTapResultInternalLink *))internalLinkBlock caseExternal:(void (^)(MuTapResultExternalLink *))externalLinkBlock caseRemote:(void (^)(MuTapResultRemoteLink *))remoteLinkBlock caseWidget:(void (^)(MuTapResultWidget *))widgetBlock caseAnnotation:(void (^)(MuTapResultAnnotation *))annotationBlock
@@ -94,8 +101,10 @@
 
 @end
 
-
 @implementation MuTapResultAnnotation
+{
+	MuAnnotation *annot;
+}
 
 @synthesize annot;
 

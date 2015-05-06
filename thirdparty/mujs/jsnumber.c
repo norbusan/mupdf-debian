@@ -21,6 +21,7 @@ static void Np_valueOf(js_State *J)
 
 static void Np_toString(js_State *J)
 {
+	char buf[32];
 	js_Object *self = js_toobject(J, 0);
 	int radix = js_isundefined(J, 1) ? 10 : js_tointeger(J, 1);
 	if (self->type != JS_CNUMBER) js_typeerror(J, "not a number");
@@ -28,11 +29,11 @@ static void Np_toString(js_State *J)
 		js_rangeerror(J, "invalid radix");
 	if (radix != 10)
 		js_rangeerror(J, "invalid radix");
-	js_pushliteral(J, jsV_numbertostring(J, self->u.number));
+	js_pushstring(J, jsV_numbertostring(J, buf, self->u.number));
 }
 
 /* Customized ToString() on a number */
-void numtostr(js_State *J, const char *fmt, int w, double n)
+static void numtostr(js_State *J, const char *fmt, int w, double n)
 {
 	char buf[32], *e;
 	if (isnan(n)) js_pushliteral(J, "NaN");
@@ -88,7 +89,7 @@ void jsB_initnumber(js_State *J)
 		jsB_propf(J, "toExponential", Np_toExponential, 1);
 		jsB_propf(J, "toPrecision", Np_toPrecision, 1);
 	}
-	js_newcconstructor(J, jsB_Number, jsB_new_Number, 1);
+	js_newcconstructor(J, jsB_Number, jsB_new_Number, "Number", 1);
 	{
 		jsB_propn(J, "MAX_VALUE", 1.7976931348623157e+308);
 		jsB_propn(J, "MIN_VALUE", 5e-324);

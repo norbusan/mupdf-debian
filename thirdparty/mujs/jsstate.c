@@ -5,6 +5,8 @@
 #include "jsrun.h"
 #include "jsbuiltin.h"
 
+#include <assert.h>
+
 static void *js_defaultalloc(void *actx, void *ptr, unsigned int size)
 {
 	if (size == 0) {
@@ -18,7 +20,7 @@ static void *js_defaultalloc(void *actx, void *ptr, unsigned int size)
 
 static void js_defaultpanic(js_State *J)
 {
-	fprintf(stderr, "libjs: uncaught exception: %s\n", js_tostring(J, -1));
+	fprintf(stderr, "uncaught exception: %s\n", js_tostring(J, -1));
 	/* return to javascript to abort */
 }
 
@@ -40,7 +42,7 @@ int js_ploadfile(js_State *J, const char *filename)
 	return 0;
 }
 
-void js_loadstring(js_State *J, const char *filename, const char *source)
+static void js_loadstringx(js_State *J, const char *filename, const char *source, int iseval)
 {
 	js_Ast *P;
 	js_Function *F;
@@ -53,9 +55,19 @@ void js_loadstring(js_State *J, const char *filename, const char *source)
 	P = jsP_parse(J, filename, source);
 	F = jsC_compile(J, P);
 	jsP_freeparse(J);
-	js_newscript(J, F);
+	js_newscript(J, F, iseval ? (J->strict ? J->E : NULL) : J->GE);
 
 	js_endtry(J);
+}
+
+void js_loadeval(js_State *J, const char *filename, const char *source)
+{
+	js_loadstringx(J, filename, source, 1);
+}
+
+void js_loadstring(js_State *J, const char *filename, const char *source)
+{
+	js_loadstringx(J, filename, source, 0);
 }
 
 void js_loadfile(js_State *J, const char *filename)
@@ -73,8 +85,17 @@ void js_loadfile(js_State *J, const char *filename)
 		fclose(f);
 		js_error(J, "cannot seek in file: '%s'", filename);
 	}
+
 	n = ftell(f);
-	fseek(f, 0, SEEK_SET);
+	if (n < 0) {
+		fclose(f);
+		js_error(J, "cannot tell in file: '%s'", filename);
+	}
+
+	if (fseek(f, 0, SEEK_SET) < 0) {
+		fclose(f);
+		js_error(J, "cannot seek in file: '%s'", filename);
+	}
 
 	s = js_malloc(J, n + 1); /* add space for string terminator */
 	if (!s) {
@@ -107,11 +128,11 @@ void js_loadfile(js_State *J, const char *filename)
 int js_dostring(js_State *J, const char *source, int report)
 {
 	if (js_try(J)) {
-		fprintf(stderr, "libjs: %s\n", js_tostring(J, -1));
+		fprintf(stderr, "%s\n", js_tostring(J, -1));
 		js_pop(J, 1);
 		return 1;
 	}
-	js_loadstring(J, "(string)", source);
+	js_loadstring(J, "[string]", source);
 	js_pushglobal(J);
 	js_call(J, 0);
 	if (report)
@@ -125,7 +146,7 @@ int js_dostring(js_State *J, const char *source, int report)
 int js_dofile(js_State *J, const char *filename)
 {
 	if (js_try(J)) {
-		fprintf(stderr, "libjs: %s\n", js_tostring(J, -1));
+		fprintf(stderr, "%s\n", js_tostring(J, -1));
 		js_pop(J, 1);
 		return 1;
 	}
@@ -144,9 +165,22 @@ js_Panic js_atpanic(js_State *J, js_Panic panic)
 	return old;
 }
 
-js_State *js_newstate(js_Alloc alloc, void *actx)
+void js_setcontext(js_State *J, void *uctx)
+{
+	J->uctx = uctx;
+}
+
+void *js_getcontext(js_State *J)
+{
+	return J->uctx;
+}
+
+js_State *js_newstate(js_Alloc alloc, void *actx, int flags)
 {
 	js_State *J;
+
+	assert(sizeof(js_Value) == 16);
+	assert(offsetof(js_Value, type) == 15);
 
 	if (!alloc)
 		alloc = js_defaultalloc;
@@ -157,6 +191,13 @@ js_State *js_newstate(js_Alloc alloc, void *actx)
 	memset(J, 0, sizeof(*J));
 	J->actx = actx;
 	J->alloc = alloc;
+
+	if (flags & JS_STRICT)
+		J->strict = 1;
+
+	J->trace[0].name = "?";
+	J->trace[0].file = "[C]";
+	J->trace[0].line = 0;
 
 	J->panic = js_defaultpanic;
 

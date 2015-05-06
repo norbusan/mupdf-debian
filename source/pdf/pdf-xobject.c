@@ -13,15 +13,15 @@ pdf_drop_xobject(fz_context *ctx, pdf_xobject *xobj)
 }
 
 static void
-pdf_free_xobject_imp(fz_context *ctx, fz_storable *xobj_)
+pdf_drop_xobject_imp(fz_context *ctx, fz_storable *xobj_)
 {
 	pdf_xobject *xobj = (pdf_xobject *)xobj_;
 
 	if (xobj->colorspace)
 		fz_drop_colorspace(ctx, xobj->colorspace);
-	pdf_drop_obj(xobj->resources);
-	pdf_drop_obj(xobj->contents);
-	pdf_drop_obj(xobj->me);
+	pdf_drop_obj(ctx, xobj->resources);
+	pdf_drop_obj(ctx, xobj->contents);
+	pdf_drop_obj(ctx, xobj->me);
 	fz_free(ctx, xobj);
 }
 
@@ -34,19 +34,19 @@ pdf_xobject_size(pdf_xobject *xobj)
 }
 
 pdf_xobject *
-pdf_load_xobject(pdf_document *doc, pdf_obj *dict)
+pdf_load_xobject(fz_context *ctx, pdf_document *doc, pdf_obj *dict)
 {
 	pdf_xobject *form;
 	pdf_obj *obj;
-	fz_context *ctx = doc->ctx;
 
-	if ((form = pdf_find_item(ctx, pdf_free_xobject_imp, dict)) != NULL)
+	if ((form = pdf_find_item(ctx, pdf_drop_xobject_imp, dict)) != NULL)
 	{
 		return form;
 	}
 
 	form = fz_malloc_struct(ctx, pdf_xobject);
-	FZ_INIT_STORABLE(form, 1, pdf_free_xobject_imp);
+	FZ_INIT_STORABLE(form, 1, pdf_drop_xobject_imp);
+	form->document = doc;
 	form->resources = NULL;
 	form->contents = NULL;
 	form->colorspace = NULL;
@@ -58,10 +58,10 @@ pdf_load_xobject(pdf_document *doc, pdf_obj *dict)
 
 	fz_try(ctx)
 	{
-		obj = pdf_dict_gets(dict, "BBox");
+		obj = pdf_dict_get(ctx, dict, PDF_NAME_BBox);
 		pdf_to_rect(ctx, obj, &form->bbox);
 
-		obj = pdf_dict_gets(dict, "Matrix");
+		obj = pdf_dict_get(ctx, dict, PDF_NAME_Matrix);
 		if (obj)
 			pdf_to_matrix(ctx, obj, &form->matrix);
 		else
@@ -71,24 +71,24 @@ pdf_load_xobject(pdf_document *doc, pdf_obj *dict)
 		form->knockout = 0;
 		form->transparency = 0;
 
-		obj = pdf_dict_gets(dict, "Group");
+		obj = pdf_dict_get(ctx, dict, PDF_NAME_Group);
 		if (obj)
 		{
 			pdf_obj *attrs = obj;
 
-			form->isolated = pdf_to_bool(pdf_dict_gets(attrs, "I"));
-			form->knockout = pdf_to_bool(pdf_dict_gets(attrs, "K"));
+			form->isolated = pdf_to_bool(ctx, pdf_dict_get(ctx, attrs, PDF_NAME_I));
+			form->knockout = pdf_to_bool(ctx, pdf_dict_get(ctx, attrs, PDF_NAME_K));
 
-			obj = pdf_dict_gets(attrs, "S");
-			if (pdf_is_name(obj) && !strcmp(pdf_to_name(obj), "Transparency"))
+			obj = pdf_dict_get(ctx, attrs, PDF_NAME_S);
+			if (pdf_name_eq(ctx, obj, PDF_NAME_Transparency))
 				form->transparency = 1;
 
-			obj = pdf_dict_gets(attrs, "CS");
+			obj = pdf_dict_get(ctx, attrs, PDF_NAME_CS);
 			if (obj)
 			{
 				fz_try(ctx)
 				{
-					form->colorspace = pdf_load_colorspace(doc, obj);
+					form->colorspace = pdf_load_colorspace(ctx, doc, obj);
 				}
 				fz_catch(ctx)
 				{
@@ -97,25 +97,25 @@ pdf_load_xobject(pdf_document *doc, pdf_obj *dict)
 			}
 		}
 
-		form->resources = pdf_dict_gets(dict, "Resources");
+		form->resources = pdf_dict_get(ctx, dict, PDF_NAME_Resources);
 		if (form->resources)
-			pdf_keep_obj(form->resources);
+			pdf_keep_obj(ctx, form->resources);
 
-		form->contents = pdf_keep_obj(dict);
+		form->contents = pdf_keep_obj(ctx, dict);
 	}
 	fz_catch(ctx)
 	{
-		pdf_remove_item(ctx, pdf_free_xobject_imp, dict);
+		pdf_remove_item(ctx, pdf_drop_xobject_imp, dict);
 		pdf_drop_xobject(ctx, form);
-		fz_rethrow_message(ctx, "cannot load xobject content stream (%d %d R)", pdf_to_num(dict), pdf_to_gen(dict));
+		fz_rethrow_message(ctx, "cannot load xobject content stream (%d %d R)", pdf_to_num(ctx, dict), pdf_to_gen(ctx, dict));
 	}
-	form->me = pdf_keep_obj(dict);
+	form->me = pdf_keep_obj(ctx, dict);
 
 	return form;
 }
 
 pdf_obj *
-pdf_new_xobject(pdf_document *doc, const fz_rect *bbox, const fz_matrix *mat)
+pdf_new_xobject(fz_context *ctx, pdf_document *doc, const fz_rect *bbox, const fz_matrix *mat)
 {
 	int idict_num;
 	pdf_obj *idict = NULL;
@@ -124,7 +124,6 @@ pdf_new_xobject(pdf_document *doc, const fz_rect *bbox, const fz_matrix *mat)
 	pdf_obj *obj = NULL;
 	pdf_obj *res = NULL;
 	pdf_obj *procset = NULL;
-	fz_context *ctx = doc->ctx;
 
 	fz_var(idict);
 	fz_var(dict);
@@ -134,55 +133,44 @@ pdf_new_xobject(pdf_document *doc, const fz_rect *bbox, const fz_matrix *mat)
 	fz_var(procset);
 	fz_try(ctx)
 	{
-		dict = pdf_new_dict(doc, 0);
+		dict = pdf_new_dict(ctx, doc, 0);
 
-		obj = pdf_new_rect(doc, bbox);
-		pdf_dict_puts(dict, "BBox", obj);
-		pdf_drop_obj(obj);
-		obj = NULL;
-
-		obj = pdf_new_int(doc, 1);
-		pdf_dict_puts(dict, "FormType", obj);
-		pdf_drop_obj(obj);
+		obj = pdf_new_rect(ctx, doc, bbox);
+		pdf_dict_put(ctx, dict, PDF_NAME_BBox, obj);
+		pdf_drop_obj(ctx, obj);
 		obj = NULL;
 
-		obj = pdf_new_int(doc, 0);
-		pdf_dict_puts(dict, "Length", obj);
-		pdf_drop_obj(obj);
+		obj = pdf_new_int(ctx, doc, 1);
+		pdf_dict_put(ctx, dict, PDF_NAME_FormType, obj);
+		pdf_drop_obj(ctx, obj);
 		obj = NULL;
 
-		obj = pdf_new_matrix(doc, mat);
-		pdf_dict_puts(dict, "Matrix", obj);
-		pdf_drop_obj(obj);
+		obj = pdf_new_int(ctx, doc, 0);
+		pdf_dict_put(ctx, dict, PDF_NAME_Length, obj);
+		pdf_drop_obj(ctx, obj);
 		obj = NULL;
 
-		res = pdf_new_dict(doc, 0);
-		procset = pdf_new_array(doc, 2);
-		obj = pdf_new_name(doc, "PDF");
-		pdf_array_push(procset, obj);
-		pdf_drop_obj(obj);
+		obj = pdf_new_matrix(ctx, doc, mat);
+		pdf_dict_put(ctx, dict, PDF_NAME_Matrix, obj);
+		pdf_drop_obj(ctx, obj);
 		obj = NULL;
-		obj = pdf_new_name(doc, "Text");
-		pdf_array_push(procset, obj);
-		pdf_drop_obj(obj);
-		obj = NULL;
-		pdf_dict_puts(res, "ProcSet", procset);
-		pdf_drop_obj(procset);
+
+		res = pdf_new_dict(ctx, doc, 0);
+		procset = pdf_new_array(ctx, doc, 2);
+		pdf_array_push(ctx, procset, PDF_NAME_PDF);
+		pdf_array_push(ctx, procset, PDF_NAME_Text);
+		pdf_dict_put(ctx, res, PDF_NAME_ProcSet, procset);
+		pdf_drop_obj(ctx, procset);
 		procset = NULL;
-		pdf_dict_puts(dict, "Resources", res);
+		pdf_dict_put(ctx, dict, PDF_NAME_Resources, res);
 
-		obj = pdf_new_name(doc, "Form");
-		pdf_dict_puts(dict, "Subtype", obj);
-		pdf_drop_obj(obj);
-		obj = NULL;
+		pdf_dict_put(ctx, dict, PDF_NAME_Subtype, PDF_NAME_Form);
 
-		obj = pdf_new_name(doc, "XObject");
-		pdf_dict_puts(dict, "Type", obj);
-		pdf_drop_obj(obj);
-		obj = NULL;
+		pdf_dict_put(ctx, dict, PDF_NAME_Type, PDF_NAME_XObject);
 
 		form = fz_malloc_struct(ctx, pdf_xobject);
-		FZ_INIT_STORABLE(form, 1, pdf_free_xobject_imp);
+		FZ_INIT_STORABLE(form, 1, pdf_drop_xobject_imp);
+		form->document = doc;
 		form->resources = NULL;
 		form->contents = NULL;
 		form->colorspace = NULL;
@@ -200,27 +188,27 @@ pdf_new_xobject(pdf_document *doc, const fz_rect *bbox, const fz_matrix *mat)
 		form->resources = res;
 		res = NULL;
 
-		idict_num = pdf_create_object(doc);
-		pdf_update_object(doc, idict_num, dict);
-		idict = pdf_new_indirect(doc, idict_num, 0);
-		pdf_drop_obj(dict);
+		idict_num = pdf_create_object(ctx, doc);
+		pdf_update_object(ctx, doc, idict_num, dict);
+		idict = pdf_new_indirect(ctx, doc, idict_num, 0);
+		pdf_drop_obj(ctx, dict);
 		dict = NULL;
 
 		pdf_store_item(ctx, idict, form, pdf_xobject_size(form));
 
-		form->contents = pdf_keep_obj(idict);
-		form->me = pdf_keep_obj(idict);
+		form->contents = pdf_keep_obj(ctx, idict);
+		form->me = pdf_keep_obj(ctx, idict);
 
 		pdf_drop_xobject(ctx, form);
 		form = NULL;
 	}
 	fz_catch(ctx)
 	{
-		pdf_drop_obj(procset);
-		pdf_drop_obj(res);
-		pdf_drop_obj(obj);
-		pdf_drop_obj(dict);
-		pdf_drop_obj(idict);
+		pdf_drop_obj(ctx, procset);
+		pdf_drop_obj(ctx, res);
+		pdf_drop_obj(ctx, obj);
+		pdf_drop_obj(ctx, dict);
+		pdf_drop_obj(ctx, idict);
 		pdf_drop_xobject(ctx, form);
 		fz_rethrow_message(ctx, "failed to create xobject)");
 	}
@@ -228,10 +216,8 @@ pdf_new_xobject(pdf_document *doc, const fz_rect *bbox, const fz_matrix *mat)
 	return idict;
 }
 
-void pdf_update_xobject_contents(pdf_document *doc, pdf_xobject *form, fz_buffer *buffer)
+void pdf_update_xobject_contents(fz_context *ctx, pdf_document *doc, pdf_xobject *form, fz_buffer *buffer)
 {
-	pdf_dict_dels(form->contents, "Filter");
-	pdf_dict_puts_drop(form->contents, "Length", pdf_new_int(doc, buffer->len));
-	pdf_update_stream(doc, pdf_to_num(form->contents), buffer);
+	pdf_update_stream(ctx, doc, form->contents, buffer, 0);
 	form->iteration ++;
 }

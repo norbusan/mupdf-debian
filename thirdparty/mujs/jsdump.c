@@ -17,16 +17,16 @@ static const char *opname[] = {
 
 const char *jsP_aststring(enum js_AstType type)
 {
-	if (type > nelem(astname))
-		return "<unknown>";
-	return astname[type];
+	if (type < nelem(astname))
+		return astname[type];
+	return "<unknown>";
 }
 
 const char *jsC_opcodestring(enum js_OpCode opcode)
 {
-	if (opcode > nelem(opname))
-		return "<unknown>";
-	return opname[opcode];
+	if (opcode < nelem(opname))
+		return opname[opcode];
+	return "<unknown>";
 }
 
 static int prec(enum js_AstType type)
@@ -365,7 +365,7 @@ static void pexpi(int d, int p, js_Ast *exp)
 	case EXP_MEMBER:
 		pexpi(d, p, exp->a);
 		pc('.');
-		pexpi(d, p, exp->b);
+		pexpi(d, 0, exp->b);
 		break;
 
 	case EXP_CALL:
@@ -711,8 +711,8 @@ void jsP_dumplist(js_State *J, js_Ast *prog)
 
 void jsC_dumpfunction(js_State *J, js_Function *F)
 {
-	short *p = F->code;
-	short *end = F->code + F->codelen;
+	js_Instruction *p = F->code;
+	js_Instruction *end = F->code + F->codelen;
 	unsigned int i;
 
 	printf("%s(%d)\n", F->name, F->numparams);
@@ -753,19 +753,19 @@ void jsC_dumpfunction(js_State *J, js_Function *F)
 		case OP_GETPROP_S:
 		case OP_SETPROP_S:
 		case OP_DELPROP_S:
-		case OP_INITPROP_S:
 		case OP_CATCH:
 			pc(' ');
 			ps(F->strtab[*p++]);
 			break;
 
+		case OP_LINE:
 		case OP_CLOSURE:
 		case OP_INITLOCAL:
 		case OP_GETLOCAL:
 		case OP_SETLOCAL:
 		case OP_DELLOCAL:
-		case OP_NUMBER_N:
-		case OP_INITPROP_N:
+		case OP_NUMBER_POS:
+		case OP_NUMBER_NEG:
 		case OP_CALL:
 		case OP_NEW:
 		case OP_JUMP:
@@ -798,7 +798,9 @@ void js_dumpvalue(js_State *J, js_Value v)
 	case JS_TNULL: printf("null"); break;
 	case JS_TBOOLEAN: printf(v.u.boolean ? "true" : "false"); break;
 	case JS_TNUMBER: printf("%.9g", v.u.number); break;
-	case JS_TSTRING: printf("'%s'", v.u.string); break;
+	case JS_TSHRSTR: printf("'%s'", v.u.shrstr); break;
+	case JS_TLITSTR: printf("'%s'", v.u.litstr); break;
+	case JS_TMEMSTR: printf("'%s'", v.u.memstr->p); break;
 	case JS_TOBJECT:
 		if (v.u.object == J->G) {
 			printf("[Global]");

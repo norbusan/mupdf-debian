@@ -19,6 +19,7 @@
 #include "mupdf/fitz/compressed-buffer.h"
 #include "mupdf/fitz/filter.h"
 #include "mupdf/fitz/output.h"
+#include "mupdf/fitz/unzip.h"
 
 /* Resources */
 #include "mupdf/fitz/store.h"
@@ -45,7 +46,6 @@
 #include "mupdf/fitz/outline.h"
 #include "mupdf/fitz/document.h"
 #include "mupdf/fitz/annotation.h"
-#include "mupdf/fitz/meta.h"
 
 #include "mupdf/fitz/write-document.h"
 

@@ -57,7 +57,7 @@ fz_image *fz_new_image_from_pixmap(fz_context *ctx, fz_pixmap *pixmap, fz_image 
 fz_image *fz_new_image_from_data(fz_context *ctx, unsigned char *data, int len);
 fz_image *fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer);
 fz_pixmap *fz_image_get_pixmap(fz_context *ctx, fz_image *image, int w, int h);
-void fz_free_image(fz_context *ctx, fz_storable *image);
+void fz_drop_image_imp(fz_context *ctx, fz_storable *image);
 fz_pixmap *fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, int indexed, int l2factor, int native_l2factor);
 fz_pixmap *fz_expand_indexed_pixmap(fz_context *ctx, fz_pixmap *src);
 
@@ -92,5 +92,7 @@ void fz_load_jxr_info(fz_context *ctx, unsigned char *data, int size, int *w, in
 
 int fz_load_tiff_subimage_count(fz_context *ctx, unsigned char *buf, int len);
 fz_pixmap *fz_load_tiff_subimage(fz_context *ctx, unsigned char *buf, int len, int subimage);
+
+void fz_image_get_sanitised_res(fz_image *image, int *xres, int *yres);
 
 #endif

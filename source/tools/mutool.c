@@ -13,6 +13,7 @@ int pdfextract_main(int argc, char *argv[]);
 int pdfinfo_main(int argc, char *argv[]);
 int pdfposter_main(int argc, char *argv[]);
 int pdfshow_main(int argc, char *argv[]);
+int pdfpages_main(int argc, char *argv[]);
 
 static struct {
 	int (*func)(int argc, char *argv[]);
@@ -22,6 +23,7 @@ static struct {
 	{ pdfclean_main, "clean", "rewrite pdf file" },
 	{ pdfextract_main, "extract", "extract font and image resources" },
 	{ pdfinfo_main, "info", "show information about pdf resources" },
+	{ pdfpages_main, "pages", "show information about pdf pages" },
 	{ pdfposter_main, "poster", "split large page into many tiles" },
 	{ pdfshow_main, "show", "show internal pdf objects" },
 };
@@ -70,6 +72,11 @@ int main(int argc, char **argv)
 		for (i = 0; i < nelem(tools); i++)
 			if (!strcmp(tools[i].name, argv[1]))
 				return tools[i].func(argc - 1, argv + 1);
+		if (!strcmp(argv[1], "-v"))
+		{
+			fprintf(stderr, "mutool version %s\n", FZ_VERSION);
+			return 0;
+		}
 	}
 
 	/* Print usage */

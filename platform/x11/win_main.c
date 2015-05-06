@@ -443,6 +443,7 @@ dloginfoproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	char buf[256];
 	wchar_t bufx[256];
+	fz_context *ctx = gapp.ctx;
 	fz_document *doc = gapp.doc;
 
 	switch(message)
@@ -451,7 +452,11 @@ dloginfoproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 		SetDlgItemTextW(hwnd, 0x10, wbuf);
 
-		if (fz_meta(doc, FZ_META_FORMAT_INFO, buf, 256) < 0)
+		if (fz_lookup_metadata(ctx, doc, FZ_META_FORMAT, buf, sizeof buf) >= 0)
+		{
+			SetDlgItemTextA(hwnd, 0x11, buf);
+		}
+		else
 		{
 			SetDlgItemTextA(hwnd, 0x11, "Unknown");
 			SetDlgItemTextA(hwnd, 0x12, "None");
@@ -459,9 +464,7 @@ dloginfoproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 			return TRUE;
 		}
 
-		SetDlgItemTextA(hwnd, 0x11, buf);
-
-		if (fz_meta(doc, FZ_META_CRYPT_INFO, buf, 256) == 0)
+		if (fz_lookup_metadata(ctx, doc, FZ_META_ENCRYPTION, buf, sizeof buf) >= 0)
 		{
 			SetDlgItemTextA(hwnd, 0x12, buf);
 		}
@@ -469,26 +472,25 @@ dloginfoproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 		{
 			SetDlgItemTextA(hwnd, 0x12, "None");
 		}
+
 		buf[0] = 0;
-		if (fz_meta(doc, FZ_META_HAS_PERMISSION, NULL, FZ_PERMISSION_PRINT) == 0)
+		if (fz_has_permission(ctx, doc, FZ_PERMISSION_PRINT))
 			strcat(buf, "print, ");
-		if (fz_meta(doc, FZ_META_HAS_PERMISSION, NULL, FZ_PERMISSION_CHANGE) == 0)
-			strcat(buf, "modify, ");
-		if (fz_meta(doc, FZ_META_HAS_PERMISSION, NULL, FZ_PERMISSION_COPY) == 0)
+		if (fz_has_permission(ctx, doc, FZ_PERMISSION_COPY))
 			strcat(buf, "copy, ");
-		if (fz_meta(doc, FZ_META_HAS_PERMISSION, NULL, FZ_PERMISSION_NOTES) == 0)
+		if (fz_has_permission(ctx, doc, FZ_PERMISSION_EDIT))
+			strcat(buf, "edit, ");
+		if (fz_has_permission(ctx, doc, FZ_PERMISSION_ANNOTATE))
 			strcat(buf, "annotate, ");
 		if (strlen(buf) > 2)
 			buf[strlen(buf)-2] = 0;
 		else
-			strcpy(buf, "None");
+			strcpy(buf, "none");
 		SetDlgItemTextA(hwnd, 0x13, buf);
 
 #define SETUTF8(ID, STRING) \
+		if (fz_lookup_metadata(ctx, doc, "info:" STRING, buf, sizeof buf) >= 0) \
 		{ \
-			*(char **)buf = STRING; \
-			if (fz_meta(doc, FZ_META_INFO, buf, 256) <= 0) \
-				buf[0] = 0; \
 			MultiByteToWideChar(CP_UTF8, 0, buf, -1, bufx, nelem(bufx)); \
 			SetDlgItemTextW(hwnd, ID, bufx); \
 		}
@@ -649,8 +651,10 @@ void winopen()
 static void
 do_close(pdfapp_t *app)
 {
+	fz_context *ctx = app->ctx;
 	pdfapp_close(app);
 	free(dibinf);
+	fz_drop_context(ctx);
 }
 
 void winclose(pdfapp_t *app)
@@ -880,12 +884,6 @@ void windocopy(pdfapp_t *app)
 	justcopied = 1;	/* keep inversion around for a while... */
 }
 
-void winreloadfile(pdfapp_t *app)
-{
-	pdfapp_close(app);
-	pdfapp_open(app, filename, 1);
-}
-
 void winreloadpage(pdfapp_t *app)
 {
 	SendMessage(hwndview, WM_APP, 0, 0);
@@ -911,6 +909,9 @@ static void killtimer(pdfapp_t *app)
 
 void handlekey(int c)
 {
+	int modifier = (GetAsyncKeyState(VK_SHIFT) < 0);
+	modifier |= ((GetAsyncKeyState(VK_CONTROL) < 0)<<2);
+
 	if (timer_pending)
 		killtimer(&gapp);
 
@@ -939,12 +940,15 @@ void handlekey(int c)
 		}
 	}
 
-	pdfapp_onkey(&gapp, c);
+	pdfapp_onkey(&gapp, c, modifier);
 	winrepaint(&gapp);
 }
 
 void handlemouse(int x, int y, int btn, int state)
 {
+	int modifier = (GetAsyncKeyState(VK_SHIFT) < 0);
+	modifier |= ((GetAsyncKeyState(VK_CONTROL) < 0)<<2);
+
 	if (state != 0 && timer_pending)
 		killtimer(&gapp);
 
@@ -959,7 +963,7 @@ void handlemouse(int x, int y, int btn, int state)
 	if (state == -1)
 		ReleaseCapture();
 
-	pdfapp_onmouse(&gapp, x, y, btn, 0, state);
+	pdfapp_onmouse(&gapp, x, y, btn, modifier, state);
 }
 
 LRESULT CALLBACK
@@ -1096,9 +1100,15 @@ viewproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 	case WM_MOUSEWHEEL:
 		if ((signed short)HIWORD(wParam) > 0)
-			handlekey(LOWORD(wParam) & MK_SHIFT ? '+' : 'k');
+		{
+			handlemouse(oldx, oldy, 4, 1);
+			handlemouse(oldx, oldy, 4, -1);
+		}
 		else
-			handlekey(LOWORD(wParam) & MK_SHIFT ? '-' : 'j');
+		{
+			handlemouse(oldx, oldy, 5, 1);
+			handlemouse(oldx, oldy, 5, -1);
+		}
 		return 0;
 
 	/* Timer */
@@ -1220,7 +1230,6 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShow
 	}
 
 	do_close(&gapp);
-	fz_free_context(ctx);
 
 	return 0;
 }

@@ -59,8 +59,17 @@ static void jsB_read(js_State *J)
 		fclose(f);
 		js_error(J, "cannot seek in file: '%s'", filename);
 	}
+
 	n = ftell(f);
-	fseek(f, 0, SEEK_SET);
+	if (n < 0) {
+		fclose(f);
+		js_error(J, "cannot tell in file: '%s'", filename);
+	}
+
+	if (fseek(f, 0, SEEK_SET) < 0) {
+		fclose(f);
+		js_error(J, "cannot seek in file: '%s'", filename);
+	}
 
 	s = malloc(n + 1);
 	if (!s) {
@@ -117,27 +126,27 @@ main(int argc, char **argv)
 	js_State *J;
 	int i;
 
-	J = js_newstate(NULL, NULL);
+	J = js_newstate(NULL, NULL, JS_STRICT);
 
-	js_newcfunction(J, jsB_gc, 0);
+	js_newcfunction(J, jsB_gc, "gc", 0);
 	js_setglobal(J, "gc");
 
-	js_newcfunction(J, jsB_load, 1);
+	js_newcfunction(J, jsB_load, "load", 1);
 	js_setglobal(J, "load");
 
-	js_newcfunction(J, jsB_print, 1);
+	js_newcfunction(J, jsB_print, "print", 1);
 	js_setglobal(J, "print");
 
-	js_newcfunction(J, jsB_write, 0);
+	js_newcfunction(J, jsB_write, "write", 0);
 	js_setglobal(J, "write");
 
-	js_newcfunction(J, jsB_read, 1);
+	js_newcfunction(J, jsB_read, "read", 1);
 	js_setglobal(J, "read");
 
-	js_newcfunction(J, jsB_readline, 0);
+	js_newcfunction(J, jsB_readline, "readline", 0);
 	js_setglobal(J, "readline");
 
-	js_newcfunction(J, jsB_quit, 1);
+	js_newcfunction(J, jsB_quit, "quit", 1);
 	js_setglobal(J, "quit");
 
 	js_dostring(J, require_js, 0);

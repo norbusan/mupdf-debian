@@ -32,7 +32,6 @@ extern int winchoiceinput(pdfapp_t*, int nopts, char *opts[], int *nvals, char *
 extern void winopenuri(pdfapp_t*, char *s);
 extern void wincursor(pdfapp_t*, int curs);
 extern void windocopy(pdfapp_t*);
-extern void winreloadfile(pdfapp_t*);
 extern void windrawstring(pdfapp_t*, int x, int y, char *s);
 extern void winclose(pdfapp_t*);
 extern void winhelp(pdfapp_t*);
@@ -54,6 +53,10 @@ struct pdfapp_s
 	char *doctitle;
 	fz_outline *outline;
 	int outline_deferred;
+
+	float layout_w;
+	float layout_h;
+	float layout_em;
 
 	int pagecount;
 
@@ -141,11 +144,12 @@ void pdfapp_open(pdfapp_t *app, char *filename, int reload);
 void pdfapp_open_progressive(pdfapp_t *app, char *filename, int reload, int bps);
 void pdfapp_close(pdfapp_t *app);
 int pdfapp_preclose(pdfapp_t *app);
+void pdfapp_reloadfile(pdfapp_t *app);
 
 char *pdfapp_version(pdfapp_t *app);
 char *pdfapp_usage(pdfapp_t *app);
 
-void pdfapp_onkey(pdfapp_t *app, int c);
+void pdfapp_onkey(pdfapp_t *app, int c, int modifiers);
 void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int state);
 void pdfapp_oncopy(pdfapp_t *app, unsigned short *ucsbuf, int ucslen);
 void pdfapp_onresize(pdfapp_t *app, int w, int h);
