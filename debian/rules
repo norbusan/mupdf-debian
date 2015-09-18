@@ -16,6 +16,7 @@ include /usr/share/dpkg/architecture.mk
 # The build system doesn't use CPPFLAGS, pass them to CFLAGS to enable the
 # missing (hardening) flags.
 CFLAGS += $(CPPFLAGS)
+CFLAGS += -DJBIG_NO_MEMENTO
 
 ifneq (,$(filter x-fpic,$(DEB_BUILD_OPTIONS)))
 	CFLAGS += -fPIC
