@@ -32,6 +32,7 @@ static const char *default_css =
 "center{text-align:center}"
 "svg{display:none}"
 "a{color:blue}"
+"tr{display:block}" /* ugly hack! */
 ;
 
 static int iswhite(int c)
@@ -128,6 +129,7 @@ static void generate_image(fz_context *ctx, fz_archive *zip, const char *base_ur
 	fz_strlcpy(path, base_uri, sizeof path);
 	fz_strlcat(path, "/", sizeof path);
 	fz_strlcat(path, src, sizeof path);
+	fz_urldecode(path);
 	fz_cleanname(path);
 
 	fz_try(ctx)
@@ -271,7 +273,7 @@ static void insert_inline_box(fz_context *ctx, fz_html *box, fz_html *top)
 }
 
 static void generate_boxes(fz_context *ctx, fz_html_font_set *set, fz_archive *zip, const char *base_uri,
-	fz_xml *node, fz_html *top, fz_css_rule *rule, fz_css_match *up_match)
+	fz_xml *node, fz_html *top, fz_css_rule *rule, fz_css_match *up_match, int list_counter)
 {
 	fz_css_match match;
 	fz_html *box;
@@ -314,13 +316,14 @@ static void generate_boxes(fz_context *ctx, fz_html_font_set *set, fz_archive *z
 				box = new_box(ctx);
 				fz_apply_css_style(ctx, set, &box->style, &match);
 
-				if (display == DIS_BLOCK)
+				if (display == DIS_BLOCK || display == DIS_INLINE_BLOCK)
 				{
 					top = insert_block_box(ctx, box, top);
 				}
 				else if (display == DIS_LIST_ITEM)
 				{
 					top = insert_block_box(ctx, box, top);
+					box->list_item = ++list_counter;
 				}
 				else if (display == DIS_INLINE)
 				{
@@ -333,7 +336,12 @@ static void generate_boxes(fz_context *ctx, fz_html_font_set *set, fz_archive *z
 				}
 
 				if (fz_xml_down(node))
-					generate_boxes(ctx, set, zip, base_uri, fz_xml_down(node), box, rule, &match);
+				{
+					int child_counter = list_counter;
+					if (!strcmp(tag, "ul") || !strcmp(tag, "ol"))
+						child_counter = 0;
+					generate_boxes(ctx, set, zip, base_uri, fz_xml_down(node), box, rule, &match, child_counter);
+				}
 
 				// TODO: remove empty flow boxes
 			}
@@ -342,9 +350,13 @@ static void generate_boxes(fz_context *ctx, fz_html_font_set *set, fz_archive *z
 		{
 			if (top->type != BOX_INLINE)
 			{
+				/* Create anonymous inline box, with the same style as the top block box. */
 				box = new_box(ctx);
 				insert_inline_box(ctx, box, top);
 				box->style = top->style;
+				/* Make sure not to recursively multiply font sizes. */
+				box->style.font_size.value = 1;
+				box->style.font_size.unit = N_SCALE;
 				generate_text(ctx, box, fz_xml_text(node));
 			}
 			else
@@ -357,15 +369,15 @@ static void generate_boxes(fz_context *ctx, fz_html_font_set *set, fz_archive *z
 	}
 }
 
-static void measure_image(fz_context *ctx, fz_html_flow *node, float w, float h)
+static void measure_image(fz_context *ctx, fz_html_flow *node, float max_w, float max_h)
 {
 	float xs = 1, ys = 1, s = 1;
 	node->x = 0;
 	node->y = 0;
-	if (node->image->w > w)
-		xs = w / node->image->w;
-	if (node->image->h > h)
-		ys = h / node->image->h;
+	if (node->image->w > max_w)
+		xs = max_w / node->image->w;
+	if (node->image->h > max_h)
+		ys = max_h / node->image->h;
 	s = fz_min(xs, ys);
 	node->w = node->image->w * s;
 	node->h = node->image->h * s;
@@ -598,31 +610,27 @@ static void layout_block(fz_context *ctx, fz_html *box, fz_html *top, float em, 
 	float box_collapse_margin;
 	int prev_br;
 
+	fz_css_style *style = &box->style;
 	float *margin = box->margin;
 	float *border = box->border;
 	float *padding = box->padding;
 
-	em = fz_from_css_number(box->style.font_size, em, em);
+	em = box->em = fz_from_css_number(style->font_size, em, em);
 
-	margin[0] = fz_from_css_number(box->style.margin[0], em, top->w);
-	margin[1] = fz_from_css_number(box->style.margin[1], em, top->w);
-	margin[2] = fz_from_css_number(box->style.margin[2], em, top->w);
-	margin[3] = fz_from_css_number(box->style.margin[3], em, top->w);
+	margin[0] = fz_from_css_number(style->margin[0], em, top->w);
+	margin[1] = fz_from_css_number(style->margin[1], em, top->w);
+	margin[2] = fz_from_css_number(style->margin[2], em, top->w);
+	margin[3] = fz_from_css_number(style->margin[3], em, top->w);
 
-	padding[0] = fz_from_css_number(box->style.padding[0], em, top->w);
-	padding[1] = fz_from_css_number(box->style.padding[1], em, top->w);
-	padding[2] = fz_from_css_number(box->style.padding[2], em, top->w);
-	padding[3] = fz_from_css_number(box->style.padding[3], em, top->w);
+	padding[0] = fz_from_css_number(style->padding[0], em, top->w);
+	padding[1] = fz_from_css_number(style->padding[1], em, top->w);
+	padding[2] = fz_from_css_number(style->padding[2], em, top->w);
+	padding[3] = fz_from_css_number(style->padding[3], em, top->w);
 
-	if (box->style.border_style)
-	{
-		border[0] = fz_from_css_number(box->style.border_width[0], em, top->w);
-		border[1] = fz_from_css_number(box->style.border_width[1], em, top->w);
-		border[2] = fz_from_css_number(box->style.border_width[2], em, top->w);
-		border[3] = fz_from_css_number(box->style.border_width[3], em, top->w);
-	}
-	else
-		border[0] = border[1] = border[2] = border[3] = 0;
+	border[0] = style->border_style[0] ? fz_from_css_number(style->border_width[0], em, top->w) : 0;
+	border[1] = style->border_style[1] ? fz_from_css_number(style->border_width[1], em, top->w) : 0;
+	border[2] = style->border_style[2] ? fz_from_css_number(style->border_width[2], em, top->w) : 0;
+	border[3] = style->border_style[3] ? fz_from_css_number(style->border_width[3], em, top->w) : 0;
 
 	if (padding[T] == 0 && border[T] == 0)
 		box_collapse_margin = margin[T];
@@ -656,7 +664,7 @@ static void layout_block(fz_context *ctx, fz_html *box, fz_html *top, float em, 
 		{
 			/* TODO: interaction with page breaks */
 			if (prev_br)
-				box->h += fz_from_css_number_scale(box->style.line_height, em, em, em);
+				box->h += fz_from_css_number_scale(style->line_height, em, em, em);
 			prev_br = 1;
 		}
 		else if (child->type == BOX_FLOW)
@@ -670,6 +678,10 @@ static void layout_block(fz_context *ctx, fz_html *box, fz_html *top, float em, 
 			}
 		}
 	}
+
+	/* reserve space for the list mark */
+	if (box->list_item && box->h == 0)
+		box->h += fz_from_css_number_scale(style->line_height, em, em, em);
 
 	if (padding[B] == 0 && border[B] == 0)
 	{
@@ -739,28 +751,185 @@ static void draw_flow_box(fz_context *ctx, fz_html *box, float page_top, float p
 	}
 }
 
-static void draw_rect(fz_context *ctx, fz_device *dev, const fz_matrix *ctm, float *rgba, float x0, float y0, float x1, float y1)
+static void draw_rect(fz_context *ctx, fz_device *dev, const fz_matrix *ctm, fz_css_color color, float x0, float y0, float x1, float y1)
 {
-	fz_path *path = fz_new_path(ctx);
+	if (color.a > 0)
+	{
+		float rgb[3];
 
-	fz_moveto(ctx, path, x0, y0);
-	fz_lineto(ctx, path, x1, y0);
-	fz_lineto(ctx, path, x1, y1);
-	fz_lineto(ctx, path, x0, y1);
-	fz_closepath(ctx, path);
+		fz_path *path = fz_new_path(ctx);
 
-	fz_fill_path(ctx, dev, path, 0, ctm, fz_device_rgb(ctx), rgba, rgba[3]);
+		fz_moveto(ctx, path, x0, y0);
+		fz_lineto(ctx, path, x1, y0);
+		fz_lineto(ctx, path, x1, y1);
+		fz_lineto(ctx, path, x0, y1);
+		fz_closepath(ctx, path);
 
-	fz_drop_path(ctx, path);
+		rgb[0] = color.r / 255.0f;
+		rgb[1] = color.g / 255.0f;
+		rgb[2] = color.b / 255.0f;
+
+		fz_fill_path(ctx, dev, path, 0, ctm, fz_device_rgb(ctx), rgb, color.a / 255.0f);
+
+		fz_drop_path(ctx, path);
+	}
+}
+
+static const char *roman_uc[3][10] = {
+	{ "", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX" },
+	{ "", "X", "XX", "XXX", "XL", "L", "LX", "LXX", "LXXX", "XC" },
+	{ "", "C", "CC", "CCC", "CD", "D", "DC", "DCC", "DCCC", "CM" },
+};
+
+static const char *roman_lc[3][10] = {
+	{ "", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix" },
+	{ "", "x", "xx", "xxx", "xl", "l", "lx", "lxx", "lxxx", "xc" },
+	{ "", "c", "cc", "ccc", "cd", "d", "dc", "dcc", "dccc", "cm" },
+};
+
+static void format_roman_number(fz_context *ctx, char *buf, int size, int n, const char *sym[3][10], const char *sym_m)
+{
+	int I = n % 10;
+	int X = (n / 10) % 10;
+	int C = (n / 100) % 100;
+	int M = (n / 1000);
+
+	fz_strlcpy(buf, "", size);
+	while (M--)
+		fz_strlcat(buf, sym_m, size);
+	fz_strlcat(buf, sym[2][C], size);
+	fz_strlcat(buf, sym[1][X], size);
+	fz_strlcat(buf, sym[0][I], size);
+	fz_strlcat(buf, ". ", size);
+}
+
+static void format_alpha_number(fz_context *ctx, char *buf, int size, int n, int alpha, int omega)
+{
+	int base = omega - alpha + 1;
+	int tmp[40];
+	int i, c;
+
+	if (alpha > 256) /* to skip final-s for greek */
+		--base;
+
+	/* Bijective base-26 (base-24 for greek) numeration */
+	i = 0;
+	while (n > 0)
+	{
+		--n;
+		c = n % base + alpha;
+		if (alpha > 256 && c > alpha + 16) /* skip final-s for greek */
+			++c;
+		tmp[i++] = c;
+		n /= base;
+	}
+
+	while (i > 0)
+		buf += fz_runetochar(buf, tmp[--i]);
+	*buf++ = '.';
+	*buf++ = ' ';
+	*buf = 0;
+}
+
+static void format_list_number(fz_context *ctx, int type, int x, char *buf, int size)
+{
+	switch (type)
+	{
+	case LST_NONE: fz_strlcpy(buf, "", size); break;
+	case LST_DISC: fz_strlcpy(buf, "\342\227\217  ", size); break; /* U+25CF BLACK CIRCLE */
+	case LST_CIRCLE: fz_strlcpy(buf, "\342\227\213  ", size); break; /* U+25CB WHITE CIRCLE */
+	case LST_SQUARE: fz_strlcpy(buf, "\342\226\240  ", size); break; /* U+25A0 BLACK SQUARE */
+	default:
+	case LST_DECIMAL: fz_snprintf(buf, size, "%d. ", x); break;
+	case LST_DECIMAL_ZERO: fz_snprintf(buf, size, "%02d. ", x); break;
+	case LST_LC_ROMAN: format_roman_number(ctx, buf, size, x, roman_lc, "m"); break;
+	case LST_UC_ROMAN: format_roman_number(ctx, buf, size, x, roman_uc, "M"); break;
+	case LST_LC_ALPHA: format_alpha_number(ctx, buf, size, x, 'a', 'z'); break;
+	case LST_UC_ALPHA: format_alpha_number(ctx, buf, size, x, 'A', 'Z'); break;
+	case LST_LC_LATIN: format_alpha_number(ctx, buf, size, x, 'a', 'z'); break;
+	case LST_UC_LATIN: format_alpha_number(ctx, buf, size, x, 'A', 'Z'); break;
+	case LST_LC_GREEK: format_alpha_number(ctx, buf, size, x, 0x03B1, 0x03C9); break;
+	case LST_UC_GREEK: format_alpha_number(ctx, buf, size, x, 0x0391, 0x03A9); break;
+	}
+}
+
+static fz_html_flow *find_list_mark_anchor(fz_context *ctx, fz_html *box)
+{
+	/* find first flow node in <li> tag */
+	while (box)
+	{
+		if (box->type == BOX_FLOW)
+			return box->flow_head;
+		box = box->down;
+	}
+	return NULL;
+}
+
+static void draw_list_mark(fz_context *ctx, fz_html *box, float page_top, float page_bot, fz_device *dev, const fz_matrix *ctm, int n)
+{
+	fz_text *text;
+	fz_matrix trm;
+	fz_html_flow *line;
+	float x, y, w;
+	float color[3];
+	const char *s;
+	char buf[40];
+	int c, g;
+
+	fz_scale(&trm, box->em, -box->em);
+	text = fz_new_text(ctx, box->style.font, &trm, 0);
+
+	line = find_list_mark_anchor(ctx, box);
+	if (line)
+	{
+		y = line->y;
+	}
+	else
+	{
+		float h = fz_from_css_number_scale(box->style.line_height, box->em, box->em, box->em);
+		float a = box->em * 0.8;
+		float d = box->em * 0.2;
+		if (a + d > h)
+			h = a + d;
+		y = box->y + a + (h - a - d) / 2;
+	}
+
+	if (y > page_bot || y < page_top)
+		return;
+
+	format_list_number(ctx, box->style.list_style_type, n, buf, sizeof buf);
+
+	s = buf;
+	w = 0;
+	while (*s)
+	{
+		s += fz_chartorune(&c, s);
+		g = fz_encode_character(ctx, box->style.font, c);
+		w += fz_advance_glyph(ctx, box->style.font, g) * box->em;
+	}
+
+	s = buf;
+	x = box->x - w;
+	while (*s)
+	{
+		s += fz_chartorune(&c, s);
+		g = fz_encode_character(ctx, box->style.font, c);
+		fz_add_text(ctx, text, g, c, x, y);
+		x += fz_advance_glyph(ctx, box->style.font, g) * box->em;
+	}
+
+	color[0] = box->style.color.r / 255.0f;
+	color[1] = box->style.color.g / 255.0f;
+	color[2] = box->style.color.b / 255.0f;
+
+	fz_fill_text(ctx, dev, text, ctm, fz_device_rgb(ctx), color, 1);
+
+	fz_drop_text(ctx, text);
 }
 
 static void draw_block_box(fz_context *ctx, fz_html *box, float page_top, float page_bot, fz_device *dev, const fz_matrix *ctm)
 {
 	float x0, y0, x1, y1;
-	float color[4];
-
-	// TODO: background fill
-	// TODO: border stroke
 
 	float *border = box->border;
 	float *padding = box->padding;
@@ -773,29 +942,20 @@ static void draw_block_box(fz_context *ctx, fz_html *box, float page_top, float 
 	if (y0 > page_bot || y1 < page_top)
 		return;
 
-	if (box->style.background_color.a > 0)
-	{
-		color[0] = box->style.background_color.r / 255.0f;
-		color[1] = box->style.background_color.g / 255.0f;
-		color[2] = box->style.background_color.b / 255.0f;
-		color[3] = box->style.background_color.a / 255.0f;
-		draw_rect(ctx, dev, ctm, color, x0, y0, x1, y1);
-	}
+	draw_rect(ctx, dev, ctm, box->style.background_color, x0, y0, x1, y1);
 
-	if (box->style.border_color.a > 0)
+	if (border[T] > 0)
+		draw_rect(ctx, dev, ctm, box->style.border_color[T], x0 - border[L], y0 - border[T], x1 + border[R], y0);
+	if (border[B] > 0)
+		draw_rect(ctx, dev, ctm, box->style.border_color[B], x0 - border[L], y1, x1 + border[R], y1 + border[B]);
+	if (border[L] > 0)
+		draw_rect(ctx, dev, ctm, box->style.border_color[L], x0 - border[L], y0 - border[T], x0, y1 + border[B]);
+	if (border[R] > 0)
+		draw_rect(ctx, dev, ctm, box->style.border_color[R], x1, y0 - border[T], x1 + border[R], y1 + border[B]);
+
+	if (box->list_item)
 	{
-		color[0] = box->style.border_color.r / 255.0f;
-		color[1] = box->style.border_color.g / 255.0f;
-		color[2] = box->style.border_color.b / 255.0f;
-		color[3] = box->style.border_color.a / 255.0f;
-		if (border[T] > 0)
-			draw_rect(ctx, dev, ctm, color, x0 - border[L], y0 - border[T], x1 + border[R], y0);
-		if (border[B] > 0)
-			draw_rect(ctx, dev, ctm, color, x0 - border[L], y1, x1 + border[R], y1 + border[B]);
-		if (border[L] > 0)
-			draw_rect(ctx, dev, ctm, color, x0 - border[L], y0 - border[T], x0, y1 + border[B]);
-		if (border[R] > 0)
-			draw_rect(ctx, dev, ctm, color, x1, y0 - border[T], x1 + border[R], y1 + border[B]);
+		draw_list_mark(ctx, box, page_top, page_bot, dev, ctm, box->list_item);
 	}
 
 	for (box = box->down; box; box = box->next)
@@ -848,6 +1008,8 @@ html_load_css(fz_context *ctx, fz_archive *zip, const char *base_uri, fz_css_rul
 	fz_buffer *buf;
 	char path[2048];
 
+	fz_var(buf);
+
 	for (node = root; node; node = fz_xml_next(node))
 	{
 		const char *tag = fz_xml_tag(node);
@@ -865,15 +1027,20 @@ html_load_css(fz_context *ctx, fz_archive *zip, const char *base_uri, fz_css_rul
 						fz_strlcpy(path, base_uri, sizeof path);
 						fz_strlcat(path, "/", sizeof path);
 						fz_strlcat(path, href, sizeof path);
+						fz_urldecode(path);
 						fz_cleanname(path);
 
-						buf = fz_read_archive_entry(ctx, zip, path);
-						fz_write_buffer_byte(ctx, buf, 0);
+						buf = NULL;
 						fz_try(ctx)
+						{
+							buf = fz_read_archive_entry(ctx, zip, path);
+							fz_write_buffer_byte(ctx, buf, 0);
 							css = fz_parse_css(ctx, css, (char*)buf->data, path);
+						}
+						fz_always(ctx)
+							fz_drop_buffer(ctx, buf);
 						fz_catch(ctx)
 							fz_warn(ctx, "ignoring stylesheet %s", path);
-						fz_drop_buffer(ctx, buf);
 					}
 				}
 			}
@@ -891,6 +1058,102 @@ html_load_css(fz_context *ctx, fz_archive *zip, const char *base_uri, fz_css_rul
 			css = html_load_css(ctx, zip, base_uri, css, fz_xml_down(node));
 	}
 	return css;
+}
+
+static void indent(int n)
+{
+	while (n-- > 0)
+		putchar('\t');
+}
+
+void
+fz_print_css_style(fz_context *ctx, fz_css_style *style, int boxtype, int n)
+{
+	indent(n); printf("font_size %g%c\n", style->font_size.value, style->font_size.unit);
+	indent(n); printf("font %s\n", style->font ? style->font->name : "NULL");
+	indent(n); printf("width = %g%c;\n", style->width.value, style->width.unit);
+	indent(n); printf("height = %g%c;\n", style->height.value, style->height.unit);
+	if (boxtype == BOX_BLOCK)
+	{
+		indent(n); printf("margin %g%c ", style->margin[0].value, style->margin[0].unit);
+		printf("%g%c ", style->margin[1].value, style->margin[1].unit);
+		printf("%g%c ", style->margin[2].value, style->margin[2].unit);
+		printf("%g%c\n", style->margin[3].value, style->margin[3].unit);
+		indent(n); printf("padding %g%c ", style->padding[0].value, style->padding[0].unit);
+		printf("%g%c ", style->padding[1].value, style->padding[1].unit);
+		printf("%g%c ", style->padding[2].value, style->padding[2].unit);
+		printf("%g%c\n", style->padding[3].value, style->padding[3].unit);
+		indent(n); printf("border_width %g%c ", style->border_width[0].value, style->border_width[0].unit);
+		printf("%g%c ", style->border_width[1].value, style->border_width[1].unit);
+		printf("%g%c ", style->border_width[2].value, style->border_width[2].unit);
+		printf("%g%c\n", style->border_width[3].value, style->border_width[3].unit);
+		indent(n); printf("border_style %d %d %d %d\n",
+				style->border_style[0], style->border_style[1],
+				style->border_style[2], style->border_style[3]);
+		indent(n); printf("text_indent %g%c\n", style->text_indent.value, style->text_indent.unit);
+		indent(n); printf("white_space %d\n", style->white_space);
+		indent(n); printf("text_align %d\n", style->text_align);
+		indent(n); printf("list_style_type %d\n", style->list_style_type);
+	}
+	indent(n); printf("line_height %g%c\n", style->line_height.value, style->line_height.unit);
+	indent(n); printf("vertical_align %d\n", style->vertical_align);
+}
+
+void
+fz_print_html_flow(fz_context *ctx, fz_html_flow *flow)
+{
+	while (flow)
+	{
+		switch (flow->type)
+		{
+		case FLOW_WORD: printf("%s", flow->text); break;
+		case FLOW_GLUE: printf(" "); break;
+		case FLOW_IMAGE: printf("[image]"); break;
+		}
+		flow = flow->next;
+	}
+}
+
+void
+fz_print_html(fz_context *ctx, fz_html *box, int pstyle, int level)
+{
+	while (box)
+	{
+		indent(level);
+		switch (box->type)
+		{
+		case BOX_BLOCK: printf("block"); break;
+		case BOX_BREAK: printf("break"); break;
+		case BOX_FLOW: printf("flow"); break;
+		case BOX_INLINE: printf("inline"); break;
+		}
+
+		if (box->down || box->flow_head)
+			printf(" {\n");
+		else
+			printf("\n");
+
+		if (pstyle && !box->flow_head)
+			fz_print_css_style(ctx, &box->style, box->type, level+1);
+
+		fz_print_html(ctx, box->down, pstyle, level+1);
+
+		if (box->flow_head)
+		{
+			indent(level+1);
+			printf("\"");
+			fz_print_html_flow(ctx, box->flow_head);
+			printf("\"\n");
+		}
+
+		if (box->down || box->flow_head)
+		{
+			indent(level);
+			printf("}\n");
+		}
+
+		box = box->next;
+	}
 }
 
 void
@@ -927,7 +1190,7 @@ fz_parse_html(fz_context *ctx, fz_html_font_set *set, fz_archive *zip, const cha
 	match.up = NULL;
 	match.count = 0;
 
-	generate_boxes(ctx, set, zip, base_uri, xml, box, css, &match);
+	generate_boxes(ctx, set, zip, base_uri, xml, box, css, &match, 0);
 
 	fz_drop_css(ctx, css);
 	fz_drop_xml(ctx, xml);
