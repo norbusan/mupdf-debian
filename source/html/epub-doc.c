@@ -164,7 +164,7 @@ path_from_idref(char *path, fz_xml *manifest, const char *base_uri, const char *
 	fz_strlcpy(path, base_uri, n);
 	fz_strlcat(path, "/", n);
 	fz_strlcat(path, rel_path, n);
-	return fz_cleanname(path);
+	return fz_cleanname(fz_urldecode(path));
 }
 
 static epub_chapter *
@@ -202,6 +202,11 @@ epub_parse_header(fz_context *ctx, epub_document *doc)
 	const char *version;
 	char ncx[2048], s[2048];
 	epub_chapter *head, *tail;
+
+	if (fz_has_archive_entry(ctx, zip, "META-INF/rights.xml"))
+		fz_throw(ctx, FZ_ERROR_GENERIC, "EPUB is locked by DRM");
+	if (fz_has_archive_entry(ctx, zip, "META-INF/encryption.xml"))
+		fz_throw(ctx, FZ_ERROR_GENERIC, "EPUB is locked by DRM");
 
 	/* parse META-INF/container.xml to find OPF */
 
