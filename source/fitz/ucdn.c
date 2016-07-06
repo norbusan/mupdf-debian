@@ -14,9 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include "ucdn.h"
+#include "mupdf/fitz.h"
 
 typedef struct {
 	unsigned char category;
@@ -26,6 +24,7 @@ typedef struct {
 	unsigned char east_asian_width;
 	unsigned char normalization_check;
 	unsigned char script;
+	unsigned char linebreak_class;
 } UCDRecord;
 
 typedef struct {
@@ -50,7 +49,7 @@ typedef struct {
 #define TCOUNT 28
 #define NCOUNT (VCOUNT * TCOUNT)
 
-static const UCDRecord *get_ucd_record(unsigned int code)
+static const UCDRecord *get_ucd_record(uint32_t code)
 {
 	int index, offset;
 
@@ -67,7 +66,7 @@ static const UCDRecord *get_ucd_record(unsigned int code)
 	return &ucd_records[index];
 }
 
-static const unsigned short *get_decomp_record(unsigned int code)
+static const unsigned short *get_decomp_record(uint32_t code)
 {
 	int index, offset;
 
@@ -85,7 +84,7 @@ static const unsigned short *get_decomp_record(unsigned int code)
 	return &decomp_data[index];
 }
 
-static int get_comp_index(unsigned int code, const Reindex *idx)
+static int get_comp_index(uint32_t code, const Reindex *idx)
 {
 	int i;
 
@@ -108,7 +107,7 @@ static int compare_mp(const void *a, const void *b)
 	return mpa->from - mpb->from;
 }
 
-static int hangul_pair_decompose(unsigned int code, unsigned int *a, unsigned int *b)
+static int hangul_pair_decompose(uint32_t code, uint32_t *a, uint32_t *b)
 {
 	int si = code - SBASE;
 
@@ -128,7 +127,7 @@ static int hangul_pair_decompose(unsigned int code, unsigned int *a, unsigned in
 	}
 }
 
-static int hangul_pair_compose(unsigned int *code, unsigned int a, unsigned int b)
+static int hangul_pair_compose(uint32_t *code, uint32_t a, uint32_t b)
 {
 	if (b < VBASE || b >= (TBASE + TCOUNT))
 		return 0;
@@ -150,17 +149,17 @@ static int hangul_pair_compose(unsigned int *code, unsigned int a, unsigned int 
 	}
 }
 
-static unsigned int decode_utf16(const unsigned short **code_ptr)
+static uint32_t decode_utf16(const unsigned short **code_ptr)
 {
 	const unsigned short *code = *code_ptr;
 
 	if ((code[0] & 0xd800) != 0xd800) {
 		*code_ptr += 1;
-		return (unsigned int)code[0];
+		return (uint32_t)code[0];
 	} else {
 		*code_ptr += 2;
-		return 0x10000 + ((unsigned int)code[1] - 0xdc00) +
-			(((unsigned int)code[0] - 0xd800) << 10);
+		return 0x10000 + ((uint32_t)code[1] - 0xdc00) +
+			(((uint32_t)code[0] - 0xd800) << 10);
 	}
 }
 
@@ -169,37 +168,72 @@ const char *ucdn_get_unicode_version(void)
 	return UNIDATA_VERSION;
 }
 
-int ucdn_get_combining_class(unsigned int code)
+int ucdn_get_combining_class(uint32_t code)
 {
 	return get_ucd_record(code)->combining;
 }
 
-int ucdn_get_east_asian_width(unsigned int code)
+int ucdn_get_east_asian_width(uint32_t code)
 {
 	return get_ucd_record(code)->east_asian_width;
 }
 
-int ucdn_get_general_category(unsigned int code)
+int ucdn_get_general_category(uint32_t code)
 {
 	return get_ucd_record(code)->category;
 }
 
-int ucdn_get_bidi_class(unsigned int code)
+int ucdn_get_bidi_class(uint32_t code)
 {
 	return get_ucd_record(code)->bidi_class;
 }
 
-int ucdn_get_mirrored(unsigned int code)
+int ucdn_get_mirrored(uint32_t code)
 {
 	return get_ucd_record(code)->mirrored;
 }
 
-int ucdn_get_script(unsigned int code)
+int ucdn_get_script(uint32_t code)
 {
 	return get_ucd_record(code)->script;
 }
 
-unsigned int ucdn_mirror(unsigned int code)
+int ucdn_get_linebreak_class(uint32_t code)
+{
+	return get_ucd_record(code)->linebreak_class;
+}
+
+int ucdn_get_resolved_linebreak_class(uint32_t code)
+{
+	const UCDRecord *record = get_ucd_record(code);
+
+	switch (record->linebreak_class)
+	{
+		case UCDN_LINEBREAK_CLASS_AI:
+		case UCDN_LINEBREAK_CLASS_SG:
+		case UCDN_LINEBREAK_CLASS_XX:
+			return UCDN_LINEBREAK_CLASS_AL;
+
+		case UCDN_LINEBREAK_CLASS_SA:
+			if (record->category == UCDN_GENERAL_CATEGORY_MC ||
+					record->category == UCDN_GENERAL_CATEGORY_MN)
+				return UCDN_LINEBREAK_CLASS_CM;
+			return UCDN_LINEBREAK_CLASS_AL;
+
+		case UCDN_LINEBREAK_CLASS_CJ:
+			return UCDN_LINEBREAK_CLASS_NS;
+
+		case UCDN_LINEBREAK_CLASS_CB:
+			return UCDN_LINEBREAK_CLASS_B2;
+
+		case UCDN_LINEBREAK_CLASS_NL:
+			return UCDN_LINEBREAK_CLASS_BK;
+	}
+
+	return record->linebreak_class;
+}
+
+uint32_t ucdn_mirror(uint32_t code)
 {
 	MirrorPair mp = {0};
 	MirrorPair *res;
@@ -207,7 +241,7 @@ unsigned int ucdn_mirror(unsigned int code)
 	if (get_ucd_record(code)->mirrored == 0)
 		return code;
 
-	mp.from = (unsigned short)code;
+	mp.from = code;
 	res = bsearch(&mp, mirror_pairs, BIDI_MIRROR_LEN, sizeof(MirrorPair),
 			compare_mp);
 
@@ -217,7 +251,7 @@ unsigned int ucdn_mirror(unsigned int code)
 		return res->to;
 }
 
-int ucdn_decompose(unsigned int code, unsigned int *a, unsigned int *b)
+int ucdn_decompose(uint32_t code, uint32_t *a, uint32_t *b)
 {
 	const unsigned short *rec;
 	int len;
@@ -241,7 +275,7 @@ int ucdn_decompose(unsigned int code, unsigned int *a, unsigned int *b)
 	return 1;
 }
 
-int ucdn_compose(unsigned int *code, unsigned int a, unsigned int b)
+int ucdn_compose(uint32_t *code, uint32_t a, uint32_t b)
 {
 	int l, r, index, indexi, offset;
 
@@ -264,7 +298,7 @@ int ucdn_compose(unsigned int *code, unsigned int a, unsigned int b)
 	return *code != 0;
 }
 
-int ucdn_compat_decompose(unsigned int code, unsigned int *decomposed)
+int ucdn_compat_decompose(uint32_t code, uint32_t *decomposed)
 {
 	int i, len;
 	const unsigned short *rec = get_decomp_record(code);

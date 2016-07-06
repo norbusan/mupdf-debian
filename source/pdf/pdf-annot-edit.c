@@ -65,13 +65,13 @@ pdf_update_annot(fz_context *ctx, pdf_document *doc, pdf_annot *annot)
 			n = pdf_dict_get(ctx, ap, PDF_NAME_N); /* normal state */
 
 		/* lookup current state in sub-dictionary */
-		if (!pdf_is_stream(ctx, doc, pdf_to_num(ctx, n), pdf_to_gen(ctx, n)))
+		if (!pdf_is_stream(ctx, n))
 			n = pdf_dict_get(ctx, n, as);
 
 		pdf_drop_xobject(ctx, annot->ap);
 		annot->ap = NULL;
 
-		if (pdf_is_stream(ctx, doc, pdf_to_num(ctx, n), pdf_to_gen(ctx, n)))
+		if (pdf_is_stream(ctx, n))
 		{
 			fz_try(ctx)
 			{
@@ -117,8 +117,7 @@ pdf_create_annot(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_annot_ty
 		/* Make printable as default */
 		pdf_dict_put_drop(ctx, annot_obj, PDF_NAME_F, pdf_new_int(ctx, doc, F_Print));
 
-		annot = fz_malloc_struct(ctx, pdf_annot);
-		annot->page = page;
+		annot = pdf_new_annot(ctx, page);
 		annot->rect = rect;
 		annot->pagerect = rect;
 		annot->ap = NULL;
@@ -138,7 +137,7 @@ pdf_create_annot(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_annot_ty
 
 		/*
 			Linking must be done after any call that might throw because
-			pdf_drop_annot below actually frees a list. Put the new annot
+			pdf_drop_annots below actually frees a list. Put the new annot
 			at the end of the list, so that it will be drawn last.
 		*/
 		*page->annot_tailp = annot;
@@ -153,7 +152,7 @@ pdf_create_annot(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_annot_ty
 	}
 	fz_catch(ctx)
 	{
-		pdf_drop_annot(ctx, annot);
+		pdf_drop_annots(ctx, annot);
 		fz_rethrow(ctx);
 	}
 
@@ -421,7 +420,7 @@ void pdf_set_free_text_details(fz_context *ctx, pdf_document *doc, pdf_annot *an
 		find_free_font_name(ctx, form_fonts, nbuf, sizeof(nbuf));
 
 		font = pdf_new_dict(ctx, doc, 5);
-		ref = pdf_new_ref(ctx, doc, font);
+		ref = pdf_add_object(ctx, doc, font);
 		pdf_dict_puts_drop(ctx, form_fonts, nbuf, ref);
 
 		pdf_dict_put_drop(ctx, font, PDF_NAME_Type, PDF_NAME_Font);

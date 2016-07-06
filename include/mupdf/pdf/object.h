@@ -14,6 +14,7 @@ typedef struct pdf_obj_s pdf_obj;
 pdf_obj *pdf_new_null(fz_context *ctx, pdf_document *doc);
 pdf_obj *pdf_new_bool(fz_context *ctx, pdf_document *doc, int b);
 pdf_obj *pdf_new_int(fz_context *ctx, pdf_document *doc, int i);
+pdf_obj *pdf_new_int_offset(fz_context *ctx, pdf_document *doc, fz_off_t off);
 pdf_obj *pdf_new_real(fz_context *ctx, pdf_document *doc, float f);
 pdf_obj *pdf_new_name(fz_context *ctx, pdf_document *doc, const char *str);
 pdf_obj *pdf_new_string(fz_context *ctx, pdf_document *doc, const char *str, int len);
@@ -24,6 +25,7 @@ pdf_obj *pdf_new_rect(fz_context *ctx, pdf_document *doc, const fz_rect *rect);
 pdf_obj *pdf_new_matrix(fz_context *ctx, pdf_document *doc, const fz_matrix *mtx);
 pdf_obj *pdf_copy_array(fz_context *ctx, pdf_obj *array);
 pdf_obj *pdf_copy_dict(fz_context *ctx, pdf_obj *dict);
+pdf_obj *pdf_deep_copy_obj(fz_context *ctx, pdf_obj *obj);
 
 pdf_obj *pdf_new_obj_from_str(fz_context *ctx, pdf_document *doc, const char *src);
 
@@ -41,7 +43,8 @@ int pdf_is_string(fz_context *ctx, pdf_obj *obj);
 int pdf_is_array(fz_context *ctx, pdf_obj *obj);
 int pdf_is_dict(fz_context *ctx, pdf_obj *obj);
 int pdf_is_indirect(fz_context *ctx, pdf_obj *obj);
-int pdf_is_stream(fz_context *ctx, pdf_document *doc, int num, int gen);
+int pdf_obj_num_is_stream(fz_context *ctx, pdf_document *doc, int num, int gen);
+int pdf_is_stream(fz_context *ctx, pdf_obj *obj);
 pdf_obj *pdf_resolve_obj(fz_context *ctx, pdf_obj *a);
 int pdf_objcmp(fz_context *ctx, pdf_obj *a, pdf_obj *b);
 int pdf_objcmp_resolve(fz_context *ctx, pdf_obj *a, pdf_obj *b);
@@ -74,6 +77,7 @@ void pdf_clean_obj(fz_context *ctx, pdf_obj *obj);
 /* safe, silent failure, no error reporting on type mismatches */
 int pdf_to_bool(fz_context *ctx, pdf_obj *obj);
 int pdf_to_int(fz_context *ctx, pdf_obj *obj);
+fz_off_t pdf_to_offset(fz_context *ctx, pdf_obj *obj);
 float pdf_to_real(fz_context *ctx, pdf_obj *obj);
 char *pdf_to_name(fz_context *ctx, pdf_obj *obj);
 char *pdf_to_str_buf(fz_context *ctx, pdf_obj *obj);
@@ -128,13 +132,7 @@ int pdf_obj_refs(fz_context *ctx, pdf_obj *ref);
 int pdf_obj_parent_num(fz_context *ctx, pdf_obj *obj);
 
 int pdf_sprint_obj(fz_context *ctx, char *s, int n, pdf_obj *obj, int tight);
-int pdf_fprint_obj(fz_context *ctx, FILE *fp, pdf_obj *obj, int tight);
-int pdf_output_obj(fz_context *ctx, fz_output *out, pdf_obj *obj, int tight);
-
-#ifndef NDEBUG
-void pdf_print_obj(fz_context *ctx, pdf_obj *obj);
-void pdf_print_ref(fz_context *ctx, pdf_obj *obj);
-#endif
+int pdf_print_obj(fz_context *ctx, fz_output *out, pdf_obj *obj, int tight);
 
 char *pdf_to_utf8(fz_context *ctx, pdf_document *doc, pdf_obj *src);
 unsigned short *pdf_to_ucs2(fz_context *ctx, pdf_document *doc, pdf_obj *src);
@@ -146,7 +144,9 @@ fz_rect *pdf_to_rect(fz_context *ctx, pdf_obj *array, fz_rect *rect);
 fz_matrix *pdf_to_matrix(fz_context *ctx, pdf_obj *array, fz_matrix *mat);
 
 pdf_document *pdf_get_indirect_document(fz_context *ctx, pdf_obj *obj);
+pdf_document *pdf_get_bound_document(fz_context *ctx, pdf_obj *obj);
 void pdf_set_str_len(fz_context *ctx, pdf_obj *obj, int newlen);
 void pdf_set_int(fz_context *ctx, pdf_obj *obj, int i);
+void pdf_set_int_offset(fz_context *ctx, pdf_obj *obj, fz_off_t i);
 
 #endif

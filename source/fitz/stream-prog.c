@@ -1,27 +1,13 @@
 #include "mupdf/fitz/stream.h"
 #include "mupdf/fitz/string.h"
 
-#if (defined(_WIN32) || defined(_WIN64)) && !defined(NDEBUG)
-#include "windows.h"
-
-static void
-show_progress(int av, int pos)
-{
-	char text[80];
-	sprintf(text, "Have %d, Want %d\n", av, pos);
-	OutputDebugStringA(text);
-}
-#else
-#define show_progress(A,B) do {} while (0)
-#endif
-
 /* File stream - progressive reading to simulate http download */
 
 typedef struct prog_state
 {
-	int fd;
-	int length;
-	int available;
+	FILE *file;
+	fz_off_t length;
+	fz_off_t available;
 	int bps;
 	clock_t start_time;
 	unsigned char buffer[4096];
@@ -39,7 +25,7 @@ static int next_prog(fz_context *ctx, fz_stream *stm, int len)
 	/* Simulate more data having arrived */
 	if (ps->available < ps->length)
 	{
-		int av = (int)((float)(clock() - ps->start_time) * ps->bps / (CLOCKS_PER_SEC*8));
+		fz_off_t av = (fz_off_t)((double)(clock() - ps->start_time) * ps->bps / (CLOCKS_PER_SEC*8));
 		if (av > ps->length)
 			av = ps->length;
 		ps->available = av;
@@ -48,14 +34,11 @@ static int next_prog(fz_context *ctx, fz_stream *stm, int len)
 		{
 			len = av - stm->pos;
 			if (len <= 0)
-			{
-				show_progress(av, stm->pos);
 				fz_throw(ctx, FZ_ERROR_TRYLATER, "Not enough data yet");
-			}
 		}
 	}
 
-	n = (len > 0 ? read(ps->fd, buf, len) : 0);
+	n = (len > 0 ? fread(buf, 1, (unsigned int)len, ps->file) : 0);
 	if (n < 0)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "read error: %s", strerror(errno));
 	stm->rp = ps->buffer + stm->pos;
@@ -66,10 +49,9 @@ static int next_prog(fz_context *ctx, fz_stream *stm, int len)
 	return *stm->rp++;
 }
 
-static void seek_prog(fz_context *ctx, fz_stream *stm, int offset, int whence)
+static void seek_prog(fz_context *ctx, fz_stream *stm, fz_off_t offset, int whence)
 {
 	prog_state *ps = (prog_state *)stm->state;
-	int n;
 
 	/* Simulate more data having arrived */
 	if (ps->available < ps->length)
@@ -82,43 +64,31 @@ static void seek_prog(fz_context *ctx, fz_stream *stm, int offset, int whence)
 	if (ps->available < ps->length)
 	{
 		if (whence == SEEK_END)
-		{
-			show_progress(ps->available, ps->length);
 			fz_throw(ctx, FZ_ERROR_TRYLATER, "Not enough data to seek to end yet");
-		}
 	}
 	if (whence == SEEK_CUR)
 	{
 		whence = SEEK_SET;
 		offset += stm->pos;
 		if (offset > ps->available)
-		{
-			show_progress(ps->available, offset);
 			fz_throw(ctx, FZ_ERROR_TRYLATER, "Not enough data to seek (relatively) to offset yet");
-		}
 	}
 	if (whence == SEEK_SET)
 	{
 		if (offset > ps->available)
-		{
-			show_progress(ps->available, offset);
 			fz_throw(ctx, FZ_ERROR_TRYLATER, "Not enough data to seek to offset yet");
-		}
 	}
 
-	n = lseek(ps->fd, offset, whence);
-	if (n < 0)
-		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot lseek: %s", strerror(errno));
-	stm->pos = n;
+	if (fz_fseek(ps->file, offset, whence) != 0)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot seek: %s", strerror(errno));
+	stm->pos = offset;
 	stm->wp = stm->rp;
 }
 
 static void close_prog(fz_context *ctx, void *state)
 {
 	prog_state *ps = (prog_state *)state;
-	int n = close(ps->fd);
-	if (n < 0)
-		fz_warn(ctx, "close error: %s", strerror(errno));
+	fclose(ps->file);
 	fz_free(ctx, state);
 }
 
@@ -137,19 +107,20 @@ static int meta_prog(fz_context *ctx, fz_stream *stm, int key, int size, void *p
 }
 
 fz_stream *
-fz_open_fd_progressive(fz_context *ctx, int fd, int bps)
+fz_open_file_ptr_progressive(fz_context *ctx, FILE *file, int bps)
 {
 	fz_stream *stm;
 	prog_state *state;
 
 	state = fz_malloc_struct(ctx, prog_state);
-	state->fd = fd;
+	state->file = file;
 	state->bps = bps;
 	state->start_time = clock();
 	state->available = 0;
 
-	state->length = lseek(state->fd, 0, SEEK_END);
-	lseek(state->fd, 0, SEEK_SET);
+	fz_fseek(state->file, 0, SEEK_END);
+	state->length = fz_ftell(state->file);
+	fz_fseek(state->file, 0, SEEK_SET);
 
 	fz_try(ctx)
 	{
@@ -169,22 +140,23 @@ fz_open_fd_progressive(fz_context *ctx, int fd, int bps)
 fz_stream *
 fz_open_file_progressive(fz_context *ctx, const char *name, int bps)
 {
+	FILE *f;
 #if defined(_WIN32) || defined(_WIN64)
 	char *s = (char*)name;
 	wchar_t *wname, *d;
-	int c, fd;
+	int c;
 	d = wname = fz_malloc(ctx, (strlen(name)+1) * sizeof(wchar_t));
 	while (*s) {
 		s += fz_chartorune(&c, s);
 		*d++ = c;
 	}
 	*d = 0;
-	fd = _wopen(wname, O_BINARY | O_RDONLY, 0);
+	f = _wfopen(wname, L"rb");
 	fz_free(ctx, wname);
 #else
-	int fd = open(name, O_BINARY | O_RDONLY, 0);
+	f = fz_fopen(name, "rb");
 #endif
-	if (fd == -1)
+	if (f == NULL)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot open %s", name);
-	return fz_open_fd_progressive(ctx, fd, bps);
+	return fz_open_file_ptr_progressive(ctx, f, bps);
 }

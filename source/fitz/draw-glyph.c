@@ -173,7 +173,7 @@ fz_subpixel_adjust(fz_context *ctx, fz_matrix *ctm, fz_matrix *subpix_ctm, unsig
 }
 
 fz_glyph *
-fz_render_stroked_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix *trm, const fz_matrix *ctm, fz_stroke_state *stroke, const fz_irect *scissor)
+fz_render_stroked_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix *trm, const fz_matrix *ctm, const fz_stroke_state *stroke, const fz_irect *scissor)
 {
 	if (font->ft_face)
 	{
@@ -189,7 +189,7 @@ fz_render_stroked_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix *trm,
 }
 
 fz_pixmap *
-fz_render_stroked_glyph_pixmap(fz_context *ctx, fz_font *font, int gid, fz_matrix *trm, const fz_matrix *ctm, fz_stroke_state *stroke, const fz_irect *scissor)
+fz_render_stroked_glyph_pixmap(fz_context *ctx, fz_font *font, int gid, fz_matrix *trm, const fz_matrix *ctm, const fz_stroke_state *stroke, const fz_irect *scissor)
 {
 	if (font->ft_face)
 	{
@@ -453,8 +453,8 @@ fz_dump_glyph_cache_stats(fz_context *ctx)
 {
 	fz_glyph_cache *cache = ctx->glyph_cache;
 
-	printf("Glyph Cache Size: %d\n", cache->total);
+	fprintf(stderr, "Glyph Cache Size: %d\n", cache->total);
 #ifndef NDEBUG
-	printf("Glyph Cache Evictions: %d (%d bytes)\n", cache->num_evictions, cache->evicted);
+	fprintf(stderr, "Glyph Cache Evictions: %d (%d bytes)\n", cache->num_evictions, cache->evicted);
 #endif
 }

@@ -23,7 +23,7 @@ static int pdf_field_dirties_document(fz_context *ctx, pdf_document *doc, pdf_ob
 	return 1;
 }
 
-/* Find the point in a field hierarchy where all descendents
+/* Find the point in a field hierarchy where all descendants
  * share the same name */
 static pdf_obj *find_head_of_field_group(fz_context *ctx, pdf_obj *obj)
 {
@@ -49,7 +49,7 @@ static void pdf_field_mark_dirty(fz_context *ctx, pdf_document *doc, pdf_obj *fi
 	}
 }
 
-static void update_field_value(fz_context *ctx, pdf_document *doc, pdf_obj *obj, char *text)
+static void update_field_value(fz_context *ctx, pdf_document *doc, pdf_obj *obj, const char *text)
 {
 	pdf_obj *sobj = NULL;
 	pdf_obj *grp;
@@ -680,7 +680,7 @@ void pdf_update_page(fz_context *ctx, pdf_document *doc, pdf_page *page)
 	*/
 	if (page->tmp_annots)
 	{
-		pdf_drop_annot(ctx, page->tmp_annots);
+		pdf_drop_annots(ctx, page->tmp_annots);
 		page->tmp_annots = NULL;
 	}
 
@@ -819,7 +819,7 @@ int pdf_widget_get_type(fz_context *ctx, pdf_widget *widget)
 	return annot->widget_type;
 }
 
-static int set_text_field_value(fz_context *ctx, pdf_document *doc, pdf_obj *field, char *text)
+static int set_text_field_value(fz_context *ctx, pdf_document *doc, pdf_obj *field, const char *text)
 {
 	pdf_obj *v = pdf_dict_getp(ctx, field, "AA/V");
 
@@ -828,7 +828,7 @@ static int set_text_field_value(fz_context *ctx, pdf_document *doc, pdf_obj *fie
 		pdf_js_event e;
 
 		e.target = field;
-		e.value = text;
+		e.value = fz_strdup(ctx, text);
 		pdf_js_setup_event(doc->js, &e);
 		execute_action(ctx, doc, field, v);
 
@@ -845,7 +845,7 @@ static int set_text_field_value(fz_context *ctx, pdf_document *doc, pdf_obj *fie
 	return 1;
 }
 
-static void update_checkbox_selector(fz_context *ctx, pdf_document *doc, pdf_obj *field, char *val)
+static void update_checkbox_selector(fz_context *ctx, pdf_document *doc, pdf_obj *field, const char *val)
 {
 	pdf_obj *kids = pdf_dict_get(ctx, field, PDF_NAME_Kids);
 
@@ -882,14 +882,14 @@ static void update_checkbox_selector(fz_context *ctx, pdf_document *doc, pdf_obj
 	}
 }
 
-static int set_checkbox_value(fz_context *ctx, pdf_document *doc, pdf_obj *field, char *val)
+static int set_checkbox_value(fz_context *ctx, pdf_document *doc, pdf_obj *field, const char *val)
 {
 	update_checkbox_selector(ctx, doc, field, val);
 	update_field_value(ctx, doc, field, val);
 	return 1;
 }
 
-int pdf_field_set_value(fz_context *ctx, pdf_document *doc, pdf_obj *field, char *text)
+int pdf_field_set_value(fz_context *ctx, pdf_document *doc, pdf_obj *field, const char *text)
 {
 	int res = 0;
 
@@ -932,7 +932,7 @@ char *pdf_field_border_style(fz_context *ctx, pdf_document *doc, pdf_obj *field)
 	return "Solid";
 }
 
-void pdf_field_set_border_style(fz_context *ctx, pdf_document *doc, pdf_obj *field, char *text)
+void pdf_field_set_border_style(fz_context *ctx, pdf_document *doc, pdf_obj *field, const char *text)
 {
 	pdf_obj *val = NULL;
 
@@ -949,7 +949,7 @@ void pdf_field_set_border_style(fz_context *ctx, pdf_document *doc, pdf_obj *fie
 	else
 		return;
 
-	fz_try(ctx);
+	fz_try(ctx)
 	{
 		pdf_dict_putl(ctx, field, val, PDF_NAME_BS, PDF_NAME_S, NULL);
 		pdf_field_mark_dirty(ctx, doc, field);
@@ -964,11 +964,11 @@ void pdf_field_set_border_style(fz_context *ctx, pdf_document *doc, pdf_obj *fie
 	}
 }
 
-void pdf_field_set_button_caption(fz_context *ctx, pdf_document *doc, pdf_obj *field, char *text)
+void pdf_field_set_button_caption(fz_context *ctx, pdf_document *doc, pdf_obj *field, const char *text)
 {
 	pdf_obj *val = pdf_new_string(ctx, doc, text, strlen(text));
 
-	fz_try(ctx);
+	fz_try(ctx)
 	{
 		if (pdf_field_type(ctx, doc, field) == PDF_WIDGET_TYPE_PUSHBUTTON)
 		{
@@ -1276,11 +1276,12 @@ int pdf_text_widget_set_text(fz_context *ctx, pdf_document *doc, pdf_widget *tw,
 	return accepted;
 }
 
-int pdf_choice_widget_options(fz_context *ctx, pdf_document *doc, pdf_widget *tw, char *opts[])
+/* Get either the listed value or the export value. */
+int pdf_choice_widget_options(fz_context *ctx, pdf_document *doc, pdf_widget *tw, int exportval, char *opts[])
 {
 	pdf_annot *annot = (pdf_annot *)tw;
 	pdf_obj *optarr;
-	int i, n;
+	int i, n, m;
 
 	if (!annot)
 		return 0;
@@ -1292,10 +1293,17 @@ int pdf_choice_widget_options(fz_context *ctx, pdf_document *doc, pdf_widget *tw
 	{
 		for (i = 0; i < n; i++)
 		{
-			opts[i] = pdf_to_str_buf(ctx, pdf_array_get(ctx, optarr, i));
+			m = pdf_array_len(ctx, pdf_array_get(ctx, optarr, i));
+			/* If it is a two element array, the second item is the one that we want if we want the listing value. */
+			if (m == 2)
+				if (exportval)
+					opts[i] = pdf_to_str_buf(ctx, pdf_array_get(ctx, pdf_array_get(ctx, optarr, i), 0));
+				else
+					opts[i] = pdf_to_str_buf(ctx, pdf_array_get(ctx, pdf_array_get(ctx, optarr, i), 1));
+			else
+				opts[i] = pdf_to_str_buf(ctx, pdf_array_get(ctx, optarr, i));
 		}
 	}
-
 	return n;
 }
 
@@ -1439,7 +1447,6 @@ void pdf_signature_set_value(fz_context *ctx, pdf_document *doc, pdf_obj *field,
 	pdf_obj *byte_range;
 	pdf_obj *contents;
 	char buf[2048];
-	pdf_unsaved_sig *unsaved_sig;
 
 	memset(buf, 0, sizeof(buf));
 
@@ -1474,9 +1481,5 @@ void pdf_signature_set_value(fz_context *ctx, pdf_document *doc, pdf_obj *field,
 	/* Record details within the document structure so that contents
 	 * and byte_range can be updated with their correct values at
 	 * saving time */
-	unsaved_sig = fz_malloc_struct(ctx, pdf_unsaved_sig);
-	unsaved_sig->field = pdf_keep_obj(ctx, field);
-	unsaved_sig->signer = pdf_keep_signer(ctx, signer);
-	unsaved_sig->next = doc->unsaved_sigs;
-	doc->unsaved_sigs = unsaved_sig;
+	pdf_xref_store_unsaved_signature(ctx, doc, field, signer);
 }

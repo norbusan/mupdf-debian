@@ -8,24 +8,32 @@
 #define main main_utf8
 #endif
 
+int mudraw_main(int argc, char *argv[]);
+int murun_main(int argc, char *argv[]);
 int pdfclean_main(int argc, char *argv[]);
 int pdfextract_main(int argc, char *argv[]);
 int pdfinfo_main(int argc, char *argv[]);
 int pdfposter_main(int argc, char *argv[]);
 int pdfshow_main(int argc, char *argv[]);
 int pdfpages_main(int argc, char *argv[]);
+int pdfcreate_main(int argc, char *argv[]);
+int pdfmerge_main(int argc, char *argv[]);
 
 static struct {
 	int (*func)(int argc, char *argv[]);
 	char *name;
 	char *desc;
 } tools[] = {
+	{ mudraw_main, "draw", "convert document" },
+	{ murun_main, "run", "run javascript" },
 	{ pdfclean_main, "clean", "rewrite pdf file" },
 	{ pdfextract_main, "extract", "extract font and image resources" },
 	{ pdfinfo_main, "info", "show information about pdf resources" },
 	{ pdfpages_main, "pages", "show information about pdf pages" },
 	{ pdfposter_main, "poster", "split large page into many tiles" },
 	{ pdfshow_main, "show", "show internal pdf objects" },
+	{ pdfcreate_main, "create", "create pdf document" },
+	{ pdfmerge_main, "merge", "merge pages from multiple pdf sources into a new pdf" },
 };
 
 static int
@@ -35,12 +43,30 @@ namematch(const char *end, const char *start, const char *match)
 	return ((end-len >= start) && (strncmp(end-len, match, len) == 0));
 }
 
+#ifdef GPERF
+#include "gperftools/profiler.h"
+
+static int profiled_main(int argc, char **argv);
+
 int main(int argc, char **argv)
+{
+	int ret;
+	ProfilerStart("mutool.prof");
+	ret = profiled_main(argc, argv);
+	ProfilerStop();
+	return ret;
+}
+
+static int profiled_main(int argc, char **argv)
+#else
+int main(int argc, char **argv)
+#endif
 {
 	char *start, *end;
 	char buf[32];
 	int i;
 
+	
 	if (argc == 0)
 	{
 		fprintf(stderr, "No command name found!\n");
@@ -61,6 +87,10 @@ int main(int argc, char **argv)
 			strcpy(buf, "mupdf");
 			strcat(buf, tools[i].name);
 			if (namematch(end, start, buf) || namematch(end, start, buf+2))
+				return tools[i].func(argc, argv);
+			strcpy(buf, "mu");
+			strcat(buf, tools[i].name);
+			if (namematch(end, start, buf))
 				return tools[i].func(argc, argv);
 		}
 	}

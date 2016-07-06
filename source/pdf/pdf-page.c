@@ -78,7 +78,7 @@ pdf_lookup_page_loc_imp(fz_context *ctx, pdf_document *doc, pdf_obj *node, int *
 				}
 				else
 				{
-					if (type ? !pdf_name_eq(ctx, type, PDF_NAME_Page) != 0 : !pdf_dict_get(ctx, kid, PDF_NAME_MediaBox))
+					if (type ? !pdf_name_eq(ctx, type, PDF_NAME_Page) : !pdf_dict_get(ctx, kid, PDF_NAME_MediaBox))
 						fz_warn(ctx, "non-page object in page tree (%s)", pdf_to_name(ctx, type));
 					if (*skip == 0)
 					{
@@ -165,7 +165,7 @@ pdf_lookup_page_number(fz_context *ctx, pdf_document *doc, pdf_obj *node)
 	int total = 0;
 	pdf_obj *parent, *parent2;
 
-	if (!pdf_name_eq(ctx, pdf_dict_get(ctx, node, PDF_NAME_Type), PDF_NAME_Page) != 0)
+	if (!pdf_name_eq(ctx, pdf_dict_get(ctx, node, PDF_NAME_Type), PDF_NAME_Page))
 		fz_throw(ctx, FZ_ERROR_GENERIC, "invalid page object");
 
 	parent2 = parent = pdf_dict_get(ctx, node, PDF_NAME_Parent);
@@ -198,6 +198,24 @@ pdf_lookup_page_number(fz_context *ctx, pdf_document *doc, pdf_obj *node)
 	}
 
 	return total;
+}
+
+int
+pdf_lookup_anchor(fz_context *ctx, pdf_document *doc, const char *name)
+{
+	pdf_obj *needle, *dest;
+	fz_link_dest ld;
+
+	needle = pdf_new_string(ctx, doc, name, strlen(name));
+	fz_try(ctx)
+		dest = pdf_lookup_dest(ctx, doc, needle);
+	fz_always(ctx)
+		pdf_drop_obj(ctx, needle);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+
+	ld = pdf_parse_link_dest(ctx, doc, FZ_LINK_GOTO, dest);
+	return ld.ld.gotor.page;
 }
 
 static pdf_obj *
@@ -405,11 +423,11 @@ pdf_drop_page_imp(fz_context *ctx, pdf_page *page)
 	if (page->links)
 		fz_drop_link(ctx, page->links);
 	if (page->annots)
-		pdf_drop_annot(ctx, page->annots);
+		pdf_drop_annots(ctx, page->annots);
 	if (page->deleted_annots)
-		pdf_drop_annot(ctx, page->deleted_annots);
+		pdf_drop_annots(ctx, page->deleted_annots);
 	if (page->tmp_annots)
-		pdf_drop_annot(ctx, page->tmp_annots);
+		pdf_drop_annots(ctx, page->tmp_annots);
 	/* doc->focus, when not NULL, refers to one of
 	 * the annotations and must be NULLed when the
 	 * annotations are destroyed. doc->focus_obj
@@ -436,10 +454,7 @@ pdf_new_page(fz_context *ctx, pdf_document *doc)
 	page->super.load_links = (fz_page_load_links_fn *)pdf_load_links;
 	page->super.bound_page = (fz_page_bound_page_fn *)pdf_bound_page;
 	page->super.first_annot = (fz_page_first_annot_fn *)pdf_first_annot;
-	page->super.next_annot = (fz_page_next_annot_fn *)pdf_next_annot;
-	page->super.bound_annot = (fz_page_bound_annot_fn *)pdf_bound_annot;
 	page->super.run_page_contents = (fz_page_run_page_contents_fn *)pdf_run_page_contents;
-	page->super.run_annot = (fz_page_run_annot_fn *)pdf_run_annot;
 	page->super.page_presentation = (fz_page_page_presentation_fn *)pdf_page_presentation;
 
 	page->resources = NULL;
@@ -606,129 +621,81 @@ pdf_delete_page(fz_context *ctx, pdf_document *doc, int at)
 }
 
 void
-pdf_insert_page(fz_context *ctx, pdf_document *doc, pdf_page *page, int at)
-{
-	int count = pdf_count_pages(ctx, doc);
-	pdf_obj *parent, *kids;
-	pdf_obj *page_ref;
-	int i;
-
-	page_ref = pdf_new_ref(ctx, doc, page->me);
-
-	fz_try(ctx)
-	{
-		if (count == 0)
-		{
-			pdf_obj *root = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME_Root);
-			parent = pdf_dict_get(ctx, root, PDF_NAME_Pages);
-			if (!parent)
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find page tree");
-
-			kids = pdf_dict_get(ctx, parent, PDF_NAME_Kids);
-			if (!kids)
-				fz_throw(ctx, FZ_ERROR_GENERIC, "malformed page tree");
-
-			pdf_array_insert(ctx, kids, page_ref, 0);
-		}
-		else if (at >= count)
-		{
-			if (at == INT_MAX)
-				at = count;
-
-			if (at > count)
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot insert page beyond end of page tree");
-
-			/* append after last page */
-			pdf_lookup_page_loc(ctx, doc, count - 1, &parent, &i);
-			kids = pdf_dict_get(ctx, parent, PDF_NAME_Kids);
-			pdf_array_insert(ctx, kids, page_ref, i + 1);
-		}
-		else
-		{
-			/* insert before found page */
-			pdf_lookup_page_loc(ctx, doc, at, &parent, &i);
-			kids = pdf_dict_get(ctx, parent, PDF_NAME_Kids);
-			pdf_array_insert(ctx, kids, page_ref, i);
-		}
-
-		pdf_dict_put(ctx, page->me, PDF_NAME_Parent, parent);
-
-		/* Adjust page counts */
-		while (parent)
-		{
-			int count = pdf_to_int(ctx, pdf_dict_get(ctx, parent, PDF_NAME_Count));
-			pdf_dict_put_drop(ctx, parent, PDF_NAME_Count, pdf_new_int(ctx, doc, count + 1));
-			parent = pdf_dict_get(ctx, parent, PDF_NAME_Parent);
-		}
-
-	}
-	fz_always(ctx)
-	{
-		pdf_drop_obj(ctx, page_ref);
-	}
-	fz_catch(ctx)
-	{
-		fz_rethrow(ctx);
-	}
-
-	doc->page_count = 0; /* invalidate cached value */
-}
-
-void
 pdf_delete_page_range(fz_context *ctx, pdf_document *doc, int start, int end)
 {
 	while (start < end)
 		pdf_delete_page(ctx, doc, start++);
 }
 
-pdf_page *
-pdf_create_page(fz_context *ctx, pdf_document *doc, fz_rect mediabox, int res, int rotate)
+pdf_obj *
+pdf_add_page(fz_context *ctx, pdf_document *doc, const fz_rect *mediabox, int rotate, fz_buffer *contents, pdf_obj *resources)
 {
-	pdf_page *page = NULL;
-	pdf_obj *pageobj;
-	float userunit = 1;
-	fz_matrix ctm, tmp;
-	fz_rect realbox;
-
-	page = pdf_new_page(ctx, doc);
-
+	pdf_obj *page_obj = pdf_new_dict(ctx, doc, 5);
 	fz_try(ctx)
 	{
-		page->me = pageobj = pdf_new_dict(ctx, doc, 4);
-
-		pdf_dict_put_drop(ctx, pageobj, PDF_NAME_Type, PDF_NAME_Page);
-
-		page->mediabox.x0 = fz_min(mediabox.x0, mediabox.x1) * userunit;
-		page->mediabox.y0 = fz_min(mediabox.y0, mediabox.y1) * userunit;
-		page->mediabox.x1 = fz_max(mediabox.x0, mediabox.x1) * userunit;
-		page->mediabox.y1 = fz_max(mediabox.y0, mediabox.y1) * userunit;
-		pdf_dict_put_drop(ctx, pageobj, PDF_NAME_MediaBox, pdf_new_rect(ctx, doc, &page->mediabox));
-
-		/* Snap page->rotate to 0, 90, 180 or 270 */
-		if (page->rotate < 0)
-			page->rotate = 360 - ((-page->rotate) % 360);
-		if (page->rotate >= 360)
-			page->rotate = page->rotate % 360;
-		page->rotate = 90*((page->rotate + 45)/90);
-		if (page->rotate > 360)
-			page->rotate = 0;
-		pdf_dict_put_drop(ctx, pageobj, PDF_NAME_Rotate, pdf_new_int(ctx, doc, page->rotate));
-
-		fz_pre_rotate(fz_scale(&ctm, 1, -1), -page->rotate);
-		realbox = page->mediabox;
-		fz_transform_rect(&realbox, &ctm);
-		fz_pre_scale(fz_translate(&tmp, -realbox.x0, -realbox.y0), userunit, userunit);
-		fz_concat(&ctm, &ctm, &tmp);
-		page->ctm = ctm;
-		/* Do not create a Contents, as an empty Contents dict is not
-		 * valid. See Bug 694712 */
+		pdf_dict_put_drop(ctx, page_obj, PDF_NAME_Type, PDF_NAME_Page);
+		pdf_dict_put_drop(ctx, page_obj, PDF_NAME_MediaBox, pdf_new_rect(ctx, doc, mediabox));
+		pdf_dict_put_drop(ctx, page_obj, PDF_NAME_Rotate, pdf_new_int(ctx, doc, rotate));
+		pdf_dict_put_drop(ctx, page_obj, PDF_NAME_Contents, pdf_add_stream(ctx, doc, contents));
+		pdf_dict_put_drop(ctx, page_obj, PDF_NAME_Resources, pdf_add_object(ctx, doc, resources));
 	}
 	fz_catch(ctx)
 	{
-		pdf_drop_obj(ctx, page->me);
-		fz_free(ctx, page);
-		fz_rethrow_message(ctx, "Failed to create page");
+		pdf_drop_obj(ctx, page_obj);
+		fz_rethrow(ctx);
+	}
+	return pdf_add_object_drop(ctx, doc, page_obj);
+}
+
+void
+pdf_insert_page(fz_context *ctx, pdf_document *doc, int at, pdf_obj *page_ref)
+{
+	int count = pdf_count_pages(ctx, doc);
+	pdf_obj *parent, *kids;
+	int i;
+
+	if (at < 0)
+		at = count;
+	if (at == INT_MAX)
+		at = count;
+	if (at > count)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot insert page beyond end of page tree");
+
+	if (count == 0)
+	{
+		pdf_obj *root = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME_Root);
+		parent = pdf_dict_get(ctx, root, PDF_NAME_Pages);
+		if (!parent)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find page tree");
+		kids = pdf_dict_get(ctx, parent, PDF_NAME_Kids);
+		if (!kids)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "malformed page tree");
+		pdf_array_insert(ctx, kids, page_ref, 0);
+	}
+	else if (at == count)
+	{
+		/* append after last page */
+		pdf_lookup_page_loc(ctx, doc, count - 1, &parent, &i);
+		kids = pdf_dict_get(ctx, parent, PDF_NAME_Kids);
+		pdf_array_insert(ctx, kids, page_ref, i + 1);
+	}
+	else
+	{
+		/* insert before found page */
+		pdf_lookup_page_loc(ctx, doc, at, &parent, &i);
+		kids = pdf_dict_get(ctx, parent, PDF_NAME_Kids);
+		pdf_array_insert(ctx, kids, page_ref, i);
 	}
 
-	return page;
+	pdf_dict_put(ctx, page_ref, PDF_NAME_Parent, parent);
+
+	/* Adjust page counts */
+	while (parent)
+	{
+		int count = pdf_to_int(ctx, pdf_dict_get(ctx, parent, PDF_NAME_Count));
+		pdf_dict_put_drop(ctx, parent, PDF_NAME_Count, pdf_new_int(ctx, doc, count + 1));
+		parent = pdf_dict_get(ctx, parent, PDF_NAME_Parent);
+	}
+
+	doc->page_count = 0; /* invalidate cached value */
 }

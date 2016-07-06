@@ -1,3 +1,46 @@
+List of changes in MuPDF 1.9
+
+* Headline changes:
+	* New command line tools: create and run.
+	* New low-level Java interface for desktop and android.
+	* Bidirectional layout for Arabic and Hebrew scripts.
+	* Shaping complex scripts for EPUB text layout.
+	* Noto fallback fonts for EPUB layout.
+
+* mutool create
+	Create new PDF files from scratch.
+	Read an annotated content stream in a text file and write a PDF file,
+	automatically embedding font and image resources.
+
+* mutool run
+	Run javascript scripts with MuPDF bindings.
+	The interface is similar to the new Java interface.
+
+* mutool draw
+	Optional multi-threaded operation (Windows and pthreads).
+	Optional low memory mode (primarily for testing).
+
+List of changes in MuPDF 1.8
+
+* Headline changes:
+	* New OpenGL-based barebones desktop viewer.
+	* New URW fonts with greek and cyrillic.
+	* 64-bit file support.
+	* Ghostscript proofing mode (source only; not in shipped binaries).
+
+* EPUB improvements:
+	* User style sheets.
+	* GIF images (also for CBZ).
+	* Table of contents.
+	* CJK text.
+	* Page margins.
+	* Many bug fixes.
+
+* Bug fixes:
+	* Updated FreeType to version 2.6.1.
+	* Various font substitution bug fixes.
+	* Fix setjmp/longjmp behaviour which could cause optimizing compilers to misbehave.
+
 List of changes in MuPDF 1.7a
 
 * Bugfixes

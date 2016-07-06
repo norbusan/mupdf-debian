@@ -329,9 +329,12 @@ parse_inline_image(fz_context *ctx, pdf_csi *csi, fz_stream *stm)
 		if (!found)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "syntax error after inline image");
 	}
-	fz_catch(ctx)
+	fz_always(ctx)
 	{
 		pdf_drop_obj(ctx, obj);
+	}
+	fz_catch(ctx)
+	{
 		fz_drop_image(ctx, img);
 		fz_rethrow(ctx);
 	}
@@ -350,11 +353,11 @@ pdf_process_extgstate(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, pdf_ob
 
 	obj = pdf_dict_get(ctx, dict, PDF_NAME_LC);
 	if (pdf_is_int(ctx, obj) && proc->op_J)
-		proc->op_J(ctx, proc, pdf_to_int(ctx, obj));
+		proc->op_J(ctx, proc, fz_clampi(pdf_to_int(ctx, obj), 0, 2));
 
 	obj = pdf_dict_get(ctx, dict, PDF_NAME_LJ);
 	if (pdf_is_int(ctx, obj) && proc->op_j)
-		proc->op_j(ctx, proc, pdf_to_int(ctx, obj));
+		proc->op_j(ctx, proc, fz_clampi(pdf_to_int(ctx, obj), 0, 2));
 
 	obj = pdf_dict_get(ctx, dict, PDF_NAME_ML);
 	if (pdf_is_number(ctx, obj) && proc->op_M)
@@ -672,10 +675,13 @@ resolve_properties(fz_context *ctx, pdf_csi *csi, pdf_obj *obj)
 }
 
 static void
-pdf_process_BDC(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, const char *name, pdf_obj *properties)
+pdf_process_BDC(fz_context *ctx, pdf_processor *proc, pdf_csi *csi)
 {
+	pdf_obj *raw = csi->obj;
+	pdf_obj *cooked = resolve_properties(ctx, csi, raw);
+
 	if (proc->op_BDC)
-		proc->op_BDC(ctx, proc, name, properties);
+		proc->op_BDC(ctx, proc, csi->name, raw, cooked);
 
 	/* Already hidden, no need to look further */
 	if (proc->hidden > 0)
@@ -685,18 +691,18 @@ pdf_process_BDC(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, const char *
 	}
 
 	/* We only look at OC groups here */
-	if (strcmp(name, "OC"))
+	if (strcmp(csi->name, "OC"))
 		return;
 
 	/* No Properties array, or name not found, means visible. */
-	if (!properties)
+	if (!cooked)
 		return;
 
 	/* Wrong type of property */
-	if (!pdf_name_eq(ctx, pdf_dict_get(ctx, properties, PDF_NAME_Type), PDF_NAME_OCG))
+	if (!pdf_name_eq(ctx, pdf_dict_get(ctx, cooked, PDF_NAME_Type), PDF_NAME_OCG))
 		return;
 
-	if (pdf_is_hidden_ocg(ctx, csi->doc->ocg, csi->rdb, proc->event, properties))
+	if (pdf_is_hidden_ocg(ctx, csi->doc->ocg, csi->rdb, proc->event, cooked))
 		++proc->hidden;
 }
 
@@ -780,8 +786,8 @@ pdf_process_keyword(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_strea
 
 	/* general graphics state */
 	case A('w'): if (proc->op_w) proc->op_w(ctx, proc, s[0]); break;
-	case A('j'): if (proc->op_j) proc->op_j(ctx, proc, s[0]); break;
-	case A('J'): if (proc->op_J) proc->op_J(ctx, proc, s[0]); break;
+	case A('j'): if (proc->op_j) proc->op_j(ctx, proc, fz_clampi(s[0], 0, 2)); break;
+	case A('J'): if (proc->op_J) proc->op_J(ctx, proc, fz_clampi(s[0], 0, 2)); break;
 	case A('M'): if (proc->op_M) proc->op_M(ctx, proc, s[0]); break;
 	case A('d'): if (proc->op_d) proc->op_d(ctx, proc, csi->obj, s[0]); break;
 	case B('r','i'): if (proc->op_ri) proc->op_ri(ctx, proc, csi->name); break;
@@ -859,7 +865,7 @@ pdf_process_keyword(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_strea
 				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find Font resource '%s'", csi->name);
 			font = load_font_or_hail_mary(ctx, csi->doc, csi->rdb, fontobj, 0, csi->cookie);
 			fz_try(ctx)
-				proc->op_Tf(ctx, proc, csi->name, font, s[0]); break;
+				proc->op_Tf(ctx, proc, csi->name, font, s[0]);
 			fz_always(ctx)
 				pdf_drop_font(ctx, font);
 			fz_catch(ctx)
@@ -963,9 +969,9 @@ pdf_process_keyword(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_strea
 
 	/* marked content */
 	case B('M','P'): if (proc->op_MP) proc->op_MP(ctx, proc, csi->name); break;
-	case B('D','P'): if (proc->op_DP) proc->op_DP(ctx, proc, csi->name, resolve_properties(ctx, csi, csi->obj)); break;
+	case B('D','P'): if (proc->op_DP) proc->op_DP(ctx, proc, csi->name, csi->obj, resolve_properties(ctx, csi, csi->obj)); break;
 	case C('B','M','C'): pdf_process_BMC(ctx, proc, csi, csi->name); break;
-	case C('B','D','C'): pdf_process_BDC(ctx, proc, csi, csi->name, resolve_properties(ctx, csi, csi->obj)); break;
+	case C('B','D','C'): pdf_process_BDC(ctx, proc, csi); break;
 	case C('E','M','C'): pdf_process_EMC(ctx, proc, csi); break;
 
 	/* compatibility */
@@ -1029,7 +1035,7 @@ pdf_process_stream(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream
 						pdf_array_push_drop(ctx, csi->obj, pdf_new_real(ctx, doc, buf->f));
 						break;
 					case PDF_TOK_INT:
-						pdf_array_push_drop(ctx, csi->obj, pdf_new_int(ctx, doc, buf->i));
+						pdf_array_push_drop(ctx, csi->obj, pdf_new_int_offset(ctx, doc, buf->i));
 						break;
 					case PDF_TOK_STRING:
 						pdf_array_push_drop(ctx, csi->obj, pdf_new_string(ctx, doc, buf->scratch, buf->len));
@@ -1175,7 +1181,7 @@ pdf_process_stream(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream
 			}
 			else
 			{
-				 cookie->errors++;
+				cookie->errors++;
 			}
 			if (!ignoring_errors)
 			{
@@ -1274,7 +1280,7 @@ pdf_process_glyph(fz_context *ctx, pdf_processor *proc, pdf_document *doc, pdf_o
 
 	fz_try(ctx)
 	{
-		fz_stream *stm = fz_open_buffer(ctx, contents);
+		stm = fz_open_buffer(ctx, contents);
 		pdf_process_stream(ctx, proc, &csi, stm);
 		pdf_process_end(ctx, proc, &csi);
 	}

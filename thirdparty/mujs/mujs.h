@@ -30,6 +30,9 @@ typedef void *(*js_Alloc)(void *memctx, void *ptr, unsigned int size);
 typedef void (*js_Panic)(js_State *J);
 typedef void (*js_CFunction)(js_State *J);
 typedef void (*js_Finalize)(js_State *J, void *p);
+typedef int (*js_HasProperty)(js_State *J, void *p, const char *name);
+typedef int (*js_Put)(js_State *J, void *p, const char *name);
+typedef int (*js_Delete)(js_State *J, void *p, const char *name);
 
 /* Basic functions */
 js_State *js_newstate(js_Alloc alloc, void *actx, int flags);
@@ -39,12 +42,21 @@ js_Panic js_atpanic(js_State *J, js_Panic panic);
 void js_freestate(js_State *J);
 void js_gc(js_State *J, int report);
 
-int js_dostring(js_State *J, const char *source, int report);
+int js_dostring(js_State *J, const char *source);
 int js_dofile(js_State *J, const char *filename);
 int js_ploadstring(js_State *J, const char *filename, const char *source);
 int js_ploadfile(js_State *J, const char *filename);
 int js_pcall(js_State *J, int n);
 int js_pconstruct(js_State *J, int n);
+
+/* Exception handling */
+
+void *js_savetry(js_State *J); /* returns a jmp_buf */
+
+#define js_try(J) \
+	setjmp(js_savetry(J))
+
+void js_endtry(js_State *J);
 
 /* State constructor flags */
 enum {
@@ -132,6 +144,7 @@ void js_newstring(js_State *J, const char *v);
 void js_newcfunction(js_State *J, js_CFunction fun, const char *name, unsigned int length);
 void js_newcconstructor(js_State *J, js_CFunction fun, js_CFunction con, const char *name, unsigned int length);
 void js_newuserdata(js_State *J, const char *tag, void *data, js_Finalize finalize);
+void js_newuserdatax(js_State *J, const char *tag, void *data, js_HasProperty has, js_Put put, js_Delete delete, js_Finalize finalize);
 void js_newregexp(js_State *J, const char *pattern, int flags);
 
 void js_pushiterator(js_State *J, int idx, int own);
@@ -169,6 +182,14 @@ void js_copy(js_State *J, int idx);
 void js_remove(js_State *J, int idx);
 void js_insert(js_State *J, int idx);
 void js_replace(js_State* J, int idx);
+
+void js_dup(js_State *J);
+void js_dup2(js_State *J);
+void js_rot2(js_State *J);
+void js_rot3(js_State *J);
+void js_rot4(js_State *J);
+void js_rot2pop1(js_State *J);
+void js_rot3pop2(js_State *J);
 
 void js_concat(js_State *J);
 int js_compare(js_State *J, int *okay);

@@ -352,22 +352,35 @@ fz_runelen(int c)
 	return fz_runetochar(str, c);
 }
 
+int
+fz_utflen(const char *s)
+{
+	int c, n, rune;
+	n = 0;
+	for(;;) {
+		c = *(const unsigned char*)s;
+		if(c < Runeself) {
+			if(c == 0)
+				return n;
+			s++;
+		} else
+			s += fz_chartorune(&rune, s);
+		n++;
+	}
+	return 0;
+}
+
 float fz_atof(const char *s)
 {
-	double d;
+	float result;
 
-	/* The errno voodoo here checks for us reading numbers that are too
-	 * big to fit into a double. The checks for FLT_MAX ensure that we
-	 * don't read a number that's OK as a double and then become invalid
-	 * as we convert to a float. */
 	errno = 0;
-	d = fz_strtod(s, NULL);
-	if (errno == ERANGE || isnan(d)) {
-		/* Return 1.0, as it's a small known value that won't cause a divide by 0. */
-		return 1.0;
-	}
-	d = fz_clampd(d, -FLT_MAX, FLT_MAX);
-	return (float)d;
+	result = fz_strtof(s, NULL);
+	if ((errno == ERANGE && result == 0) || isnan(result))
+		/* Return 1.0 on  underflow, as it's a small known value that won't cause a divide by 0.  */
+		return 1;
+	result = fz_clamp(result, -FLT_MAX, FLT_MAX);
+	return result;
 }
 
 int fz_atoi(const char *s)
@@ -375,4 +388,11 @@ int fz_atoi(const char *s)
 	if (s == NULL)
 		return 0;
 	return atoi(s);
+}
+
+fz_off_t fz_atoo(const char *s)
+{
+	if (s == NULL)
+		return 0;
+	return fz_atoo_imp(s);
 }

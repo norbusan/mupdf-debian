@@ -20,7 +20,7 @@
 typedef struct fz_image_s fz_image;
 
 /*
-	fz_new_pixmap_from_image: Called to get a handle to a pixmap from an image.
+	fz_get_pixmap_from_image: Called to get a handle to a pixmap from an image.
 
 	image: The image to retrieve a pixmap from.
 
@@ -34,7 +34,7 @@ typedef struct fz_image_s fz_image;
 
 	Returns a non NULL pixmap pointer. May throw exceptions.
 */
-fz_pixmap *fz_new_pixmap_from_image(fz_context *ctx, fz_image *image, int w, int h);
+fz_pixmap *fz_get_pixmap_from_image(fz_context *ctx, fz_image *image, int w, int h);
 
 /*
 	fz_drop_image: Drop a reference to an image.
@@ -56,9 +56,9 @@ fz_image *fz_new_image(fz_context *ctx, int w, int h, int bpc, fz_colorspace *co
 fz_image *fz_new_image_from_pixmap(fz_context *ctx, fz_pixmap *pixmap, fz_image *mask);
 fz_image *fz_new_image_from_data(fz_context *ctx, unsigned char *data, int len);
 fz_image *fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer);
-fz_pixmap *fz_image_get_pixmap(fz_context *ctx, fz_image *image, int w, int h);
+fz_image *fz_new_image_from_file(fz_context *ctx, const char *path);
 void fz_drop_image_imp(fz_context *ctx, fz_storable *image);
-fz_pixmap *fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, int indexed, int l2factor, int native_l2factor);
+fz_pixmap *fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, int indexed, int l2factor);
 fz_pixmap *fz_expand_indexed_pixmap(fz_context *ctx, fz_pixmap *src);
 
 struct fz_image_s
@@ -67,32 +67,40 @@ struct fz_image_s
 	int w, h, n, bpc;
 	fz_image *mask;
 	fz_colorspace *colorspace;
-	fz_pixmap *(*get_pixmap)(fz_context *, fz_image *, int w, int h);
-	fz_compressed_buffer *buffer;
+	fz_pixmap *(*get_pixmap)(fz_context *, fz_image *, int w, int h, int *l2factor);
 	int colorkey[FZ_MAX_COLORS * 2];
 	float decode[FZ_MAX_COLORS * 2];
 	int imagemask;
 	int interpolate;
 	int usecolorkey;
-	fz_pixmap *tile; /* Private to the implementation */
 	int xres; /* As given in the image, not necessarily as rendered */
 	int yres; /* As given in the image, not necessarily as rendered */
 	int invert_cmyk_jpeg;
+
+	/* Only 'standard' images use these currently. Maybe they should be
+	 * moved out into a derived image class. */
+	fz_compressed_buffer *buffer;
+	fz_pixmap *tile;
 };
 
+fz_pixmap *fz_load_jpeg(fz_context *ctx, unsigned char *data, int size);
 fz_pixmap *fz_load_jpx(fz_context *ctx, unsigned char *data, int size, fz_colorspace *cs, int indexed);
 fz_pixmap *fz_load_png(fz_context *ctx, unsigned char *data, int size);
 fz_pixmap *fz_load_tiff(fz_context *ctx, unsigned char *data, int size);
 fz_pixmap *fz_load_jxr(fz_context *ctx, unsigned char *data, int size);
+fz_pixmap *fz_load_gif(fz_context *ctx, unsigned char *data, int size);
+fz_pixmap *fz_load_bmp(fz_context *ctx, unsigned char *data, int size);
 
 void fz_load_jpeg_info(fz_context *ctx, unsigned char *data, int size, int *w, int *h, int *xres, int *yres, fz_colorspace **cspace);
 void fz_load_png_info(fz_context *ctx, unsigned char *data, int size, int *w, int *h, int *xres, int *yres, fz_colorspace **cspace);
 void fz_load_tiff_info(fz_context *ctx, unsigned char *data, int size, int *w, int *h, int *xres, int *yres, fz_colorspace **cspace);
 void fz_load_jxr_info(fz_context *ctx, unsigned char *data, int size, int *w, int *h, int *xres, int *yres, fz_colorspace **cspace);
+void fz_load_gif_info(fz_context *ctx, unsigned char *data, int size, int *w, int *h, int *xres, int *yres, fz_colorspace **cspace);
+void fz_load_bmp_info(fz_context *ctx, unsigned char *data, int size, int *w, int *h, int *xres, int *yres, fz_colorspace **cspace);
 
 int fz_load_tiff_subimage_count(fz_context *ctx, unsigned char *buf, int len);
 fz_pixmap *fz_load_tiff_subimage(fz_context *ctx, unsigned char *buf, int len, int subimage);
 
-void fz_image_get_sanitised_res(fz_image *image, int *xres, int *yres);
+void fz_image_resolution(fz_image *image, int *xres, int *yres);
 
 #endif

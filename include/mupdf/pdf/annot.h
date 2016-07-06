@@ -27,14 +27,14 @@ pdf_annot *pdf_first_annot(fz_context *ctx, pdf_page *page);
 
 	Does not throw exceptions.
 */
-pdf_annot *pdf_next_annot(fz_context *ctx, pdf_page *page, pdf_annot *annot);
+pdf_annot *pdf_next_annot(fz_context *ctx, pdf_annot *annot);
 
 /*
 	pdf_bound_annot: Return the rectangle for an annotation on a page.
 
 	Does not throw exceptions.
 */
-fz_rect *pdf_bound_annot(fz_context *ctx, pdf_page *page, pdf_annot *annot, fz_rect *rect);
+fz_rect *pdf_bound_annot(fz_context *ctx, pdf_annot *annot, fz_rect *rect);
 
 /*
 	pdf_annot_type: Return the type of an annotation
@@ -53,10 +53,11 @@ fz_annot_type pdf_annot_type(fz_context *ctx, pdf_annot *annot);
 	ctm: A transformation matrix applied to the objects on the page,
 	e.g. to scale or rotate the page contents as desired.
 */
-void pdf_run_annot(fz_context *ctx, pdf_page *page, pdf_annot *annot, fz_device *dev, const fz_matrix *ctm, fz_cookie *cookie);
+void pdf_run_annot(fz_context *ctx, pdf_annot *annot, fz_device *dev, const fz_matrix *ctm, fz_cookie *cookie);
 
 struct pdf_annot_s
 {
+	fz_annot super;
 	pdf_page *page;
 	pdf_obj *obj;
 	fz_rect rect;
@@ -82,7 +83,7 @@ fz_link *pdf_load_link_annots(fz_context *ctx, pdf_document *, pdf_obj *annots, 
 void pdf_transform_annot(fz_context *ctx, pdf_annot *annot);
 void pdf_load_annots(fz_context *ctx, pdf_document *, pdf_page *page, pdf_obj *annots);
 void pdf_update_annot(fz_context *ctx, pdf_document *, pdf_annot *annot);
-void pdf_drop_annot(fz_context *ctx, pdf_annot *link);
+void pdf_drop_annots(fz_context *ctx, pdf_annot *annot_list);
 
 /*
 	pdf_create_annot: create a new annotation of the specified type on the
@@ -135,5 +136,10 @@ fz_annot_type pdf_annot_obj_type(fz_context *ctx, pdf_obj *obj);
 	by a call to pdf_update_page.
 */
 pdf_annot *pdf_poll_changed_annot(fz_context *ctx, pdf_document *idoc, pdf_page *page);
+
+/*
+	pdf_new_annot: Internal function for creating a new pdf annotation.
+*/
+pdf_annot *pdf_new_annot(fz_context *ctx, pdf_page *page);
 
 #endif

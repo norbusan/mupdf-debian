@@ -1,5 +1,3 @@
-#include "pdfapp.h"
-
 #ifndef UNICODE
 #define UNICODE
 #endif
@@ -10,6 +8,9 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <shellapi.h>
+
+/* Include pdfapp.h *AFTER* the UNICODE defines */
+#include "pdfapp.h"
 
 #ifndef WM_MOUSEWHEEL
 #define WM_MOUSEWHEEL 0x020A
@@ -35,7 +36,9 @@ static int justcopied = 0;
 
 static pdfapp_t gapp;
 
+#ifndef PATH_MAX
 #define PATH_MAX (1024)
+#endif
 
 static wchar_t wbuf[PATH_MAX];
 static char filename[PATH_MAX];
@@ -1169,17 +1172,57 @@ viewproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 	return DefWindowProc(hwnd, message, wParam, lParam);
 }
 
+typedef BOOL (SetProcessDPIAwareFn)(void);
+
+static int
+get_system_dpi(void)
+{
+	HMODULE hUser32 = LoadLibrary(TEXT("user32.dll"));
+	SetProcessDPIAwareFn *ptr;
+	int hdpi, vdpi;
+	HDC desktopDC;
+
+	ptr = (SetProcessDPIAwareFn *)GetProcAddress(hUser32, "SetProcessDPIAware");
+	if (ptr != NULL)
+		ptr();
+	FreeLibrary(hUser32);
+
+	desktopDC = GetDC(NULL);
+	hdpi = GetDeviceCaps(desktopDC, LOGPIXELSX);
+	vdpi = GetDeviceCaps(desktopDC, LOGPIXELSY);
+	/* hdpi,vdpi = 100 means 96dpi. */
+	return ((hdpi + vdpi) * 96.0 + 0.5) / 200;
+}
+
+static void usage(void)
+{
+	fprintf(stderr, "usage: mupdf [options] file.pdf [page]\n");
+	fprintf(stderr, "\t-p -\tpassword\n");
+	fprintf(stderr, "\t-r -\tresolution\n");
+	fprintf(stderr, "\t-A -\tset anti-aliasing quality in bits (0=off, 8=best)\n");
+	fprintf(stderr, "\t-C -\tRRGGBB (tint color in hexadecimal syntax)\n");
+	fprintf(stderr, "\t-W -\tpage width for EPUB layout\n");
+	fprintf(stderr, "\t-H -\tpage height for EPUB layout\n");
+	fprintf(stderr, "\t-S -\tfont size for EPUB layout\n");
+	fprintf(stderr, "\t-U -\tuser style sheet for EPUB layout\n");
+	exit(1);
+}
+
 int WINAPI
 WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
 {
 	int argc;
-	LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+	LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
+	char **argv;
 	char argv0[256];
 	MSG msg;
 	int code;
 	fz_context *ctx;
-	int arg;
 	int bps = 0;
+	int displayRes = get_system_dpi();
+	int c;
+	char *password = NULL;
+	char *layout_css = NULL;
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
 	if (!ctx)
@@ -1189,39 +1232,58 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShow
 	}
 	pdfapp_init(ctx, &gapp);
 
+	argv = fz_argv_from_wargv(argc, wargv);
+
+	while ((c = fz_getopt(argc, argv, "p:r:A:C:W:H:S:U:b:")) != -1)
+	{
+		switch (c)
+		{
+		case 'C':
+			c = strtol(fz_optarg, NULL, 16);
+			gapp.tint = 1;
+			gapp.tint_r = (c >> 16) & 255;
+			gapp.tint_g = (c >> 8) & 255;
+			gapp.tint_b = (c) & 255;
+			break;
+		case 'p': password = fz_optarg; break;
+		case 'r': displayRes = fz_atoi(fz_optarg); break;
+		case 'A': fz_set_aa_level(ctx, fz_atoi(fz_optarg)); break;
+		case 'W': gapp.layout_w = fz_atoi(fz_optarg); break;
+		case 'H': gapp.layout_h = fz_atoi(fz_optarg); break;
+		case 'S': gapp.layout_em = fz_atoi(fz_optarg); break;
+		case 'b': bps = (fz_optarg && *fz_optarg) ? fz_atoi(fz_optarg) : 4096; break;
+		case 'U': layout_css = fz_optarg; break;
+		default: usage();
+		}
+	}
+
+	pdfapp_setresolution(&gapp, displayRes);
+
 	GetModuleFileNameA(NULL, argv0, sizeof argv0);
 	install_app(argv0);
 
 	winopen();
 
-	arg = 1;
-	while (arg < argc)
+	if (fz_optind < argc)
 	{
-		if (!wcscmp(argv[arg], L"-p"))
-		{
-			if (arg+1 < argc)
-				bps = _wtoi(argv[++arg]);
-			else
-				bps = 4096;
-		}
-		else
-			break;
-		arg++;
-	}
-
-	if (arg < argc)
-	{
-		wcscpy(wbuf, argv[arg]);
+		strcpy(filename, argv[fz_optind]);
 	}
 	else
 	{
 		if (!winfilename(wbuf, nelem(wbuf)))
 			exit(0);
+		code = WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, filename, sizeof filename, NULL, NULL);
+		if (code == 0)
+			winerror(&gapp, "cannot convert filename to utf-8");
 	}
 
-	code = WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, filename, sizeof filename, NULL, NULL);
-	if (code == 0)
-		winerror(&gapp, "cannot convert filename to utf-8");
+	if (layout_css)
+	{
+		fz_buffer *buf = fz_read_file(ctx, layout_css);
+		fz_write_buffer_byte(ctx, buf, 0);
+		fz_set_user_css(ctx, (char*)buf->data);
+		fz_drop_buffer(ctx, buf);
+	}
 
 	if (bps)
 		pdfapp_open_progressive(&gapp, filename, 0, bps);
@@ -1233,6 +1295,8 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShow
 		TranslateMessage(&msg);
 		DispatchMessage(&msg);
 	}
+
+	fz_free_argv(argc, argv);
 
 	do_close(&gapp);
 

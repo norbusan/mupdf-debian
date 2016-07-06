@@ -74,7 +74,7 @@ pdf_new_crypt(fz_context *ctx, pdf_obj *dict, pdf_obj *id)
 		pdf_drop_crypt(ctx, crypt);
 		fz_throw(ctx, FZ_ERROR_GENERIC, "unspecified encryption handler");
 	}
-	if (!pdf_name_eq(ctx, PDF_NAME_Standard, obj) != 0)
+	if (!pdf_name_eq(ctx, PDF_NAME_Standard, obj))
 	{
 		pdf_drop_crypt(ctx, crypt);
 		fz_throw(ctx, FZ_ERROR_GENERIC, "unknown encryption handler: '%s'", pdf_to_name(ctx, obj));
@@ -332,7 +332,7 @@ pdf_parse_crypt_filter(fz_context *ctx, pdf_crypt_filter *cf, pdf_crypt *crypt, 
 		fz_throw(ctx, FZ_ERROR_GENERIC, "invalid key length: %d", cf->length);
 
 	if ((crypt->r == 1 || crypt->r == 2 || crypt->r == 3 || crypt->r == 4) &&
-		(cf->length < 0 || cf->length > 128))
+		(cf->length < 40 || cf->length > 128))
 		fz_throw(ctx, FZ_ERROR_GENERIC, "invalid key length: %d", cf->length);
 	if ((crypt->r == 5 || crypt->r == 6) && cf->length != 256)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "invalid key length: %d", cf->length);
@@ -448,10 +448,16 @@ pdf_compute_encryption_key_r5(fz_context *ctx, pdf_crypt *crypt, unsigned char *
 
 	/* Step 3.5/4.5 - compute file encryption key from OE/UE */
 
-	memcpy(buffer + pwlen, crypt->u + 40, 8);
+	if (ownerkey)
+	{
+		memcpy(buffer + pwlen, crypt->o + 40, 8);
+		memcpy(buffer + pwlen + 8, crypt->u, 48);
+	}
+	else
+		memcpy(buffer + pwlen, crypt->u + 40, 8);
 
 	fz_sha256_init(&sha256);
-	fz_sha256_update(&sha256, buffer, pwlen + 8);
+	fz_sha256_update(&sha256, buffer, pwlen + 8 + (ownerkey ? 48 : 0));
 	fz_sha256_final(&sha256, buffer);
 
 	/* clear password buffer and use it as iv */
@@ -550,7 +556,9 @@ pdf_compute_encryption_key_r6(fz_context *ctx, pdf_crypt *crypt, unsigned char *
 		(ownerkey ? crypt->o : crypt->u) + 32,
 		ownerkey ? crypt->u : NULL, validationkey);
 	pdf_compute_hardened_hash_r6(ctx, password, pwlen,
-		crypt->u + 40, NULL, hash);
+		(ownerkey ? crypt->o : crypt->u) + 40,
+		(ownerkey ? crypt->u : NULL),
+		hash);
 
 	memset(iv, 0, sizeof(iv));
 	if (aes_setkey_dec(&aes, hash, 256))
@@ -1008,28 +1016,27 @@ pdf_open_crypt_with_filter(fz_context *ctx, fz_stream *chain, pdf_crypt *crypt, 
 	return chain;
 }
 
-#ifndef NDEBUG
-void pdf_print_crypt(fz_context *ctx, pdf_crypt *crypt)
+void
+pdf_print_crypt(fz_context *ctx, fz_output *out, pdf_crypt *crypt)
 {
 	int i;
 
-	printf("crypt {\n");
+	fz_printf(ctx, out, "crypt {\n");
 
-	printf("\tv=%d length=%d\n", crypt->v, crypt->length);
-	printf("\tstmf method=%d length=%d\n", crypt->stmf.method, crypt->stmf.length);
-	printf("\tstrf method=%d length=%d\n", crypt->strf.method, crypt->strf.length);
-	printf("\tr=%d\n", crypt->r);
+	fz_printf(ctx, out, "\tv=%d length=%d\n", crypt->v, crypt->length);
+	fz_printf(ctx, out, "\tstmf method=%d length=%d\n", crypt->stmf.method, crypt->stmf.length);
+	fz_printf(ctx, out, "\tstrf method=%d length=%d\n", crypt->strf.method, crypt->strf.length);
+	fz_printf(ctx, out, "\tr=%d\n", crypt->r);
 
-	printf("\to=<");
+	fz_printf(ctx, out, "\to=<");
 	for (i = 0; i < 32; i++)
-		printf("%02X", crypt->o[i]);
-	printf(">\n");
+		fz_printf(ctx, out, "%02X", crypt->o[i]);
+	fz_printf(ctx, out, ">\n");
 
-	printf("\tu=<");
+	fz_printf(ctx, out, "\tu=<");
 	for (i = 0; i < 32; i++)
-		printf("%02X", crypt->u[i]);
-	printf(">\n");
+		fz_printf(ctx, out, "%02X", crypt->u[i]);
+	fz_printf(ctx, out, ">\n");
 
-	printf("}\n");
+	fz_printf(ctx, out, "}\n");
 }
-#endif

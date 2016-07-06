@@ -10,11 +10,13 @@
 
 typedef struct fz_alloc_context_s fz_alloc_context;
 typedef struct fz_error_context_s fz_error_context;
+typedef struct fz_error_stack_slot_s fz_error_stack_slot;
 typedef struct fz_id_context_s fz_id_context;
 typedef struct fz_warn_context_s fz_warn_context;
 typedef struct fz_font_context_s fz_font_context;
 typedef struct fz_colorspace_context_s fz_colorspace_context;
 typedef struct fz_aa_context_s fz_aa_context;
+typedef struct fz_style_context_s fz_style_context;
 typedef struct fz_locks_context_s fz_locks_context;
 typedef struct fz_store_s fz_store;
 typedef struct fz_glyph_cache_s fz_glyph_cache;
@@ -29,13 +31,16 @@ struct fz_alloc_context_s
 	void (*free)(void *, void *);
 };
 
+struct fz_error_stack_slot_s
+{
+	int code;
+	fz_jmp_buf buffer;
+};
+
 struct fz_error_context_s
 {
-	int top;
-	struct {
-		int code;
-		fz_jmp_buf buffer;
-	} stack[256];
+	fz_error_stack_slot *top;
+	fz_error_stack_slot stack[256];
 	int errcode;
 	char message[256];
 };
@@ -49,27 +54,27 @@ void fz_var_imp(void *);
 */
 
 #define fz_try(ctx) \
-	if (fz_push_try(ctx->error) && \
-		((ctx->error->stack[ctx->error->top].code = fz_setjmp(ctx->error->stack[ctx->error->top].buffer)) == 0))\
-	{ do {
+	{ \
+		if (fz_push_try(ctx)) { \
+			if (fz_setjmp((ctx)->error->top->buffer) == 0) do \
 
 #define fz_always(ctx) \
-		} while (0); \
-	} \
-	if (ctx->error->stack[ctx->error->top].code < 3) \
-	{ \
-		ctx->error->stack[ctx->error->top].code++; \
-		do { \
+			while (0); \
+		} \
+		if (ctx->error->top->code < 3) { \
+			ctx->error->top->code++; \
+			do \
 
 #define fz_catch(ctx) \
-		} while(0); \
+			while (0); \
+		} \
 	} \
-	if (ctx->error->stack[ctx->error->top--].code > 1)
+	if ((ctx->error->top--)->code > 1)
 
-int fz_push_try(fz_error_context *ex);
-FZ_NORETURN void fz_throw(fz_context *, int errcode, const char *, ...) __printflike(3, 4);
-FZ_NORETURN void fz_rethrow(fz_context *);
-FZ_NORETURN void fz_rethrow_message(fz_context *, const char *, ...)  __printflike(2, 3);
+int fz_push_try(fz_context *ctx);
+FZ_NORETURN void fz_throw(fz_context *ctx, int errcode, const char *, ...) __printflike(3, 4);
+FZ_NORETURN void fz_rethrow(fz_context *ctx);
+FZ_NORETURN void fz_rethrow_message(fz_context *ctx, const char *fmt, ...)  __printflike(2, 3);
 void fz_warn(fz_context *ctx, const char *fmt, ...) __printflike(2, 3);
 const char *fz_caught_message(fz_context *ctx);
 int fz_caught(fz_context *ctx);
@@ -100,14 +105,16 @@ void fz_flush_warnings(fz_context *ctx);
 
 struct fz_context_s
 {
-	fz_alloc_context *alloc;
-	fz_locks_context *locks;
+	void *user;
+	const fz_alloc_context *alloc;
+	const fz_locks_context *locks;
 	fz_id_context *id;
 	fz_error_context *error;
 	fz_warn_context *warn;
 	fz_font_context *font;
 	fz_colorspace_context *colorspace;
 	fz_aa_context *aa;
+	fz_style_context *style;
 	fz_store *store;
 	fz_glyph_cache *glyph_cache;
 	fz_document_handler_context *handler;
@@ -155,7 +162,7 @@ enum {
 
 	Does not throw exceptions, but may return NULL.
 */
-fz_context *fz_new_context_imp(fz_alloc_context *alloc, fz_locks_context *locks, unsigned int max_store, const char *version);
+fz_context *fz_new_context_imp(const fz_alloc_context *alloc, const fz_locks_context *locks, unsigned int max_store, const char *version);
 
 #define fz_new_context(alloc, locks, max_store) fz_new_context_imp(alloc, locks, max_store, FZ_VERSION)
 
@@ -188,6 +195,23 @@ fz_context *fz_clone_context(fz_context *ctx);
 void fz_drop_context(fz_context *ctx);
 
 /*
+	fz_set_user_context: Set the user field in the context.
+
+	NULL initially, this field can be set to any opaque value
+	required by the user. It is copied on clones.
+
+	Does not throw exceptions.
+*/
+void fz_set_user_context(fz_context *ctx, void *user);
+
+/*
+	fz_user_context: Read the user field from the context.
+
+	Does not throw exceptions.
+*/
+void *fz_user_context(fz_context *ctx);
+
+/*
 	fz_aa_level: Get the number of bits of antialiasing we are
 	using. Between 0 and 8.
 */
@@ -200,6 +224,16 @@ int fz_aa_level(fz_context *ctx);
 	to within the 0 to 8 range).
 */
 void fz_set_aa_level(fz_context *ctx, int bits);
+
+/*
+	fz_user_css: Get the user stylesheet source text.
+*/
+const char *fz_user_css(fz_context *ctx);
+
+/*
+	fz_set_user_css: Set the user stylesheet source text for use with HTML and EPUB.
+*/
+void fz_set_user_css(fz_context *ctx, const char *text);
 
 /*
 	Locking functions

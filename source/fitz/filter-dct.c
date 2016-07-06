@@ -1,7 +1,6 @@
 #include "mupdf/fitz.h"
 
 #include <jpeglib.h>
-#include <setjmp.h>
 
 #ifndef SHARE_JPEG
 typedef void * backing_store_ptr;
@@ -53,7 +52,6 @@ static void
 fz_dct_mem_free(j_common_ptr cinfo, void *object, size_t size)
 {
 	fz_dctd *state = JZ_DCT_STATE_FROM_CINFO(cinfo);
-	UNUSED(size);
 	fz_free(state->ctx, object);
 }
 

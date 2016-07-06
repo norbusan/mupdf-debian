@@ -63,98 +63,132 @@ lex_comment(fz_context *ctx, fz_stream *f)
 	} while ((c != '\012') && (c != '\015') && (c != EOF));
 }
 
-static int
-lex_number(fz_context *ctx, fz_stream *f, pdf_lexbuf *buf, int c)
+/* Fast(ish) but inaccurate strtof, with Adobe overflow handling. */
+static float acrobat_compatible_atof(char *s)
 {
 	int neg = 0;
 	int i = 0;
-	int n;
-	int d;
-	float v;
 
-	/* Initially we might have +, -, . or a digit */
-	switch (c)
+	while (*s == '-')
 	{
-	case '.':
-		goto loop_after_dot;
-	case '-':
 		neg = 1;
-		break;
-	case '+':
-		break;
-	default: /* Must be a digit */
-		i = c - '0';
-		break;
+		++s;
+	}
+	while (*s == '+')
+	{
+		++s;
 	}
 
-	while (1)
+	while (*s >= '0' && *s <= '9')
 	{
-		c = fz_read_byte(ctx, f);
+		/* We deliberately ignore overflow here.
+		 * Tests show that Acrobat handles * overflows in exactly the same way we do:
+		 * 123450000000000000000678 is read as 678.
+		 */
+		i = i * 10 + (*s - '0');
+		++s;
+	}
+
+	if (*s == '.')
+	{
+		float v = i;
+		float n = 0;
+		float d = 1;
+		++s;
+		while (*s >= '0' && *s <= '9')
+		{
+			n = 10 * n + (*s - '0');
+			d = 10 * d;
+			++s;
+		}
+		v += n / d;
+		return neg ? -v : v;
+	}
+	else
+	{
+		return neg ? -i : i;
+	}
+}
+
+/* Fast but inaccurate atoi. */
+static int fast_atoi(char *s)
+{
+	int neg = 0;
+	int i = 0;
+
+	while (*s == '-')
+	{
+		neg = 1;
+		++s;
+	}
+	while (*s == '+')
+	{
+		++s;
+	}
+
+	while (*s >= '0' && *s <= '9')
+	{
+		/* We deliberately ignore overflow here. */
+		i = i * 10 + (*s - '0');
+		++s;
+	}
+
+	return neg ? -i : i;
+}
+
+static int
+lex_number(fz_context *ctx, fz_stream *f, pdf_lexbuf *buf, int c)
+{
+	char *s = buf->scratch;
+	char *e = buf->scratch + buf->size - 1; /* leave space for zero terminator */
+	char *isreal = (c == '.' ? s : NULL);
+	int neg = (c == '-');
+
+	*s++ = c;
+
+	while (s < e)
+	{
+		int c = fz_read_byte(ctx, f);
 		switch (c)
 		{
+		case IS_WHITE:
+		case IS_DELIM:
+			fz_unread_byte(ctx, f);
+			goto end;
+		case EOF:
+			goto end;
+		case '-':
+			neg++;
+			*s++ = c;
+			break;
 		case '.':
-			goto loop_after_dot;
-		case RANGE_0_9:
-			i = 10*i + c - '0';
-			/* FIXME: Need overflow check here; do we care? */
-			break;
+			isreal = s;
+			/* Fall through */
 		default:
-			fz_unread_byte(ctx, f);
-			/* Fallthrough */
-		case EOF:
-			if (neg)
-				i = -i;
-			buf->i = i;
-			return PDF_TOK_INT;
+			*s++ = c;
+			break;
 		}
 	}
 
-	/* In here, we've seen a dot, so can accept just digits */
-loop_after_dot:
-	n = 0;
-	d = 1;
-	while (1)
+end:
+	*s = '\0';
+	if (isreal)
 	{
-		c = fz_read_byte(ctx, f);
-		switch (c)
-		{
-		case RANGE_0_9:
-			if (d >= INT_MAX/10)
-				goto underflow;
-			n = n*10 + (c - '0');
-			d *= 10;
-			break;
-		default:
-			fz_unread_byte(ctx, f);
-			/* Fallthrough */
-		case EOF:
-			v = (float)i + ((float)n / (float)d);
-			if (neg)
-				v = -v;
-			buf->f = v;
-			return PDF_TOK_REAL;
-		}
+		/* We'd like to use the fastest possible atof
+		 * routine, but we'd rather match acrobats
+		 * handling of broken numbers. As such, we
+		 * spot common broken cases and call an
+		 * acrobat compatible routine where required. */
+		if (neg > 1 || isreal - buf->scratch >= 10)
+			buf->f = acrobat_compatible_atof(buf->scratch);
+		else
+			buf->f = fz_atof(buf->scratch);
+		return PDF_TOK_REAL;
 	}
-
-underflow:
-	/* Ignore any digits after here, because they are too small */
-	while (1)
+	else
 	{
-		c = fz_read_byte(ctx, f);
-		switch (c)
-		{
-		case RANGE_0_9:
-			break;
-		default:
-			fz_unread_byte(ctx, f);
-			/* Fallthrough */
-		case EOF:
-			v = (float)i + ((float)n / (float)d);
-			if (neg)
-				v = -v;
-			buf->f = v;
-			return PDF_TOK_REAL;
-		}
+		buf->i = fast_atoi(buf->scratch);
+		return PDF_TOK_INT;
 	}
 }
 
@@ -582,7 +616,7 @@ void pdf_print_token(fz_context *ctx, fz_buffer *fzbuf, int tok, pdf_lexbuf *buf
 		if (buf->len >= buf->size)
 			pdf_lexbuf_grow(ctx, buf);
 		buf->scratch[buf->len] = 0;
-		fz_buffer_cat_pdf_string(ctx, fzbuf, buf->scratch);
+		fz_buffer_print_pdf_string(ctx, fzbuf, buf->scratch);
 		break;
 	case PDF_TOK_OPEN_DICT:
 		fz_buffer_printf(ctx, fzbuf, "<<");

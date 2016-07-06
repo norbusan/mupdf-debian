@@ -202,7 +202,7 @@ flatten_rectto(fz_context *ctx, void *arg_, float x0, float y0, float x1, float 
 	}
 }
 
-static const fz_path_processor flatten_proc =
+static const fz_path_walker flatten_proc =
 {
 	flatten_moveto,
 	flatten_lineto,
@@ -215,7 +215,7 @@ static const fz_path_processor flatten_proc =
 };
 
 void
-fz_flatten_fill_path(fz_context *ctx, fz_gel *gel, fz_path *path, const fz_matrix *ctm, float flatness)
+fz_flatten_fill_path(fz_context *ctx, fz_gel *gel, const fz_path *path, const fz_matrix *ctm, float flatness)
 {
 	flatten_arg arg;
 
@@ -224,7 +224,7 @@ fz_flatten_fill_path(fz_context *ctx, fz_gel *gel, fz_path *path, const fz_matri
 	arg.flatness = flatness;
 	arg.b.x = arg.b.y = arg.c.x = arg.c.y = 0;
 
-	fz_process_path(ctx, &flatten_proc, &arg, path);
+	fz_walk_path(ctx, path, &flatten_proc, &arg);
 	if (arg.c.x != arg.b.x || arg.c.y != arg.b.y)
 		line(ctx, gel, ctm, arg.c.x, arg.c.y, arg.b.x, arg.b.y);
 }
@@ -594,6 +594,8 @@ fz_add_line_dot(fz_context *ctx, sctx *s, float ax, float ay)
 	float oy = ay;
 	int i;
 
+	if (n < 3)
+		n = 3;
 	for (i = 1; i < n; i++)
 	{
 		float theta = (float)M_PI * 2 * i / n;
@@ -830,7 +832,7 @@ stroke_close(fz_context *ctx, void *s_)
 	fz_stroke_closepath(ctx, s);
 }
 
-static const fz_path_processor stroke_proc =
+static const fz_path_walker stroke_proc =
 {
 	stroke_moveto,
 	stroke_lineto,
@@ -840,7 +842,7 @@ static const fz_path_processor stroke_proc =
 };
 
 void
-fz_flatten_stroke_path(fz_context *ctx, fz_gel *gel, fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, float flatness, float linewidth)
+fz_flatten_stroke_path(fz_context *ctx, fz_gel *gel, const fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, float flatness, float linewidth)
 {
 	struct sctx s;
 
@@ -867,7 +869,7 @@ fz_flatten_stroke_path(fz_context *ctx, fz_gel *gel, fz_path *path, const fz_str
 	s.cur.x = s.cur.y = 0;
 	s.stroke = stroke;
 
-	fz_process_path(ctx, &stroke_proc, &s, path);
+	fz_walk_path(ctx, path, &stroke_proc, &s);
 	fz_stroke_flush(ctx, &s, stroke->start_cap, stroke->end_cap);
 }
 
@@ -1289,7 +1291,7 @@ dash_close(fz_context *ctx, void *s_)
 	s->cur.y = s->dash_beg.y;
 }
 
-static const fz_path_processor dash_proc =
+static const fz_path_walker dash_proc =
 {
 	dash_moveto,
 	dash_lineto,
@@ -1299,10 +1301,10 @@ static const fz_path_processor dash_proc =
 };
 
 void
-fz_flatten_dash_path(fz_context *ctx, fz_gel *gel, fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, float flatness, float linewidth)
+fz_flatten_dash_path(fz_context *ctx, fz_gel *gel, const fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, float flatness, float linewidth)
 {
 	struct sctx s;
-	float phase_len, max_expand;
+	float max_expand;
 	int i;
 	fz_matrix inv;
 
@@ -1318,19 +1320,20 @@ fz_flatten_dash_path(fz_context *ctx, fz_gel *gel, fz_path *path, const fz_strok
 	s.dot = 0;
 
 	s.dash_list = stroke->dash_list;
-	s.dash_phase = stroke->dash_phase;
 	s.dash_len = stroke->dash_len;
+
+	s.dash_total = 0;
+	for (i = 0; i < s.dash_len; i++)
+		s.dash_total += s.dash_list[i];
+	if (s.dash_len > 0 && s.dash_total == 0)
+		return;
+
+	s.dash_phase = fmodf(stroke->dash_phase, s.dash_total);
+	s.cap = stroke->start_cap;
 	s.toggle = 0;
 	s.offset = 0;
 	s.phase = 0;
 
-	s.cap = stroke->start_cap;
-
-	phase_len = 0;
-	for (i = 0; i < stroke->dash_len; i++)
-		phase_len += stroke->dash_list[i];
-	if (stroke->dash_len > 0 && phase_len == 0)
-		return;
 	fz_gel_scissor(ctx, gel, &s.rect);
 	if (fz_try_invert_matrix(&inv, ctm))
 		return;
@@ -1341,14 +1344,13 @@ fz_flatten_dash_path(fz_context *ctx, fz_gel *gel, fz_path *path, const fz_strok
 	s.rect.y1 += linewidth;
 
 	max_expand = fz_matrix_max_expansion(ctm);
-	if (phase_len < 0.01f || phase_len * max_expand < 0.5f)
+	if (s.dash_total < 0.01f || s.dash_total * max_expand < 0.5f)
 	{
 		fz_flatten_stroke_path(ctx, gel, path, stroke, ctm, flatness, linewidth);
 		return;
 	}
-	s.dash_total = phase_len;
 
 	s.cur.x = s.cur.y = 0;
-	fz_process_path(ctx, &dash_proc, &s, path);
+	fz_walk_path(ctx, path, &dash_proc, &s);
 	fz_stroke_flush(ctx, &s, s.cap, stroke->end_cap);
 }

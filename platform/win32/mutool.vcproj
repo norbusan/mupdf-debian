@@ -42,8 +42,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\include"
-				PreprocessorDefinitions="DEBUG=1;USE_OUTPUT_DEBUG_STRING"
+				AdditionalIncludeDirectories="..\..\include;..\..\thirdparty\mujs"
+				PreprocessorDefinitions="FZ_LARGEFILE;DEBUG=1;USE_OUTPUT_DEBUG_STRING"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -116,7 +116,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\..\include"
-				PreprocessorDefinitions="DEBUG=1;USE_OUTPUT_DEBUG_STRING"
+				PreprocessorDefinitions="FZ_LARGEFILE;DEBUG=1;USE_OUTPUT_DEBUG_STRING"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -189,7 +189,8 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="..\..\include"
+				AdditionalIncludeDirectories="..\..\include;..\..\thirdparty\mujs"
+				PreprocessorDefinitions="FZ_LARGEFILE"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -265,6 +266,7 @@
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
 				AdditionalIncludeDirectories="..\..\include"
+				PreprocessorDefinitions="FZ_LARGEFILE"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -336,8 +338,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\include"
-				PreprocessorDefinitions="MEMENTO=1;DEBUG=1;USE_OUTPUT_DEBUG_STRING"
+				AdditionalIncludeDirectories="..\..\include;..\..\thirdparty\mujs"
+				PreprocessorDefinitions="FZ_LARGEFILE;MEMENTO=1;DEBUG=1;USE_OUTPUT_DEBUG_STRING"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -410,7 +412,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\..\include"
-				PreprocessorDefinitions="MEMENTO=1;DEBUG=1;USE_OUTPUT_DEBUG_STRING"
+				PreprocessorDefinitions="FZ_LARGEFILE;MEMENTO=1;DEBUG=1;USE_OUTPUT_DEBUG_STRING"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -461,6 +463,14 @@
 	</References>
 	<Files>
 		<File
+			RelativePath="..\..\source\tools\mudraw.c"
+			>
+		</File>
+		<File
+			RelativePath="..\..\source\tools\murun.c"
+			>
+		</File>
+		<File
 			RelativePath="..\..\source\tools\mutool.c"
 			>
 		</File>
@@ -469,9 +479,17 @@
 			>
 		</File>
 		<File
+			RelativePath="..\..\source\tools\pdfcreate.c"
+			>
+		</File>
+		<File
 			RelativePath="..\..\source\tools\pdfextract.c"
 			>
 		</File>
+    <File
+			RelativePath="..\..\source\tools\pdfmerge.c"
+			>
+		</File>	
 		<File
 			RelativePath="..\..\source\tools\pdfinfo.c"
 			>
