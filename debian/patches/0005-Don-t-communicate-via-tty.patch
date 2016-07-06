@@ -1,0 +1,31 @@
+From: =?utf-8?q?=22Kan-Ru_Chen_=28=E9=99=B3=E4=BE=83=E5=A6=82=29=22?=
+ <koster@debian.org>
+Date: Thu, 7 Jul 2016 01:27:41 +0800
+Subject: Don't communicate via tty
+
+Closes: #830143
+---
+ platform/x11/x11_main.c | 10 ++--------
+ 1 file changed, 2 insertions(+), 8 deletions(-)
+
+diff --git a/platform/x11/x11_main.c b/platform/x11/x11_main.c
+index 21e3e84..476b26d 100644
+--- a/platform/x11/x11_main.c
++++ b/platform/x11/x11_main.c
+@@ -176,14 +176,8 @@ char *winpassword(pdfapp_t *app, char *filename)
+ 
+ char *wintextinput(pdfapp_t *app, char *inittext, int retry)
+ {
+-	static char buf[256];
+-
+-	if (retry)
+-		return NULL;
+-
+-	printf("> [%s] ", inittext);
+-	fgets(buf, sizeof buf, stdin);
+-	return buf;
++	/* Don't communicate via tty */
++	return NULL;
+ }
+ 
+ int winchoiceinput(pdfapp_t *app, int nopts, char *opts[], int *nvals, char *vals[])
