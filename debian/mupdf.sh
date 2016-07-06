@@ -23,7 +23,7 @@ file=""
 cmd="/usr/lib/mupdf/mupdf-x11"
 while [ "$#" -gt "0" ]; do
     case "$1" in
-    -p|-r|-b)
+    -p|-r|-A|-C|-W|-H|-S|-U)
 	cmd="$cmd $1 "$2"" && shift ;;
     *)
         test -f "$1" && file="$1" && break ||
