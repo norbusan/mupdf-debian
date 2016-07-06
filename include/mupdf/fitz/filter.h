@@ -10,7 +10,7 @@
 typedef struct fz_jbig2_globals_s fz_jbig2_globals;
 
 fz_stream *fz_open_copy(fz_context *ctx, fz_stream *chain);
-fz_stream *fz_open_null(fz_context *ctx, fz_stream *chain, int len, int offset);
+fz_stream *fz_open_null(fz_context *ctx, fz_stream *chain, int len, fz_off_t offset);
 fz_stream *fz_open_concat(fz_context *ctx, int max, int pad);
 void fz_concat_push(fz_context *ctx, fz_stream *concat, fz_stream *chain); /* Ownership of chain is passed in */
 fz_stream *fz_open_arc4(fz_context *ctx, fz_stream *chain, unsigned char *key, unsigned keylen);
@@ -23,7 +23,7 @@ fz_stream *fz_open_faxd(fz_context *ctx, fz_stream *chain,
 	int k, int end_of_line, int encoded_byte_align,
 	int columns, int rows, int end_of_block, int black_is_1);
 fz_stream *fz_open_flated(fz_context *ctx, fz_stream *chain, int window_bits);
-fz_stream *fz_open_lzwd(fz_context *ctx, fz_stream *chain, int early_change);
+fz_stream *fz_open_lzwd(fz_context *ctx, fz_stream *chain, int early_change, int min_bits, int reverse_bits);
 fz_stream *fz_open_predict(fz_context *ctx, fz_stream *chain, int predictor, int columns, int colors, int bpc);
 fz_stream *fz_open_jbig2d(fz_context *ctx, fz_stream *chain, fz_jbig2_globals *globals);
 

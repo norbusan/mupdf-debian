@@ -112,6 +112,9 @@ struct js_Object
 		struct {
 			const char *tag;
 			void *data;
+			js_HasProperty has;
+			js_Put put;
+			js_Delete delete;
 			js_Finalize finalize;
 		} user;
 	} u;

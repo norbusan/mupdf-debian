@@ -46,6 +46,7 @@ int xps_count_pages(fz_context *ctx, xps_document *doc);
 xps_page *xps_load_page(fz_context *ctx, xps_document *doc, int number);
 fz_outline *xps_load_outline(fz_context *ctx, xps_document *doc);
 void xps_run_page(fz_context *ctx, xps_page *page, fz_device *dev, const fz_matrix *ctm, fz_cookie *cookie);
+fz_link *xps_load_links(fz_context *ctx, xps_page *page);
 
 /* xps-internal.h */
 
@@ -96,8 +97,6 @@ struct xps_fixpage_s
 	int number;
 	int width;
 	int height;
-	int links_resolved;
-	fz_link *links;
 	xps_fixpage *next;
 };
 
@@ -121,7 +120,6 @@ void xps_print_page_list(fz_context *ctx, xps_document *doc);
 void xps_drop_page_list(fz_context *ctx, xps_document *doc);
 
 int xps_lookup_link_target(fz_context *ctx, xps_document *doc, char *target_uri);
-void xps_add_link(fz_context *ctx, xps_document *doc, const fz_rect *area, char *base_uri, char *target_uri);
 
 /*
  * Images, fonts, and colorspaces.
@@ -193,8 +191,14 @@ void xps_parse_radial_gradient_brush(fz_context *ctx, xps_document *doc, const f
 
 void xps_parse_tiling_brush(fz_context *ctx, xps_document *doc, const fz_matrix *ctm, const fz_rect *area, char *base_uri, xps_resource *dict, fz_xml *root, void(*func)(fz_context *ctx, xps_document*, const fz_matrix *, const fz_rect *, char*, xps_resource*, fz_xml*, void*), void *user);
 
-void xps_parse_matrix_transform(fz_context *ctx, xps_document *doc, fz_xml *root, fz_matrix *matrix);
-void xps_parse_render_transform(fz_context *ctx, xps_document *doc, char *text, fz_matrix *matrix);
+fz_font *xps_lookup_font(fz_context *ctx, xps_document *doc, char *base_uri, char *font_uri, char *style_att);
+fz_text *xps_parse_glyphs_imp(fz_context *ctx, xps_document *doc, const fz_matrix *ctm,
+	fz_font *font, float size, float originx, float originy,
+	int is_sideways, int bidi_level,
+	char *indices, char *unicode);
+fz_path *xps_parse_abbreviated_geometry(fz_context *ctx, xps_document *doc, char *geom, int *fill_rule);
+fz_path *xps_parse_path_geometry(fz_context *ctx, xps_document *doc, xps_resource *dict, fz_xml *root, int stroking, int *fill_rule);
+void xps_parse_transform(fz_context *ctx, xps_document *doc, char *att, fz_xml *tag, fz_matrix *new_ctm, const fz_matrix *ctm);
 void xps_parse_rectangle(fz_context *ctx, xps_document *doc, char *text, fz_rect *rect);
 
 void xps_begin_opacity(fz_context *ctx, xps_document *doc, const fz_matrix *ctm, const fz_rect *area, char *base_uri, xps_resource *dict, char *opacity_att, fz_xml *opacity_mask_tag);
@@ -216,7 +220,7 @@ typedef struct xps_entry_s xps_entry;
 struct xps_entry_s
 {
 	char *name;
-	int offset;
+	fz_off_t offset;
 	int csize;
 	int usize;
 };
@@ -253,9 +257,6 @@ struct xps_document_s
 	/* Current device */
 	fz_device *dev;
 	fz_cookie *cookie;
-
-	/* Current page we are loading */
-	xps_fixpage *current_page;
 };
 
 #endif

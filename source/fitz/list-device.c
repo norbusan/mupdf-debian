@@ -7,8 +7,6 @@ typedef struct fz_list_device_s fz_list_device;
 
 typedef enum fz_display_command_e
 {
-	FZ_CMD_BEGIN_PAGE,
-	FZ_CMD_END_PAGE,
 	FZ_CMD_FILL_PATH,
 	FZ_CMD_STROKE_PATH,
 	FZ_CMD_CLIP_PATH,
@@ -28,7 +26,8 @@ typedef enum fz_display_command_e
 	FZ_CMD_BEGIN_GROUP,
 	FZ_CMD_END_GROUP,
 	FZ_CMD_BEGIN_TILE,
-	FZ_CMD_END_TILE
+	FZ_CMD_END_TILE,
+	FZ_CMD_RENDER_FLAGS
 } fz_display_command;
 
 /* The display list is a list of nodes.
@@ -114,6 +113,7 @@ struct fz_display_list_s
 {
 	fz_storable storable;
 	fz_display_node *list;
+	fz_rect mediabox;
 	int max;
 	int len;
 };
@@ -152,12 +152,12 @@ fz_append_display_node(
 	fz_display_command cmd,
 	int flags,
 	const fz_rect *rect,
-	fz_path *path,
-	float *color,
+	const fz_path *path,
+	const float *color,
 	fz_colorspace *colorspace,
-	float *alpha,
+	const float *alpha,
 	const fz_matrix *ctm,
-	fz_stroke_state *stroke,
+	const fz_stroke_state *stroke,
 	void *private_data,
 	int private_data_len)
 {
@@ -184,6 +184,8 @@ fz_append_display_node(
 	{
 	case FZ_CMD_CLIP_PATH:
 	case FZ_CMD_CLIP_STROKE_PATH:
+	case FZ_CMD_CLIP_TEXT:
+	case FZ_CMD_CLIP_STROKE_TEXT:
 	case FZ_CMD_CLIP_IMAGE_MASK:
 		if (writer->top < STACK_SIZE)
 		{
@@ -192,13 +194,7 @@ fz_append_display_node(
 		}
 		writer->top++;
 		break;
-	case FZ_CMD_CLIP_TEXT:
-		/* don't reset the clip rect for accumulated text */
-		if (flags == 2)
-			break;
-		/* fallthrough */
 	case FZ_CMD_END_MASK:
-	case FZ_CMD_CLIP_STROKE_TEXT:
 		if (writer->top < STACK_SIZE)
 		{
 			writer->stack[writer->top].update = NULL;
@@ -634,49 +630,8 @@ fz_append_display_node(
 }
 
 static void
-fz_list_begin_page(fz_context *ctx, fz_device *dev, const fz_rect *mediabox, const fz_matrix *ctm)
-{
-	fz_rect rect = *mediabox;
-
-	fz_transform_rect(&rect, ctm);
-	fz_append_display_node(
-		ctx,
-		dev,
-		FZ_CMD_BEGIN_PAGE,
-		0, /* flags */
-		&rect,
-		NULL, /* path */
-		NULL, /* color */
-		NULL, /* colorspace */
-		NULL, /* alpha */
-		ctm,
-		NULL, /* stroke_state */
-		NULL, /* private_data */
-		0); /* private_data_len */
-}
-
-static void
-fz_list_end_page(fz_context *ctx, fz_device *dev)
-{
-	fz_append_display_node(
-		ctx,
-		dev,
-		FZ_CMD_END_PAGE,
-		0, /* flags */
-		NULL, /* rect */
-		NULL, /* path */
-		NULL, /* color */
-		NULL, /* colorspace */
-		NULL, /* alpha */
-		NULL, /* ctm */
-		NULL, /* stroke_state */
-		NULL, /* private_data */
-		0); /* private_data_len */
-}
-
-static void
-fz_list_fill_path(fz_context *ctx, fz_device *dev, fz_path *path, int even_odd, const fz_matrix *ctm,
-	fz_colorspace *colorspace, float *color, float alpha)
+fz_list_fill_path(fz_context *ctx, fz_device *dev, const fz_path *path, int even_odd, const fz_matrix *ctm,
+	fz_colorspace *colorspace, const float *color, float alpha)
 {
 	fz_rect rect;
 
@@ -698,8 +653,8 @@ fz_list_fill_path(fz_context *ctx, fz_device *dev, fz_path *path, int even_odd, 
 }
 
 static void
-fz_list_stroke_path(fz_context *ctx, fz_device *dev, fz_path *path, fz_stroke_state *stroke,
-	const fz_matrix *ctm, fz_colorspace *colorspace, float *color, float alpha)
+fz_list_stroke_path(fz_context *ctx, fz_device *dev, const fz_path *path, const fz_stroke_state *stroke,
+	const fz_matrix *ctm, fz_colorspace *colorspace, const float *color, float alpha)
 {
 	fz_rect rect;
 
@@ -721,13 +676,13 @@ fz_list_stroke_path(fz_context *ctx, fz_device *dev, fz_path *path, fz_stroke_st
 }
 
 static void
-fz_list_clip_path(fz_context *ctx, fz_device *dev, fz_path *path, const fz_rect *rect, int even_odd, const fz_matrix *ctm)
+fz_list_clip_path(fz_context *ctx, fz_device *dev, const fz_path *path, int even_odd, const fz_matrix *ctm, const fz_rect *scissor)
 {
 	fz_rect rect2;
 
 	fz_bound_path(ctx, path, NULL, ctm, &rect2);
-	if (rect)
-		fz_intersect_rect(&rect2, rect);
+	if (scissor)
+		fz_intersect_rect(&rect2, scissor);
 	fz_append_display_node(
 		ctx,
 		dev,
@@ -745,13 +700,13 @@ fz_list_clip_path(fz_context *ctx, fz_device *dev, fz_path *path, const fz_rect 
 }
 
 static void
-fz_list_clip_stroke_path(fz_context *ctx, fz_device *dev, fz_path *path, const fz_rect *rect, fz_stroke_state *stroke, const fz_matrix *ctm)
+fz_list_clip_stroke_path(fz_context *ctx, fz_device *dev, const fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, const fz_rect *scissor)
 {
 	fz_rect rect2;
 
 	fz_bound_path(ctx, path, stroke, ctm, &rect2);
-	if (rect)
-		fz_intersect_rect(&rect2, rect);
+	if (scissor)
+		fz_intersect_rect(&rect2, scissor);
 	fz_append_display_node(
 		ctx,
 		dev,
@@ -769,8 +724,8 @@ fz_list_clip_stroke_path(fz_context *ctx, fz_device *dev, fz_path *path, const f
 }
 
 static void
-fz_list_fill_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matrix *ctm,
-	fz_colorspace *colorspace, float *color, float alpha)
+fz_list_fill_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_matrix *ctm,
+	fz_colorspace *colorspace, const float *color, float alpha)
 {
 	fz_rect rect;
 	fz_text *cloned_text = fz_keep_text(ctx, text);
@@ -801,8 +756,8 @@ fz_list_fill_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matri
 }
 
 static void
-fz_list_stroke_text(fz_context *ctx, fz_device *dev, fz_text *text, fz_stroke_state *stroke, const fz_matrix *ctm,
-	fz_colorspace *colorspace, float *color, float alpha)
+fz_list_stroke_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_stroke_state *stroke, const fz_matrix *ctm,
+	fz_colorspace *colorspace, const float *color, float alpha)
 {
 	fz_rect rect;
 	fz_text *cloned_text = fz_keep_text(ctx, text);
@@ -833,22 +788,21 @@ fz_list_stroke_text(fz_context *ctx, fz_device *dev, fz_text *text, fz_stroke_st
 }
 
 static void
-fz_list_clip_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matrix *ctm, int accumulate)
+fz_list_clip_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_matrix *ctm, const fz_rect *scissor)
 {
 	fz_rect rect;
 	fz_text *cloned_text = fz_keep_text(ctx, text);
 
 	fz_try(ctx)
 	{
-		if (accumulate)
-			rect = fz_infinite_rect;
-		else
-			fz_bound_text(ctx, text, NULL, ctm, &rect);
+		fz_bound_text(ctx, text, NULL, ctm, &rect);
+		if (scissor)
+			fz_intersect_rect(&rect, scissor);
 		fz_append_display_node(
 			ctx,
 			dev,
 			FZ_CMD_CLIP_TEXT,
-			accumulate, /* flags */
+			0, /* flags */
 			&rect,
 			NULL, /* path */
 			NULL, /* color */
@@ -867,7 +821,7 @@ fz_list_clip_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matri
 }
 
 static void
-fz_list_clip_stroke_text(fz_context *ctx, fz_device *dev, fz_text *text, fz_stroke_state *stroke, const fz_matrix *ctm)
+fz_list_clip_stroke_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_stroke_state *stroke, const fz_matrix *ctm, const fz_rect *scissor)
 {
 	fz_rect rect;
 	fz_text *cloned_text = fz_keep_text(ctx, text);
@@ -875,6 +829,8 @@ fz_list_clip_stroke_text(fz_context *ctx, fz_device *dev, fz_text *text, fz_stro
 	fz_try(ctx)
 	{
 		fz_bound_text(ctx, text, stroke, ctm, &rect);
+		if (scissor)
+			fz_intersect_rect(&rect, scissor);
 		fz_append_display_node(
 			ctx,
 			dev,
@@ -898,7 +854,7 @@ fz_list_clip_stroke_text(fz_context *ctx, fz_device *dev, fz_text *text, fz_stro
 }
 
 static void
-fz_list_ignore_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matrix *ctm)
+fz_list_ignore_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_matrix *ctm)
 {
 	fz_rect rect;
 	fz_text *cloned_text = fz_keep_text(ctx, text);
@@ -1011,7 +967,7 @@ fz_list_fill_image(fz_context *ctx, fz_device *dev, fz_image *image, const fz_ma
 
 static void
 fz_list_fill_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, const fz_matrix *ctm,
-	fz_colorspace *colorspace, float *color, float alpha)
+	fz_colorspace *colorspace, const float *color, float alpha)
 {
 	fz_image *image2 = fz_keep_image(ctx, image);
 	fz_rect rect = fz_unit_rect;
@@ -1042,14 +998,14 @@ fz_list_fill_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, const 
 }
 
 static void
-fz_list_clip_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, const fz_rect *rect, const fz_matrix *ctm)
+fz_list_clip_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, const fz_matrix *ctm, const fz_rect *scissor)
 {
 	fz_image *image2 = fz_keep_image(ctx, image);
 	fz_rect rect2 = fz_unit_rect;
 
 	fz_transform_rect(&rect2, ctm);
-	if (rect)
-		fz_intersect_rect(&rect2, rect);
+	if (scissor)
+		fz_intersect_rect(&rect2, scissor);
 	fz_try(ctx)
 	{
 		fz_append_display_node(
@@ -1075,7 +1031,7 @@ fz_list_clip_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, const 
 }
 
 static void
-fz_list_begin_mask(fz_context *ctx, fz_device *dev, const fz_rect *rect, int luminosity, fz_colorspace *colorspace, float *color)
+fz_list_begin_mask(fz_context *ctx, fz_device *dev, const fz_rect *rect, int luminosity, fz_colorspace *colorspace, const float *color)
 {
 	fz_append_display_node(
 		ctx,
@@ -1212,6 +1168,37 @@ fz_list_end_tile(fz_context *ctx, fz_device *dev)
 }
 
 static void
+fz_list_render_flags(fz_context *ctx, fz_device *dev, int set, int clear)
+{
+	int flags;
+
+	/* Pack the options down */
+	if (set == FZ_DEVFLAG_GRIDFIT_AS_TILED && clear == 0)
+		flags = 1;
+	else if (set == 0 && clear == FZ_DEVFLAG_GRIDFIT_AS_TILED)
+		flags = 0;
+	else
+	{
+		assert("Unsupported flags combination" == NULL);
+		return;
+	}
+	fz_append_display_node(
+		ctx,
+		dev,
+		FZ_CMD_RENDER_FLAGS,
+		flags, /* flags */
+		NULL,
+		NULL, /* path */
+		NULL, /* color */
+		NULL, /* colorspace */
+		NULL, /* alpha */
+		NULL, /* ctm */
+		NULL, /* stroke */
+		NULL, /* private_data */
+		0); /* private_data_len */
+}
+
+static void
 drop_writer(fz_context *ctx, fz_device *dev)
 {
 	fz_list_device *writer = (fz_list_device *)dev;
@@ -1227,9 +1214,6 @@ fz_new_list_device(fz_context *ctx, fz_display_list *list)
 	fz_list_device *dev;
 
 	dev = fz_new_device(ctx, sizeof(fz_list_device));
-
-	dev->super.begin_page = fz_list_begin_page;
-	dev->super.end_page = fz_list_end_page;
 
 	dev->super.fill_path = fz_list_fill_path;
 	dev->super.stroke_path = fz_list_stroke_path;
@@ -1256,6 +1240,8 @@ fz_new_list_device(fz_context *ctx, fz_display_list *list)
 
 	dev->super.begin_tile = fz_list_begin_tile;
 	dev->super.end_tile = fz_list_end_tile;
+
+	dev->super.render_flags = fz_list_render_flags;
 
 	dev->super.drop_imp = drop_writer;
 
@@ -1371,6 +1357,7 @@ fz_new_display_list(fz_context *ctx)
 	fz_display_list *list = fz_malloc_struct(ctx, fz_display_list);
 	FZ_INIT_STORABLE(list, 1, fz_drop_display_list_imp);
 	list->list = NULL;
+	list->mediabox = fz_empty_rect;
 	list->max = 0;
 	list->len = 0;
 	return list;
@@ -1379,13 +1366,20 @@ fz_new_display_list(fz_context *ctx)
 fz_display_list *
 fz_keep_display_list(fz_context *ctx, fz_display_list *list)
 {
-	return (fz_display_list *)fz_keep_storable(ctx, &list->storable);
+	return fz_keep_storable(ctx, &list->storable);
 }
 
 void
 fz_drop_display_list(fz_context *ctx, fz_display_list *list)
 {
 	fz_drop_storable(ctx, &list->storable);
+}
+
+fz_rect *
+fz_bound_display_list(fz_context *ctx, fz_display_list *list, fz_rect *bounds)
+{
+	*bounds = list->mediabox;
+	return bounds;
 }
 
 void
@@ -1570,7 +1564,7 @@ fz_run_display_list(fz_context *ctx, fz_display_list *list, fz_device *dev, cons
 
 		if (tiled ||
 			n.cmd == FZ_CMD_BEGIN_TILE || n.cmd == FZ_CMD_END_TILE ||
-			n.cmd == FZ_CMD_BEGIN_PAGE || n.cmd == FZ_CMD_END_PAGE)
+			n.cmd == FZ_CMD_RENDER_FLAGS)
 		{
 			empty = 0;
 		}
@@ -1587,16 +1581,12 @@ fz_run_display_list(fz_context *ctx, fz_display_list *list, fz_device *dev, cons
 			{
 			case FZ_CMD_CLIP_PATH:
 			case FZ_CMD_CLIP_STROKE_PATH:
+			case FZ_CMD_CLIP_TEXT:
 			case FZ_CMD_CLIP_STROKE_TEXT:
 			case FZ_CMD_CLIP_IMAGE_MASK:
 			case FZ_CMD_BEGIN_MASK:
 			case FZ_CMD_BEGIN_GROUP:
 				clipped++;
-				continue;
-			case FZ_CMD_CLIP_TEXT:
-				/* Accumulated text has no extra pops */
-				if (n.flags != 2)
-					clipped++;
 				continue;
 			case FZ_CMD_POP_CLIP:
 			case FZ_CMD_END_GROUP:
@@ -1620,12 +1610,6 @@ visible:
 		{
 			switch (n.cmd)
 			{
-			case FZ_CMD_BEGIN_PAGE:
-				fz_begin_page(ctx, dev, &trans_rect, &trans_ctm);
-				break;
-			case FZ_CMD_END_PAGE:
-				fz_end_page(ctx, dev);
-				break;
 			case FZ_CMD_FILL_PATH:
 				fz_fill_path(ctx, dev, path, n.flags, &trans_ctm, colorspace, color, alpha);
 				break;
@@ -1633,10 +1617,10 @@ visible:
 				fz_stroke_path(ctx, dev, path, stroke, &trans_ctm, colorspace, color, alpha);
 				break;
 			case FZ_CMD_CLIP_PATH:
-				fz_clip_path(ctx, dev, path, &trans_rect, n.flags, &trans_ctm);
+				fz_clip_path(ctx, dev, path, n.flags, &trans_ctm, &trans_rect);
 				break;
 			case FZ_CMD_CLIP_STROKE_PATH:
-				fz_clip_stroke_path(ctx, dev, path, &trans_rect, stroke, &trans_ctm);
+				fz_clip_stroke_path(ctx, dev, path, stroke, &trans_ctm, &trans_rect);
 				break;
 			case FZ_CMD_FILL_TEXT:
 				fz_fill_text(ctx, dev, *(fz_text **)node, &trans_ctm, colorspace, color, alpha);
@@ -1645,10 +1629,10 @@ visible:
 				fz_stroke_text(ctx, dev, *(fz_text **)node, stroke, &trans_ctm, colorspace, color, alpha);
 				break;
 			case FZ_CMD_CLIP_TEXT:
-				fz_clip_text(ctx, dev, *(fz_text **)node, &trans_ctm, n.flags);
+				fz_clip_text(ctx, dev, *(fz_text **)node, &trans_ctm, &trans_rect);
 				break;
 			case FZ_CMD_CLIP_STROKE_TEXT:
-				fz_clip_stroke_text(ctx, dev, *(fz_text **)node, stroke, &trans_ctm);
+				fz_clip_stroke_text(ctx, dev, *(fz_text **)node, stroke, &trans_ctm, &trans_rect);
 				break;
 			case FZ_CMD_IGNORE_TEXT:
 				fz_ignore_text(ctx, dev, *(fz_text **)node, &trans_ctm);
@@ -1667,7 +1651,7 @@ visible:
 				break;
 			case FZ_CMD_CLIP_IMAGE_MASK:
 				if ((dev->hints & FZ_IGNORE_IMAGE) == 0)
-					fz_clip_image_mask(ctx, dev, *(fz_image **)node, &trans_rect, &trans_ctm);
+					fz_clip_image_mask(ctx, dev, *(fz_image **)node, &trans_ctm, &trans_rect);
 				break;
 			case FZ_CMD_POP_CLIP:
 				fz_pop_clip(ctx, dev);
@@ -1699,6 +1683,12 @@ visible:
 			case FZ_CMD_END_TILE:
 				tiled--;
 				fz_end_tile(ctx, dev);
+				break;
+			case FZ_CMD_RENDER_FLAGS:
+				if (n.flags == 0)
+					fz_render_flags(ctx, dev, 0, FZ_DEVFLAG_GRIDFIT_AS_TILED);
+				else if (n.flags == 1)
+					fz_render_flags(ctx, dev, FZ_DEVFLAG_GRIDFIT_AS_TILED, 0);
 				break;
 			}
 		}

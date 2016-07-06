@@ -70,12 +70,13 @@ static char *tmp_path(char *path)
 static void saveDoc(char *current_path, fz_document *doc)
 {
 	char *tmp;
-	fz_write_options opts;
+	pdf_document *idoc = pdf_specifics(ctx, doc);
+	pdf_write_options opts = { 0 };
+
 	opts.do_incremental = 1;
-	opts.do_ascii = 0;
-	opts.do_expand = 0;
-	opts.do_garbage = 0;
-	opts.do_linear = 0;
+
+	if (!idoc)
+		return;
 
 	tmp = tmp_path(current_path);
 	if (tmp)
@@ -105,7 +106,7 @@ static void saveDoc(char *current_path, fz_document *doc)
 
 			if (!err)
 			{
-				fz_write_document(ctx, doc, tmp, &opts);
+				pdf_save_document(ctx, idoc, tmp, &opts);
 				written = 1;
 			}
 		}
@@ -172,19 +173,10 @@ static void saveDoc(char *current_path, fz_document *doc)
 	doc = docRef->doc;
 	filePath = strdup(cstr);
 
-	dispatch_sync(queue, ^{});
+	//  this will be created right before the outline is shown
+	outline = nil;
 
-	fz_outline *root = fz_load_outline(ctx, doc);
-	if (root) {
-		NSMutableArray *titles = [[NSMutableArray alloc] init];
-		NSMutableArray *pages = [[NSMutableArray alloc] init];
-		flattenOutline(titles, pages, root, 0);
-		if ([titles count])
-			outline = [[MuOutlineController alloc] initWithTarget: self titles: titles pages: pages];
-		[titles release];
-		[pages release];
-		fz_drop_outline(ctx, root);
-	}
+	dispatch_sync(queue, ^{});
 
 	return self;
 }
@@ -283,9 +275,14 @@ static void saveDoc(char *current_path, fz_document *doc)
 
 	// Set up the buttons on the navigation and search bar
 
-	if (outline) {
+	fz_outline *outlineRoot = fz_load_outline(ctx, doc);
+	if (outlineRoot)
+	{
+		//  only show the outline button if there is an outline
 		outlineButton = [self newResourceBasedButton:@"ic_list" withAction:@selector(onShowOutline:)];
+		fz_drop_outline(ctx, outlineRoot);
 	}
+
 	linkButton = [self newResourceBasedButton:@"ic_link" withAction:@selector(onToggleLinks:)];
 	cancelButton = [self newResourceBasedButton:@"ic_cancel" withAction:@selector(onCancel:)];
 	searchButton = [self newResourceBasedButton:@"ic_magnifying_glass" withAction:@selector(onShowSearch:)];
@@ -476,6 +473,23 @@ static void saveDoc(char *current_path, fz_document *doc)
 
 - (void) onShowOutline: (id)sender
 {
+	//  rebuild the outline in case the layout has changed
+	fz_outline *root = fz_load_outline(ctx, doc);
+	if (root)
+	{
+		NSMutableArray *titles = [[NSMutableArray alloc] init];
+		NSMutableArray *pages = [[NSMutableArray alloc] init];
+		flattenOutline(titles, pages, root, 0);
+		[outline release];
+		if ([titles count])
+			outline = [[MuOutlineController alloc] initWithTarget: self titles: titles pages: pages];
+		[titles release];
+		[pages release];
+		fz_drop_outline(ctx, root);
+	}
+
+	//  now show it
+
 	[[self navigationController] pushViewController: outline animated: YES];
 }
 

@@ -103,9 +103,7 @@ void pdf_load_to_unicode(fz_context *ctx, pdf_document *doc, pdf_font_desc *font
 
 int pdf_font_cid_to_gid(fz_context *ctx, pdf_font_desc *fontdesc, int cid);
 
-unsigned char *pdf_lookup_builtin_font(fz_context *ctx, const char *name, unsigned int *len);
-unsigned char *pdf_lookup_substitute_font(fz_context *ctx, int mono, int serif, int bold, int italic, unsigned int *len);
-unsigned char *pdf_lookup_substitute_cjk_font(fz_context *ctx, int ros, int serif, int wmode, unsigned int *len, int *index);
+const char *pdf_lookup_substitute_font(fz_context *ctx, int mono, int serif, int bold, int italic, int *len);
 
 pdf_font_desc *pdf_load_type3_font(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, pdf_obj *obj);
 void pdf_load_type3_glyphs(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc, int nestedDepth);
@@ -116,13 +114,16 @@ pdf_font_desc *pdf_new_font_desc(fz_context *ctx);
 pdf_font_desc *pdf_keep_font(fz_context *ctx, pdf_font_desc *fontdesc);
 void pdf_drop_font(fz_context *ctx, pdf_font_desc *font);
 
-#ifndef NDEBUG
-void pdf_print_font(fz_context *ctx, pdf_font_desc *fontdesc);
-#endif
+void pdf_print_font(fz_context *ctx, fz_output *out, pdf_font_desc *fontdesc);
 
 fz_rect *pdf_measure_text(fz_context *ctx, pdf_font_desc *fontdesc, unsigned char *buf, int len, fz_rect *rect);
 float pdf_text_stride(fz_context *ctx, pdf_font_desc *fontdesc, float fontsize, unsigned char *buf, int len, float room, int *count);
 
 void pdf_run_glyph(fz_context *ctx, pdf_document *doc, pdf_obj *resources, fz_buffer *contents, fz_device *dev, const fz_matrix *ctm, void *gstate, int nestedDepth);
+
+pdf_obj *pdf_add_simple_font(fz_context *ctx, pdf_document *doc, fz_font *font);
+pdf_obj *pdf_add_cid_font(fz_context *ctx, pdf_document *doc, fz_font *font);
+
+int pdf_font_writing_supported(fz_font *font);
 
 #endif

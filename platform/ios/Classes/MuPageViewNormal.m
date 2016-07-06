@@ -48,16 +48,16 @@ static NSArray *enumerateAnnotations(fz_document *doc, fz_page *page)
 	fz_annot *annot;
 	NSMutableArray *arr = [NSMutableArray arrayWithCapacity:10];
 
-	for (annot = fz_first_annot(ctx, page); annot; annot = fz_next_annot(ctx, page, annot))
-		[arr addObject:[MuAnnotation annotFromAnnot:annot forPage:page]];
+	for (annot = fz_first_annot(ctx, page); annot; annot = fz_next_annot(ctx, annot))
+		[arr addObject:[MuAnnotation annotFromAnnot:annot]];
 
 	return [arr retain];
 }
 
 static NSArray *enumerateWords(fz_document *doc, fz_page *page)
 {
-	fz_text_sheet *sheet = NULL;
-	fz_text_page *text = NULL;
+	fz_stext_sheet *sheet = NULL;
+	fz_stext_page *text = NULL;
 	fz_device *dev = NULL;
 	NSMutableArray *lns = [NSMutableArray array];
 	NSMutableArray *wds;
@@ -70,20 +70,20 @@ static NSArray *enumerateWords(fz_document *doc, fz_page *page)
 	fz_var(text);
 	fz_var(dev);
 
-	fz_try(ctx);
+	fz_try(ctx)
 	{
 		int b, l, c;
 
-		sheet = fz_new_text_sheet(ctx);
-		text = fz_new_text_page(ctx);
-		dev = fz_new_text_device(ctx, sheet, text);
+		sheet = fz_new_stext_sheet(ctx);
+		text = fz_new_stext_page(ctx);
+		dev = fz_new_stext_device(ctx, sheet, text);
 		fz_run_page(ctx, page, dev, &fz_identity, NULL);
 		fz_drop_device(ctx, dev);
 		dev = NULL;
 
 		for (b = 0; b < text->len; b++)
 		{
-			fz_text_block *block;
+			fz_stext_block *block;
 
 			if (text->blocks[b].type != FZ_PAGE_BLOCK_TEXT)
 				continue;
@@ -92,8 +92,8 @@ static NSArray *enumerateWords(fz_document *doc, fz_page *page)
 
 			for (l = 0; l < block->len; l++)
 			{
-				fz_text_line *line = &block->lines[l];
-				fz_text_span *span;
+				fz_stext_line *line = &block->lines[l];
+				fz_stext_span *span;
 
 				wds = [NSMutableArray array];
 				if (!wds)
@@ -107,11 +107,11 @@ static NSArray *enumerateWords(fz_document *doc, fz_page *page)
 				{
 					for (c = 0; c < span->len; c++)
 					{
-						fz_text_char *ch = &span->text[c];
+						fz_stext_char *ch = &span->text[c];
 						fz_rect bbox;
 						CGRect rect;
 
-						fz_text_char_bbox(ctx, &bbox, span, c);
+						fz_stext_char_bbox(ctx, &bbox, span, c);
 						rect = CGRectMake(bbox.x0, bbox.y0, bbox.x1 - bbox.x0, bbox.y1 - bbox.y0);
 
 						if (ch->c != ' ')
@@ -136,10 +136,10 @@ static NSArray *enumerateWords(fz_document *doc, fz_page *page)
 			}
 		}
 	}
-	fz_always(ctx);
+	fz_always(ctx)
 	{
-		fz_drop_text_page(ctx, text);
-		fz_drop_text_sheet(ctx, sheet);
+		fz_drop_stext_page(ctx, text);
+		fz_drop_stext_sheet(ctx, sheet);
 		fz_drop_device(ctx, dev);
 	}
 	fz_catch(ctx)
@@ -305,7 +305,7 @@ static void deleteAnnotation(fz_document *doc, fz_page *page, int index)
 		int i;
 		fz_annot *annot = fz_first_annot(ctx, page);
 		for (i = 0; i < index && annot; i++)
-			annot = fz_next_annot(ctx, page, annot);
+			annot = fz_next_annot(ctx, annot);
 
 		if (annot)
 			pdf_delete_annot(ctx, idoc, (pdf_page *)page, (pdf_annot *)annot);
@@ -408,8 +408,8 @@ static fz_display_list *create_annot_list(fz_document *doc, fz_page *page)
 			pdf_update_page(ctx, idoc, (pdf_page *)page);
 		list = fz_new_display_list(ctx);
 		dev = fz_new_list_device(ctx, list);
-		for (annot = fz_first_annot(ctx, page); annot; annot = fz_next_annot(ctx, page, annot))
-			fz_run_annot(ctx, page, annot, dev, &fz_identity, NULL);
+		for (annot = fz_first_annot(ctx, page); annot; annot = fz_next_annot(ctx, annot))
+			fz_run_annot(ctx, annot, dev, &fz_identity, NULL);
 	}
 	fz_always(ctx)
 	{
@@ -508,7 +508,7 @@ static rect_list *updatePage(fz_document *doc, fz_page *page)
 			{
 				rect_list *node = fz_malloc_struct(ctx, rect_list);
 
-				fz_bound_annot(ctx, page, annot, &node->rect);
+				fz_bound_annot(ctx, annot, &node->rect);
 				node->next = list;
 				list = node;
 			}
@@ -1301,9 +1301,9 @@ static void updatePixmap(fz_document *doc, fz_display_list *page_list, fz_displa
 				case PDF_WIDGET_TYPE_LISTBOX:
 				case PDF_WIDGET_TYPE_COMBOBOX:
 				{
-					int nopts = pdf_choice_widget_options(ctx, idoc, focus, NULL);
+					int nopts = pdf_choice_widget_options(ctx, idoc, focus, 0, NULL);
 					opts = fz_malloc(ctx, nopts * sizeof(*opts));
-					(void)pdf_choice_widget_options(ctx, idoc, focus, opts);
+					(void)pdf_choice_widget_options(ctx, idoc, focus, 0, opts);
 					NSMutableArray *arr = [[NSMutableArray arrayWithCapacity:nopts] retain];
 					for (int i = 0; i < nopts; i++)
 					{

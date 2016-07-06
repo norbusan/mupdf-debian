@@ -30,6 +30,9 @@ int fz_pixmap_width(fz_context *ctx, fz_pixmap *pix);
 */
 int fz_pixmap_height(fz_context *ctx, fz_pixmap *pix);
 
+int fz_pixmap_x(fz_context *ctx, fz_pixmap *pix);
+int fz_pixmap_y(fz_context *ctx, fz_pixmap *pix);
+
 /*
 	fz_new_pixmap: Create a new pixmap, with it's origin at (0,0)
 
@@ -143,6 +146,11 @@ int fz_pixmap_components(fz_context *ctx, fz_pixmap *pix);
 */
 unsigned char *fz_pixmap_samples(fz_context *ctx, fz_pixmap *pix);
 
+/*
+	fz_pixmap_stride: Return the number of bytes in a row in the pixmap.
+*/
+int fz_pixmap_stride(fz_context *ctx, fz_pixmap *pix);
+
 void fz_pixmap_set_resolution(fz_pixmap *pix, int res);
 
 /*
@@ -249,7 +257,7 @@ void fz_convert_pixmap(fz_context *ctx, fz_pixmap *dst, fz_pixmap *src);
 
 	n: The number of color components in the image. Always
 	includes a separate alpha channel. For mask images n=1, for greyscale
-	(plus alpha) images n=2, for rgb (plus alpha) images n=3.
+	(plus alpha) images n=2, for rgb (plus alpha) images n=4.
 
 	interpolate: A boolean flag set to non-zero if the image
 	will be drawn using linear interpolation, or set to zero if
@@ -293,14 +301,14 @@ typedef struct fz_scale_cache_s fz_scale_cache;
 
 fz_scale_cache *fz_new_scale_cache(fz_context *ctx);
 void fz_drop_scale_cache(fz_context *ctx, fz_scale_cache *cache);
-fz_pixmap *fz_scale_pixmap_cached(fz_context *ctx, fz_pixmap *src, float x, float y, float w, float h, const fz_irect *clip, fz_scale_cache *cache_x, fz_scale_cache *cache_y);
+fz_pixmap *fz_scale_pixmap_cached(fz_context *ctx, const fz_pixmap *src, float x, float y, float w, float h, const fz_irect *clip, fz_scale_cache *cache_x, fz_scale_cache *cache_y);
 
 void fz_subsample_pixmap(fz_context *ctx, fz_pixmap *tile, int factor);
 
 fz_irect *fz_pixmap_bbox_no_ctx(fz_pixmap *src, fz_irect *bbox);
 
-void fz_decode_tile(fz_context *ctx, fz_pixmap *pix, float *decode);
-void fz_decode_indexed_tile(fz_context *ctx, fz_pixmap *pix, float *decode, int maxval);
+void fz_decode_tile(fz_context *ctx, fz_pixmap *pix, const float *decode);
+void fz_decode_indexed_tile(fz_context *ctx, fz_pixmap *pix, const float *decode, int maxval);
 void fz_unpack_tile(fz_context *ctx, fz_pixmap *dst, unsigned char * restrict src, int n, int depth, int stride, int scale);
 
 /*

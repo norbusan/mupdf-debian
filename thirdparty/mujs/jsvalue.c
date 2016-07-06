@@ -12,7 +12,7 @@ double jsV_numbertointeger(double n)
 	double sign = n < 0 ? -1 : 1;
 	if (isnan(n)) return 0;
 	if (n == 0 || isinf(n)) return n;
-	return sign * floor(abs(n));
+	return sign * floor(fabs(n));
 }
 
 int jsV_numbertoint32(double n)
@@ -421,6 +421,7 @@ void js_newcconstructor(js_State *J, js_CFunction cfun, js_CFunction ccon, const
 	obj->u.c.name = name;
 	obj->u.c.function = cfun;
 	obj->u.c.constructor = ccon;
+	obj->u.c.length = length;
 	js_pushobject(J, obj); /* proto obj */
 	{
 		js_pushnumber(J, length);
@@ -432,7 +433,7 @@ void js_newcconstructor(js_State *J, js_CFunction cfun, js_CFunction ccon, const
 	}
 }
 
-void js_newuserdata(js_State *J, const char *tag, void *data, js_Finalize finalize)
+void js_newuserdatax(js_State *J, const char *tag, void *data, js_HasProperty has, js_Put put, js_Delete delete, js_Finalize finalize)
 {
 	js_Object *prototype = NULL;
 	js_Object *obj;
@@ -444,8 +445,16 @@ void js_newuserdata(js_State *J, const char *tag, void *data, js_Finalize finali
 	obj = jsV_newobject(J, JS_CUSERDATA, prototype);
 	obj->u.user.tag = tag;
 	obj->u.user.data = data;
+	obj->u.user.has = has;
+	obj->u.user.put = put;
+	obj->u.user.delete = delete;
 	obj->u.user.finalize = finalize;
 	js_pushobject(J, obj);
+}
+
+void js_newuserdata(js_State *J, const char *tag, void *data, js_Finalize finalize)
+{
+	js_newuserdatax(J, tag, data, NULL, NULL, NULL, finalize);
 }
 
 /* Non-trivial operations on values. These are implemented using the stack. */

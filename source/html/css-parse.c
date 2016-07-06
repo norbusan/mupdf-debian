@@ -58,6 +58,7 @@ static fz_css_property *fz_new_css_property(fz_context *ctx, const char *name, f
 	prop->name = fz_strdup(ctx, name);
 	prop->value = value;
 	prop->spec = spec;
+	prop->important = 0;
 	prop->next = NULL;
 	return prop;
 }
@@ -610,7 +611,11 @@ static fz_css_property *parse_declaration(struct lexbuf *buf)
 	/* !important */
 	if (accept(buf, '!'))
 	{
-		expect(buf, CSS_KEYWORD);
+		white(buf);
+		if (buf->lookahead != CSS_KEYWORD || strcmp(buf->string, "important"))
+			fz_css_error(buf, "expected keyword 'important' after '!'");
+		p->important = 1;
+		next(buf);
 		white(buf);
 	}
 
@@ -771,55 +776,42 @@ static fz_css_selector *parse_simple_selector(struct lexbuf *buf)
 	fz_css_error(buf, "expected selector");
 }
 
-static fz_css_selector *parse_combinator(struct lexbuf *buf, fz_css_selector *a)
+static fz_css_selector *parse_combinator(struct lexbuf *buf, int c, fz_css_selector *a)
 {
-	fz_css_selector *s, *b;
-	if (accept(buf, '+'))
-	{
-		white(buf);
-		b = parse_selector(buf);
-		s = fz_new_css_selector(buf->ctx, NULL);
-		s->combine = '+';
-		s->left = a;
-		s->right = b;
-		return s;
-	}
-	if (accept(buf, '>'))
-	{
-		white(buf);
-		b = parse_selector(buf);
-		s = fz_new_css_selector(buf->ctx, NULL);
-		s->combine = '>';
-		s->left = a;
-		s->right = b;
-		return s;
-	}
-	return a;
+	fz_css_selector *sel, *b;
+	white(buf);
+	b = parse_simple_selector(buf);
+	sel = fz_new_css_selector(buf->ctx, NULL);
+	sel->combine = c;
+	sel->left = a;
+	sel->right = b;
+	return sel;
 }
 
 static fz_css_selector *parse_selector(struct lexbuf *buf)
 {
-	fz_css_selector *s, *a, *b;
-
-	a = parse_simple_selector(buf);
-	if (accept(buf, ' '))
+	fz_css_selector *sel = parse_simple_selector(buf);
+	for (;;)
 	{
-		s = parse_combinator(buf, a);
-		if (s == a && buf->lookahead != ',' && buf->lookahead != '{' && buf->lookahead != EOF)
+		if (accept(buf, ' '))
 		{
-			b = parse_selector(buf);
-			s = fz_new_css_selector(buf->ctx, NULL);
-			s->combine = ' ';
-			s->left = a;
-			s->right = b;
-			return s;
+			if (accept(buf, '+'))
+				sel = parse_combinator(buf, '+', sel);
+			else if (accept(buf, '>'))
+				sel = parse_combinator(buf, '>', sel);
+			else if (buf->lookahead != ',' && buf->lookahead != '{' && buf->lookahead != EOF)
+				sel = parse_combinator(buf, ' ', sel);
+			else
+				break;
 		}
+		else if (accept(buf, '+'))
+			sel = parse_combinator(buf, '+', sel);
+		else if (accept(buf, '>'))
+			sel = parse_combinator(buf, '>', sel);
+		else
+			break;
 	}
-	else
-	{
-		s = parse_combinator(buf, a);
-	}
-	return s;
+	return sel;
 }
 
 static fz_css_selector *parse_selector_list(struct lexbuf *buf)
@@ -864,6 +856,41 @@ static fz_css_rule *parse_ruleset(struct lexbuf *buf)
 		return NULL;
 	}
 
+	return fz_new_css_rule(buf->ctx, s, p);
+}
+
+static fz_css_rule *parse_at_page(struct lexbuf *buf)
+{
+	fz_css_selector *s = NULL;
+	fz_css_property *p = NULL;
+
+	white(buf);
+	if (accept(buf, ':'))
+	{
+		expect(buf, CSS_KEYWORD);
+		white(buf);
+	}
+	expect(buf, '{');
+	p = parse_declaration_list(buf);
+	expect(buf, '}');
+	white(buf);
+
+	s = fz_new_css_selector(buf->ctx, "@page");
+	return fz_new_css_rule(buf->ctx, s, p);
+}
+
+static fz_css_rule *parse_at_font_face(struct lexbuf *buf)
+{
+	fz_css_selector *s = NULL;
+	fz_css_property *p = NULL;
+
+	white(buf);
+	expect(buf, '{');
+	p = parse_declaration_list(buf);
+	expect(buf, '}');
+	white(buf);
+
+	s = fz_new_css_selector(buf->ctx, "@font-face");
 	return fz_new_css_rule(buf->ctx, s, p);
 }
 
@@ -920,7 +947,22 @@ static fz_css_rule *parse_stylesheet(struct lexbuf *buf, fz_css_rule *chain)
 	{
 		if (accept(buf, '@'))
 		{
-			parse_at_rule(buf);
+			if (buf->lookahead == CSS_KEYWORD && !strcmp(buf->string, "page"))
+			{
+				next(buf);
+				rule = *nextp = parse_at_page(buf);
+				nextp = &rule->next;
+			}
+			else if (buf->lookahead == CSS_KEYWORD && !strcmp(buf->string, "font-face"))
+			{
+				next(buf);
+				rule = *nextp = parse_at_font_face(buf);
+				nextp = &rule->next;
+			}
+			else
+			{
+				parse_at_rule(buf);
+			}
 		}
 		else
 		{

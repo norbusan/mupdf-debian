@@ -85,16 +85,43 @@ struct fz_xml_s
 	fz_xml *up, *down, *tail, *prev, *next;
 };
 
-static inline void indent(int n)
+static void indent(int n)
 {
-	while (n--) putchar(' ');
+	while (n--) {
+		putchar(' ');
+		putchar(' ');
+	}
 }
 
 void fz_debug_xml(fz_xml *item, int level)
 {
 	if (item->text)
 	{
-		printf("%s\n", item->text);
+		char *s = item->text;
+		int c;
+		indent(level);
+		putchar('"');
+		while ((c = *s++)) {
+			switch (c) {
+			default:
+				if (c < 32 || c > 127) {
+					putchar('\\');
+					putchar('0' + ((c >> 6) & 7));
+					putchar('0' + ((c >> 3) & 7));
+					putchar('0' + ((c) & 7));
+				} else {
+					putchar(c);
+				}
+				break;
+			case '\\': putchar('\\'); putchar('\\'); break;
+			case '\b': putchar('\\'); putchar('b'); break;
+			case '\f': putchar('\\'); putchar('f'); break;
+			case '\n': putchar('\\'); putchar('n'); break;
+			case '\r': putchar('\\'); putchar('r'); break;
+			case '\t': putchar('\\'); putchar('t'); break;
+			}
+		}
+		putchar('\n');
 	}
 	else
 	{
@@ -102,21 +129,16 @@ void fz_debug_xml(fz_xml *item, int level)
 		struct attribute *att;
 
 		indent(level);
-		printf("<%s", item->name);
+		printf("(%s\n", item->name);
 		for (att = item->atts; att; att = att->next)
-			printf(" %s=\"%s\"", att->name, att->value);
-		if (item->down)
 		{
-			printf(">\n");
-			for (child = item->down; child; child = child->next)
-				fz_debug_xml(child, level + 1);
 			indent(level);
-			printf("</%s>\n", item->name);
+			printf("=%s %s\n", att->name, att->value);
 		}
-		else
-		{
-			printf("/>\n");
-		}
+		for (child = item->down; child; child = child->next)
+			fz_debug_xml(child, level + 1);
+		indent(level);
+		printf(")%s\n", item->name);
 	}
 }
 
@@ -432,8 +454,16 @@ static char *xml_parse_document_imp(fz_context *ctx, struct parser *parser, char
 parse_text:
 	mark = p;
 	while (*p && *p != '<') ++p;
-	if (mark != p) xml_emit_text(ctx, parser, mark, p);
-	if (*p == '<') { ++p; goto parse_element; }
+	if (*p == '<') {
+		/* skip trailing newline before closing tag */
+		if (p[1] == '/' && p - 1 >= mark && p[-1] == '\n')
+			xml_emit_text(ctx, parser, mark, p - 1);
+		else if (mark < p)
+			xml_emit_text(ctx, parser, mark, p);
+		++p;
+		goto parse_element;
+	} else if (mark < p)
+		xml_emit_text(ctx, parser, mark, p);
 	return NULL;
 
 parse_element:
@@ -503,7 +533,11 @@ parse_element_name:
 	mark = p;
 	while (isname(*p)) ++p;
 	xml_emit_open_tag(ctx, parser, mark, p);
-	if (*p == '>') { ++p; goto parse_text; }
+	if (*p == '>') {
+		++p;
+		if (*p == '\n') ++p; /* must skip linebreak immediately after an opening tag */
+		goto parse_text;
+	}
 	if (p[0] == '/' && p[1] == '>') {
 		xml_emit_close_tag(ctx, parser);
 		p += 2;
@@ -517,7 +551,11 @@ parse_attributes:
 	while (iswhite(*p)) ++p;
 	if (isname(*p))
 		goto parse_attribute_name;
-	if (*p == '>') { ++p; goto parse_text; }
+	if (*p == '>') {
+		++p;
+		if (*p == '\n') ++p; /* must skip linebreak immediately after an opening tag */
+		goto parse_text;
+	}
 	if (p[0] == '/' && p[1] == '>') {
 		xml_emit_close_tag(ctx, parser);
 		p += 2;

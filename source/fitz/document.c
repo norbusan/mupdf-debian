@@ -157,7 +157,8 @@ fz_new_document(fz_context *ctx, int size)
 fz_document *
 fz_keep_document(fz_context *ctx, fz_document *doc)
 {
-	++doc->refs;
+	if (doc)
+		++doc->refs;
 	return doc;
 }
 
@@ -239,13 +240,6 @@ fz_lookup_metadata(fz_context *ctx, fz_document *doc, const char *key, char *buf
 	return -1;
 }
 
-void
-fz_write_document(fz_context *ctx, fz_document *doc, char *filename, fz_write_options *opts)
-{
-	if (doc && doc->write)
-		doc->write(ctx, doc, filename, opts);
-}
-
 fz_page *
 fz_load_page(fz_context *ctx, fz_document *doc, int number)
 {
@@ -282,18 +276,18 @@ fz_first_annot(fz_context *ctx, fz_page *page)
 }
 
 fz_annot *
-fz_next_annot(fz_context *ctx, fz_page *page, fz_annot *annot)
+fz_next_annot(fz_context *ctx, fz_annot *annot)
 {
-	if (page && page->next_annot && annot)
-		return page->next_annot(ctx, page, annot);
+	if (annot && annot->next_annot)
+		return annot->next_annot(ctx, annot);
 	return NULL;
 }
 
 fz_rect *
-fz_bound_annot(fz_context *ctx, fz_page *page, fz_annot *annot, fz_rect *rect)
+fz_bound_annot(fz_context *ctx, fz_annot *annot, fz_rect *rect)
 {
-	if (page && page->bound_annot && annot && rect)
-		return page->bound_annot(ctx, page, annot, rect);
+	if (annot && annot->bound_annot && rect)
+		return annot->bound_annot(ctx, annot, rect);
 	if (rect)
 		*rect = fz_empty_rect;
 	return rect;
@@ -317,13 +311,13 @@ fz_run_page_contents(fz_context *ctx, fz_page *page, fz_device *dev, const fz_ma
 }
 
 void
-fz_run_annot(fz_context *ctx, fz_page *page, fz_annot *annot, fz_device *dev, const fz_matrix *transform, fz_cookie *cookie)
+fz_run_annot(fz_context *ctx, fz_annot *annot, fz_device *dev, const fz_matrix *transform, fz_cookie *cookie)
 {
-	if (page && page->run_annot && page && annot)
+	if (annot && annot->run_annot)
 	{
 		fz_try(ctx)
 		{
-			page->run_annot(ctx, page, annot, dev, transform, cookie);
+			annot->run_annot(ctx, annot, dev, transform, cookie);
 		}
 		fz_catch(ctx)
 		{
@@ -337,22 +331,18 @@ void
 fz_run_page(fz_context *ctx, fz_page *page, fz_device *dev, const fz_matrix *transform, fz_cookie *cookie)
 {
 	fz_annot *annot;
-	fz_rect mediabox;
-
-	fz_bound_page(ctx, page, &mediabox);
-	fz_begin_page(ctx, dev, &mediabox, transform);
 
 	fz_run_page_contents(ctx, page, dev, transform, cookie);
 
 	if (cookie && cookie->progress_max != -1)
 	{
 		int count = 1;
-		for (annot = fz_first_annot(ctx, page); annot; annot = fz_next_annot(ctx, page, annot))
+		for (annot = fz_first_annot(ctx, page); annot; annot = fz_next_annot(ctx, annot))
 			count++;
 		cookie->progress_max += count;
 	}
 
-	for (annot = fz_first_annot(ctx, page); annot; annot = fz_next_annot(ctx, page, annot))
+	for (annot = fz_first_annot(ctx, page); annot; annot = fz_next_annot(ctx, annot))
 	{
 		/* Check the cookie for aborting */
 		if (cookie)
@@ -362,10 +352,35 @@ fz_run_page(fz_context *ctx, fz_page *page, fz_device *dev, const fz_matrix *tra
 			cookie->progress++;
 		}
 
-		fz_run_annot(ctx, page, annot, dev, transform, cookie);
+		fz_run_annot(ctx, annot, dev, transform, cookie);
 	}
+}
 
-	fz_end_page(ctx, dev);
+void *
+fz_new_annot(fz_context *ctx, int size)
+{
+	fz_annot *annot = Memento_label(fz_calloc(ctx, 1, size), "fz_annot");
+	annot->refs = 1;
+	return annot;
+}
+
+fz_annot *
+fz_keep_annot(fz_context *ctx, fz_annot *annot)
+{
+	if (annot)
+		++annot->refs;
+	return annot;
+}
+
+void
+fz_drop_annot(fz_context *ctx, fz_annot *annot)
+{
+	if (annot && --annot->refs == 0)
+	{
+		if (annot->drop_annot_imp)
+			annot->drop_annot_imp(ctx, annot);
+		fz_free(ctx, annot);
+	}
 }
 
 void *
@@ -387,7 +402,8 @@ fz_keep_page(fz_context *ctx, fz_page *page)
 void
 fz_drop_page(fz_context *ctx, fz_page *page)
 {
-	if (page) {
+	if (page)
+	{
 		if (--page->refs == 0 && page->drop_page_imp)
 		{
 			page->drop_page_imp(ctx, page);
@@ -407,4 +423,38 @@ fz_page_presentation(fz_context *ctx, fz_page *page, float *duration)
 	if (page && page->page_presentation && page)
 		return page->page_presentation(ctx, page, duration);
 	return NULL;
+}
+
+int fz_count_separations_on_page(fz_context *ctx, fz_page *page)
+{
+	if (ctx == NULL || page == NULL || page->count_separations == NULL)
+		return 0;
+
+	return page->count_separations(ctx, page);
+}
+
+void fz_control_separation_on_page(fz_context *ctx, fz_page *page, int sep, int disable)
+{
+	if (ctx == NULL || page == NULL || page->control_separation == NULL)
+		return;
+
+	page->control_separation(ctx, page, sep, disable);
+}
+
+int fz_separation_disabled_on_page (fz_context *ctx, fz_page *page, int sep)
+{
+	if (ctx == NULL || page == NULL || page->separation_disabled == NULL)
+		return 0;
+	return page->separation_disabled(ctx, page, sep);
+}
+
+const char *fz_get_separation_on_page(fz_context *ctx, fz_page *page, int sep, uint32_t *rgba, uint32_t *cmyk)
+{
+	if (ctx == NULL || page == NULL || page->get_separation == NULL)
+	{
+		*rgba = 0;
+		*cmyk = 0;
+		return NULL;
+	}
+	return page->get_separation(ctx, page, sep, rgba, cmyk);
 }

@@ -39,8 +39,8 @@ struct fz_storable_s {
 	S->drop = (DROP); \
 	} while (0)
 
-void *fz_keep_storable(fz_context *, fz_storable *);
-void fz_drop_storable(fz_context *, fz_storable *);
+void *fz_keep_storable(fz_context *, const fz_storable *);
+void fz_drop_storable(fz_context *, const fz_storable *);
 
 /*
 	The store can be seen as a dictionary that maps keys to fz_storable
@@ -73,7 +73,7 @@ struct fz_store_hash_s
 		} i;
 		struct
 		{
-			void *ptr;
+			const void *ptr;
 			int i;
 		} pi;
 		struct
@@ -92,9 +92,7 @@ struct fz_store_type_s
 	void *(*keep_key)(fz_context *,void *);
 	void (*drop_key)(fz_context *,void *);
 	int (*cmp_key)(fz_context *ctx, void *, void *);
-#ifndef NDEBUG
-	void (*debug)(fz_context *ctx, FILE *, void *);
-#endif
+	void (*print)(fz_context *ctx, fz_output *out, void *);
 };
 
 /*
@@ -197,9 +195,7 @@ int fz_shrink_store(fz_context *ctx, unsigned int percent);
 /*
 	fz_print_store: Dump the contents of the store for debugging.
 */
-#ifndef NDEBUG
-void fz_print_store(fz_context *ctx, FILE *out);
-void fz_print_store_locked(fz_context *ctx, FILE *out);
-#endif
+void fz_print_store(fz_context *ctx, fz_output *out);
+void fz_print_store_locked(fz_context *ctx, fz_output *out);
 
 #endif

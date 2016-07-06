@@ -15,10 +15,8 @@
 //
 // gcc -g -o build/debug/example-mt -Iinclude docs/multi-threaded.c \
 //	build/debug/libmupdf.a \
-//	build/debug/libfreetype.a build/debug/libjbig2dec.a \
-//	build/debug/libjpeg.a build/debug/libopenjpeg.a \
-//	build/debug/libmujs.a \
-//	build/debug/libz.a -lpthread -lm
+//	build/debug/libmupdfthird.a \
+//	-lpthread -lcrypto -lm
 //
 // build/debug/example-mt /path/to/document.pdf
 //
@@ -260,7 +258,7 @@ int main(int argc, char **argv)
 
 		// Write the rendered image to a PNG file
 
-		fz_write_png(ctx, data->pix, filename, 0);
+		fz_save_pixmap_as_png(ctx, data->pix, filename, 0);
 
 		// Free the thread's pixmap and display list since
 		// they were allocated by the main thread above.

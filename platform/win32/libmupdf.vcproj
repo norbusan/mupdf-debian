@@ -43,8 +43,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs"
-				PreprocessorDefinitions="DEBUG=1;USE_OUTPUT_DEBUG_STRING"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src"
+				PreprocessorDefinitions="FZ_LARGEFILE;DEBUG=1;USE_OUTPUT_DEBUG_STRING"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -106,8 +106,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs"
-				PreprocessorDefinitions="DEBUG=1;USE_OUTPUT_DEBUG_STRING"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src"
+				PreprocessorDefinitions="FZ_LARGEFILE;DEBUG=1;USE_OUTPUT_DEBUG_STRING"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -171,7 +171,8 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs"
+				WholeProgramOptimization="false"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -235,7 +236,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -295,8 +296,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs"
-				PreprocessorDefinitions="MEMENTO=1;DEBUG=1;USE_OUTPUT_DEBUG_STRING"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src"
+				PreprocessorDefinitions="FZ_LARGEFILE;MEMENTO=1;DEBUG=1;USE_OUTPUT_DEBUG_STRING"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -358,8 +359,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs"
-				PreprocessorDefinitions="MEMENTO=1;DEBUG=1;USE_OUTPUT_DEBUG_STRING"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src"
+				PreprocessorDefinitions="FZ_LARGEFILE;MEMENTO=1;DEBUG=1;USE_OUTPUT_DEBUG_STRING"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -420,8 +421,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\openssl\include;..\..\thirdparty\mujs"
-				PreprocessorDefinitions="DEBUG=1;HAVE_OPENSSL;USE_OUTPUT_DEBUG_STRING"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\openssl\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src"
+				PreprocessorDefinitions="FZ_LARGEFILE;DEBUG=1;HAVE_OPENSSL;USE_OUTPUT_DEBUG_STRING"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -483,8 +484,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\openssl\include;..\..\thirdparty\mujs"
-				PreprocessorDefinitions="DEBUG=1;HAVE_OPENSSL;USE_OUTPUT_DEBUG_STRING"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\openssl\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src"
+				PreprocessorDefinitions="FZ_LARGEFILE;DEBUG=1;HAVE_OPENSSL;USE_OUTPUT_DEBUG_STRING"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -548,7 +549,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -612,7 +613,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs"
+				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\jpeg;..\..\scripts\openjpeg;..\..\include;..\..\ucdn;..\..\generated;..\..\thirdparty\jbig2dec;..\..\thirdparty\jpeg;..\..\thirdparty\openjpeg\libopenjpeg;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -690,6 +691,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\source\xps\xps-link.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\xps\xps-outline.c"
 				>
 			</File>
@@ -719,6 +724,14 @@
 			>
 			<File
 				RelativePath="..\..\source\fitz\bbox-device.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\fitz\bidi-std.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\fitz\bidi.c"
 				>
 			</File>
 			<File
@@ -878,6 +891,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\source\fitz\harfbuzz.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\fitz\hash.c"
 				>
 			</File>
@@ -899,6 +916,14 @@
 			</File>
 			<File
 				RelativePath="..\..\source\fitz\list-device.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\fitz\load-bmp.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\fitz\load-gif.c"
 				>
 			</File>
 			<File
@@ -930,11 +955,19 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\source\fitz\noto.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\fitz\outline.c"
 				>
 			</File>
 			<File
 				RelativePath="..\..\source\fitz\output-pcl.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\fitz\output-ps.c"
 				>
 			</File>
 			<File
@@ -946,6 +979,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\source\fitz\paint-glyph.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\fitz\path.c"
 				>
 			</File>
@@ -954,7 +991,15 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\source\fitz\pool.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\fitz\printf.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\fitz\separation.c"
 				>
 			</File>
 			<File
@@ -1002,7 +1047,15 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\source\fitz\strtof.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\fitz\svg-device.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\fitz\tempfile.c"
 				>
 			</File>
 			<File
@@ -1034,15 +1087,15 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\source\fitz\ucdn.h"
-				>
-			</File>
-			<File
 				RelativePath="..\..\source\fitz\unicodedata_db.h"
 				>
 			</File>
 			<File
 				RelativePath="..\..\source\fitz\unzip.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\fitz\util.c"
 				>
 			</File>
 			<File
@@ -1122,10 +1175,6 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\source\pdf\pdf-fontfile.c"
-				>
-			</File>
-			<File
 				RelativePath="..\..\source\pdf\pdf-form.c"
 				>
 			</File>
@@ -1135,6 +1184,10 @@
 			</File>
 			<File
 				RelativePath="..\..\source\pdf\pdf-glyphlist.h"
+				>
+			</File>
+      <File
+				RelativePath="..\..\source\pdf\pdf-graft.c"
 				>
 			</File>
 			<File
@@ -1201,6 +1254,14 @@
 				RelativePath="..\..\source\pdf\pdf-repair.c"
 				>
 			</File>
+      <File
+				RelativePath="..\..\source\pdf\pdf-resources.c"
+				>
+			</File>
+      <File
+				RelativePath="..\..\source\pdf\pdf-resources.c"
+				>
+			</File>
 			<File
 				RelativePath="..\..\source\pdf\pdf-run.c"
 				>
@@ -1242,10 +1303,6 @@
 				>
 				<File
 					RelativePath="..\..\source\pdf\js\pdf-js.c"
-					>
-				</File>
-				<File
-					RelativePath="..\..\source\pdf\js\pdf-jsimp-mu.c"
 					>
 				</File>
 				<File
@@ -1320,6 +1377,10 @@
 					RelativePath="..\..\include\mupdf\pdf\font.h"
 					>
 				</File>
+        <File
+					RelativePath="..\..\include\mupdf\pdf\graft.h"
+					>
+				</File>
 				<File
 					RelativePath="..\..\include\mupdf\pdf\javascript.h"
 					>
@@ -1362,6 +1423,10 @@
 				>
 				<File
 					RelativePath="..\..\include\mupdf\fitz\annotation.h"
+					>
+				</File>
+				<File
+					RelativePath="..\..\include\mupdf\fitz\bidi.h"
 					>
 				</File>
 				<File
@@ -1461,6 +1526,10 @@
 					>
 				</File>
 				<File
+					RelativePath="..\..\include\mupdf\fitz\output-ps.h"
+					>
+				</File>
+				<File
 					RelativePath="..\..\include\mupdf\fitz\output-pwg.h"
 					>
 				</File>
@@ -1482,6 +1551,14 @@
 				</File>
 				<File
 					RelativePath="..\..\include\mupdf\fitz\pixmap.h"
+					>
+				</File>
+				<File
+					RelativePath="..\..\include\mupdf\fitz\pool.h"
+					>
+				</File>
+				<File
+					RelativePath="..\..\include\mupdf\fitz\separation.h"
 					>
 				</File>
 				<File
@@ -1521,15 +1598,19 @@
 					>
 				</File>
 				<File
+					RelativePath="..\..\include\mupdf\fitz\ucdn.h"
+					>
+				</File>
+				<File
 					RelativePath="..\..\include\mupdf\fitz\unzip.h"
 					>
 				</File>
 				<File
-					RelativePath="..\..\include\mupdf\fitz\version.h"
+					RelativePath="..\..\include\mupdf\fitz\util.h"
 					>
 				</File>
 				<File
-					RelativePath="..\..\include\mupdf\fitz\write-document.h"
+					RelativePath="..\..\include\mupdf\fitz\version.h"
 					>
 				</File>
 				<File
@@ -1563,6 +1644,18 @@
 			</File>
 			<File
 				RelativePath="..\..\source\html\html-layout.c"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="gprf"
+			>
+			<File
+				RelativePath="..\..\source\gprf\gprf-doc.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\gprf\gprf-skeleton.c"
 				>
 			</File>
 		</Filter>

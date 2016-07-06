@@ -4,7 +4,6 @@ static const char *inherit_list[] = {
 	"color",
 	"direction",
 	"font-family",
-	"font-size",
 	"font-style",
 	"font-variant",
 	"font-weight",
@@ -107,6 +106,18 @@ keyword_in_list(const char *name, const char **list, int n)
 	return 0;
 }
 
+static int
+is_bold_from_font_weight(const char *weight)
+{
+	return !strcmp(weight, "bold") || !strcmp(weight, "bolder") || atoi(weight) > 400;
+}
+
+static int
+is_italic_from_font_style(const char *style)
+{
+	return !strcmp(style, "italic") || !strcmp(style, "oblique");
+}
+
 /*
  * Compute specificity
  */
@@ -190,15 +201,15 @@ count_selector_names(fz_css_selector *sel)
 	return n;
 }
 
-#define INLINE_SPECIFICITY 1000
+#define INLINE_SPECIFICITY 10000
 
 static int
-selector_specificity(fz_css_selector *sel)
+selector_specificity(fz_css_selector *sel, int important)
 {
 	int b = count_selector_ids(sel);
 	int c = count_selector_atts(sel);
 	int d = count_selector_names(sel);
-	return b * 100 + c * 10 + d;
+	return important * 1000 + b * 100 + c * 10 + d;
 }
 
 /*
@@ -218,15 +229,18 @@ static int
 match_class_condition(fz_xml *node, const char *p)
 {
 	const char *s = fz_xml_att(node, "class");
-	char buf[1024];
+	const char *ss;
+	int n;
 	if (s) {
-		strcpy(buf, s);
-		s = strtok(buf, " ");
-		while (s) {
-			if (!strcmp(s, p))
-				return 1;
-			s = strtok(NULL, " ");
-		}
+		/* Try matching whole property first. */
+		if (!strcmp(s, p))
+			return 1;
+
+		/* Look for matching words. */
+		n = strlen(p);
+		ss = strstr(s, p);
+		if (ss && (ss[n] == ' ' || ss[n] == 0) && (ss == s || ss[-1] == ' '))
+			return 1;
 	}
 	return 0;
 }
@@ -577,6 +591,27 @@ add_property(fz_css_match *match, const char *name, fz_css_value *value, int spe
 	++match->count;
 }
 
+static void
+sort_properties(fz_css_match *match)
+{
+	int count = match->count;
+	fz_css_match_prop *prop = match->prop;
+	int i, k;
+
+	/* Insertion sort. */
+	for (i = 1; i < count; ++i)
+	{
+		k = i;
+		while (k > 0 && strcmp(prop[k-1].name, prop[k].name) > 0)
+		{
+			fz_css_match_prop save = prop[k-1];
+			prop[k-1] = prop[k];
+			prop[k] = save;
+			--k;
+		}
+	}
+}
+
 void
 fz_match_css(fz_context *ctx, fz_css_match *match, fz_css_rule *css, fz_xml *node)
 {
@@ -593,7 +628,7 @@ fz_match_css(fz_context *ctx, fz_css_match *match, fz_css_rule *css, fz_xml *nod
 			if (match_selector(sel, node))
 			{
 				for (prop = rule->declaration; prop; prop = prop->next)
-					add_property(match, prop->name, prop->value, selector_specificity(sel));
+					add_property(match, prop->name, prop->value, selector_specificity(sel, prop->important));
 				break;
 			}
 			sel = sel->next;
@@ -621,15 +656,139 @@ fz_match_css(fz_context *ctx, fz_css_match *match, fz_css_rule *css, fz_xml *nod
 			fz_warn(ctx, "ignoring style attribute");
 		}
 	}
+
+	sort_properties(match); /* speed up subsequent value_from_raw_property lookups */
+}
+
+void
+fz_match_css_at_page(fz_context *ctx, fz_css_match *match, fz_css_rule *css)
+{
+	fz_css_rule *rule;
+	fz_css_selector *sel;
+	fz_css_property *prop;
+
+	for (rule = css; rule; rule = rule->next)
+	{
+		sel = rule->selector;
+		while (sel)
+		{
+			if (sel->name && !strcmp(sel->name, "@page"))
+			{
+				for (prop = rule->declaration; prop; prop = prop->next)
+					add_property(match, prop->name, prop->value, selector_specificity(sel, prop->important));
+				break;
+			}
+			sel = sel->next;
+		}
+	}
+
+	sort_properties(match); /* speed up subsequent value_from_raw_property lookups */
+}
+
+void
+fz_add_css_font_face(fz_context *ctx, fz_html_font_set *set, fz_archive *zip, const char *base_uri, fz_css_property *declaration)
+{
+	fz_html_font_face *custom;
+	fz_css_property *prop;
+	fz_font *font = NULL;
+	fz_buffer *buf = NULL;
+	int is_bold, is_italic;
+	char path[2048];
+
+	const char *family = "serif";
+	const char *weight = "normal";
+	const char *style = "normal";
+	const char *src = NULL;
+
+	for (prop = declaration; prop; prop = prop->next)
+	{
+		if (!strcmp(prop->name, "font-family")) family = prop->value->data;
+		if (!strcmp(prop->name, "font-weight")) weight = prop->value->data;
+		if (!strcmp(prop->name, "font-style")) style = prop->value->data;
+		if (!strcmp(prop->name, "src")) src = prop->value->data;
+	}
+
+	if (!src)
+		return;
+
+	is_bold = is_bold_from_font_weight(weight);
+	is_italic = is_italic_from_font_style(style);
+
+	fz_strlcpy(path, base_uri, sizeof path);
+	fz_strlcat(path, "/", sizeof path);
+	fz_strlcat(path, src, sizeof path);
+	fz_urldecode(path);
+	fz_cleanname(path);
+
+	for (custom = set->custom; custom; custom = custom->next)
+		if (!strcmp(custom->src, path) && !strcmp(custom->family, family) &&
+				custom->is_bold == is_bold &&
+				custom->is_italic == is_italic)
+			return; /* already loaded */
+
+	printf("epub: @font-face: family='%s' b=%d i=%d src=%s\n", family, is_bold, is_italic, src);
+
+	fz_var(buf);
+	fz_var(font);
+
+	fz_try(ctx)
+	{
+		if (fz_has_archive_entry(ctx, zip, path))
+			buf = fz_read_archive_entry(ctx, zip, path);
+		else
+			buf = fz_read_file(ctx, src);
+		font = fz_new_font_from_buffer(ctx, src, buf, 0, 0);
+		fz_add_html_font_face(ctx, set, family, is_bold, is_italic, path, font);
+	}
+	fz_always(ctx)
+	{
+		fz_drop_buffer(ctx, buf);
+		fz_drop_font(ctx, font);
+	}
+	fz_catch(ctx)
+	{
+		fz_warn(ctx, "cannot load font-face: %s", src);
+	}
+}
+
+void
+fz_add_css_font_faces(fz_context *ctx, fz_html_font_set *set, fz_archive *zip, const char *base_uri, fz_css_rule *css)
+{
+	fz_css_rule *rule;
+	fz_css_selector *sel;
+
+	for (rule = css; rule; rule = rule->next)
+	{
+		sel = rule->selector;
+		while (sel)
+		{
+			if (sel->name && !strcmp(sel->name, "@font-face"))
+			{
+				fz_add_css_font_face(ctx, set, zip, base_uri, rule->declaration);
+				break;
+			}
+			sel = sel->next;
+		}
+	}
 }
 
 static fz_css_value *
 value_from_raw_property(fz_css_match *match, const char *name)
 {
-	int i;
-	for (i = 0; i < match->count; ++i)
-		if (!strcmp(match->prop[i].name, name))
-			return match->prop[i].value;
+	fz_css_match_prop *prop = match->prop;
+	int l = 0;
+	int r = match->count - 1;
+	while (l <= r)
+	{
+		int m = (l + r) >> 1;
+		int c = strcmp(name, prop[m].name);
+		if (c < 0)
+			r = m - 1;
+		else if (c > 0)
+			l = m + 1;
+		else
+			return prop[m].value;
+	}
 	return NULL;
 }
 
@@ -642,7 +801,8 @@ value_from_property(fz_css_match *match, const char *name)
 	if (match->up)
 	{
 		if (value && !strcmp(value->data, "inherit"))
-			return value_from_property(match->up, name);
+			if (strcmp(name, "font-size") != 0) /* never inherit 'font-size' textually */
+				return value_from_property(match->up, name);
 		if (!value && keyword_in_list(name, inherit_list, nelem(inherit_list)))
 			return value_from_property(match->up, name);
 	}
@@ -668,6 +828,45 @@ make_number(float v, int u)
 	return n;
 }
 
+/* Fast but inaccurate strtof. */
+static float
+fz_css_strtof(char *s, char **endptr)
+{
+	float sign = 1;
+	float v = 0;
+	float n = 0;
+	float d = 1;
+
+	if (*s == '-')
+	{
+		sign = -1;
+		++s;
+	}
+
+	while (*s >= '0' && *s <= '9')
+	{
+		v = v * 10 + (*s - '0');
+		++s;
+	}
+
+	if (*s == '.')
+	{
+		++s;
+		while (*s >= '0' && *s <= '9')
+		{
+			n = n * 10 + (*s - '0');
+			d = d * 10;
+			++s;
+		}
+		v += n / d;
+	}
+
+	if (endptr)
+		*endptr = s;
+
+	return sign * v;
+}
+
 static fz_css_number
 number_from_value(fz_css_value *value, float initial, int initial_unit)
 {
@@ -677,14 +876,14 @@ number_from_value(fz_css_value *value, float initial, int initial_unit)
 		return make_number(initial, initial_unit);
 
 	if (value->type == CSS_PERCENT)
-		return make_number((float)fz_strtod(value->data, NULL), N_PERCENT);
+		return make_number(fz_css_strtof(value->data, NULL), N_PERCENT);
 
 	if (value->type == CSS_NUMBER)
-		return make_number((float)fz_strtod(value->data, NULL), N_NUMBER);
+		return make_number(fz_css_strtof(value->data, NULL), N_NUMBER);
 
 	if (value->type == CSS_LENGTH)
 	{
-		float x = (float)fz_strtod(value->data, &p);
+		float x = fz_css_strtof(value->data, &p);
 
 		if (p[0] == 'e' && p[1] == 'm')
 			return make_number(x, N_SCALE);
@@ -692,20 +891,20 @@ number_from_value(fz_css_value *value, float initial, int initial_unit)
 			return make_number(x / 2, N_SCALE);
 
 		if (p[0] == 'i' && p[1] == 'n')
-			return make_number(x * 72, N_NUMBER);
+			return make_number(x * 72, N_LENGTH);
 		if (p[0] == 'c' && p[1] == 'm')
-			return make_number(x * 7200 / 254, N_NUMBER);
+			return make_number(x * 7200 / 254, N_LENGTH);
 		if (p[0] == 'm' && p[1] == 'm')
-			return make_number(x * 720 / 254, N_NUMBER);
+			return make_number(x * 720 / 254, N_LENGTH);
 		if (p[0] == 'p' && p[1] == 'c')
-			return make_number(x * 12, N_NUMBER);
+			return make_number(x * 12, N_LENGTH);
 
 		if (p[0] == 'p' && p[1] == 't')
-			return make_number(x, N_NUMBER);
+			return make_number(x, N_LENGTH);
 		if (p[0] == 'p' && p[1] == 'x')
-			return make_number(x, N_NUMBER);
+			return make_number(x, N_LENGTH);
 
-		return make_number(x, N_NUMBER);
+		return make_number(x, N_LENGTH);
 	}
 
 	if (value->type == CSS_KEYWORD)
@@ -730,14 +929,14 @@ border_width_from_property(fz_css_match *match, const char *property)
 	if (value)
 	{
 		if (!strcmp(value->data, "thin"))
-			return make_number(1, N_NUMBER);
+			return make_number(1, N_LENGTH);
 		if (!strcmp(value->data, "medium"))
-			return make_number(2, N_NUMBER);
+			return make_number(2, N_LENGTH);
 		if (!strcmp(value->data, "thick"))
-			return make_number(4, N_NUMBER);
-		return number_from_value(value, 0, N_NUMBER);
+			return make_number(4, N_LENGTH);
+		return number_from_value(value, 0, N_LENGTH);
 	}
-	return make_number(2, N_NUMBER); /* initial: 'medium' */
+	return make_number(2, N_LENGTH); /* initial: 'medium' */
 }
 
 static int
@@ -759,6 +958,7 @@ fz_from_css_number(fz_css_number number, float em, float width)
 	switch (number.unit) {
 	default:
 	case N_NUMBER: return number.value;
+	case N_LENGTH: return number.value;
 	case N_SCALE: return number.value * em;
 	case N_PERCENT: return number.value * 0.01 * width;
 	case N_AUTO: return width;
@@ -771,6 +971,7 @@ fz_from_css_number_scale(fz_css_number number, float scale, float em, float widt
 	switch (number.unit) {
 	default:
 	case N_NUMBER: return number.value * scale;
+	case N_LENGTH: return number.value;
 	case N_SCALE: return number.value * em;
 	case N_PERCENT: return number.value * 0.01 * width;
 	case N_AUTO: return width;
@@ -921,10 +1122,24 @@ white_space_from_property(fz_css_match *match)
 	return WS_NORMAL;
 }
 
+static int
+visibility_from_property(fz_css_match *match)
+{
+	fz_css_value *value = value_from_property(match, "visibility");
+	if (value)
+	{
+		if (!strcmp(value->data, "visible")) return V_VISIBLE;
+		else if (!strcmp(value->data, "hidden")) return V_HIDDEN;
+		else if (!strcmp(value->data, "collapse")) return V_COLLAPSE;
+	}
+	return V_VISIBLE;
+}
+
 void
 fz_default_css_style(fz_context *ctx, fz_css_style *style)
 {
 	memset(style, 0, sizeof *style);
+	style->visibility = V_VISIBLE;
 	style->text_align = TA_LEFT;
 	style->vertical_align = VA_BASELINE;
 	style->white_space = WS_NORMAL;
@@ -944,6 +1159,7 @@ fz_apply_css_style(fz_context *ctx, fz_html_font_set *set, fz_css_style *style, 
 
 	fz_default_css_style(ctx, style);
 
+	style->visibility = visibility_from_property(match);
 	style->white_space = white_space_from_property(match);
 
 	value = value_from_property(match, "text-align");
@@ -963,6 +1179,8 @@ fz_apply_css_style(fz_context *ctx, fz_html_font_set *set, fz_css_style *style, 
 		else if (!strcmp(value->data, "super")) style->vertical_align = VA_SUPER;
 		else if (!strcmp(value->data, "top")) style->vertical_align = VA_TOP;
 		else if (!strcmp(value->data, "bottom")) style->vertical_align = VA_BOTTOM;
+		else if (!strcmp(value->data, "text-top")) style->vertical_align = VA_TEXT_TOP;
+		else if (!strcmp(value->data, "text-bottom")) style->vertical_align = VA_TEXT_BOTTOM;
 	}
 
 	value = value_from_property(match, "font-size");
@@ -977,7 +1195,7 @@ fz_apply_css_style(fz_context *ctx, fz_html_font_set *set, fz_css_style *style, 
 		else if (!strcmp(value->data, "xx-small")) style->font_size = make_number(0.69f, N_SCALE);
 		else if (!strcmp(value->data, "larger")) style->font_size = make_number(1.2f, N_SCALE);
 		else if (!strcmp(value->data, "smaller")) style->font_size = make_number(1/1.2f, N_SCALE);
-		else style->font_size = number_from_value(value, 12, N_NUMBER);
+		else style->font_size = number_from_value(value, 12, N_LENGTH);
 	}
 	else
 	{
@@ -1007,20 +1225,20 @@ fz_apply_css_style(fz_context *ctx, fz_html_font_set *set, fz_css_style *style, 
 
 	style->line_height = number_from_property(match, "line-height", 1.2f, N_SCALE);
 
-	style->text_indent = number_from_property(match, "text-indent", 0, N_NUMBER);
+	style->text_indent = number_from_property(match, "text-indent", 0, N_LENGTH);
 
 	style->width = number_from_property(match, "width", 0, N_AUTO);
 	style->height = number_from_property(match, "height", 0, N_AUTO);
 
-	style->margin[0] = number_from_property(match, "margin-top", 0, N_NUMBER);
-	style->margin[1] = number_from_property(match, "margin-right", 0, N_NUMBER);
-	style->margin[2] = number_from_property(match, "margin-bottom", 0, N_NUMBER);
-	style->margin[3] = number_from_property(match, "margin-left", 0, N_NUMBER);
+	style->margin[0] = number_from_property(match, "margin-top", 0, N_LENGTH);
+	style->margin[1] = number_from_property(match, "margin-right", 0, N_LENGTH);
+	style->margin[2] = number_from_property(match, "margin-bottom", 0, N_LENGTH);
+	style->margin[3] = number_from_property(match, "margin-left", 0, N_LENGTH);
 
-	style->padding[0] = number_from_property(match, "padding-top", 0, N_NUMBER);
-	style->padding[1] = number_from_property(match, "padding-right", 0, N_NUMBER);
-	style->padding[2] = number_from_property(match, "padding-bottom", 0, N_NUMBER);
-	style->padding[3] = number_from_property(match, "padding-left", 0, N_NUMBER);
+	style->padding[0] = number_from_property(match, "padding-top", 0, N_LENGTH);
+	style->padding[1] = number_from_property(match, "padding-right", 0, N_LENGTH);
+	style->padding[2] = number_from_property(match, "padding-bottom", 0, N_LENGTH);
+	style->padding[3] = number_from_property(match, "padding-left", 0, N_LENGTH);
 
 	style->color = color_from_property(match, "color", black);
 	style->background_color = color_from_property(match, "background-color", transparent);
@@ -1041,11 +1259,23 @@ fz_apply_css_style(fz_context *ctx, fz_html_font_set *set, fz_css_style *style, 
 	style->border_width[3] = border_width_from_property(match, "border-left-width");
 
 	{
-		const char *font_family = string_from_property(match, "font-family", "serif");
-		const char *font_variant = string_from_property(match, "font-variant", "normal");
-		const char *font_style = string_from_property(match, "font-style", "normal");
 		const char *font_weight = string_from_property(match, "font-weight", "normal");
-		style->font = fz_load_html_font(ctx, set, font_family, font_variant, font_style, font_weight);
+		const char *font_style = string_from_property(match, "font-style", "normal");
+		int is_bold = is_bold_from_font_weight(font_weight);
+		int is_italic = is_italic_from_font_style(font_style);
+		value = value_from_property(match, "font-family");
+		while (value)
+		{
+			if (strcmp(value->data, ",") != 0)
+			{
+				style->font = fz_load_html_font(ctx, set, value->data, is_bold, is_italic);
+				if (style->font)
+					break;
+			}
+			value = value->next;
+		}
+		if (!style->font)
+			style->font = fz_load_html_font(ctx, set, "serif", is_bold, is_italic);
 	}
 }
 
@@ -1075,7 +1305,9 @@ print_property(fz_css_property *prop)
 {
 	printf("\t%s: ", prop->name);
 	print_value(prop->value);
-	printf(" !%d;\n", prop->spec);
+	if (prop->important)
+		printf(" !important");
+	printf(";\n");
 }
 
 void
@@ -1124,7 +1356,7 @@ print_rule(fz_css_rule *rule)
 	for (sel = rule->selector; sel; sel = sel->next)
 	{
 		print_selector(sel);
-		printf(" !%d", selector_specificity(sel));
+		printf(" /* %d */", selector_specificity(sel, 0));
 		if (sel->next)
 			printf(", ");
 	}

@@ -41,6 +41,7 @@ enum
 	 * undefined, but that causes problems; do we assume that it should
 	 * always be set to non-dashing at the start of every glyph? */
 	FZ_DEVFLAG_BBOX_DEFINED = 2048,
+	FZ_DEVFLAG_GRIDFIT_AS_TILED = 4096,
 };
 
 enum
@@ -102,34 +103,33 @@ struct fz_device_s
 
 	void (*drop_imp)(fz_context *, fz_device *);
 
-	void (*begin_page)(fz_context *, fz_device *, const fz_rect *rect, const fz_matrix *ctm);
-	void (*end_page)(fz_context *, fz_device *);
+	void (*fill_path)(fz_context *, fz_device *, const fz_path *, int even_odd, const fz_matrix *, fz_colorspace *, const float *color, float alpha);
+	void (*stroke_path)(fz_context *, fz_device *, const fz_path *, const fz_stroke_state *, const fz_matrix *, fz_colorspace *, const float *color, float alpha);
+	void (*clip_path)(fz_context *, fz_device *, const fz_path *, int even_odd, const fz_matrix *, const fz_rect *scissor);
+	void (*clip_stroke_path)(fz_context *, fz_device *, const fz_path *, const fz_stroke_state *, const fz_matrix *, const fz_rect *scissor);
 
-	void (*fill_path)(fz_context *, fz_device *, fz_path *, int even_odd, const fz_matrix *, fz_colorspace *, float *color, float alpha);
-	void (*stroke_path)(fz_context *, fz_device *, fz_path *, fz_stroke_state *, const fz_matrix *, fz_colorspace *, float *color, float alpha);
-	void (*clip_path)(fz_context *, fz_device *, fz_path *, const fz_rect *rect, int even_odd, const fz_matrix *);
-	void (*clip_stroke_path)(fz_context *, fz_device *, fz_path *, const fz_rect *rect, fz_stroke_state *, const fz_matrix *);
-
-	void (*fill_text)(fz_context *, fz_device *, fz_text *, const fz_matrix *, fz_colorspace *, float *color, float alpha);
-	void (*stroke_text)(fz_context *, fz_device *, fz_text *, fz_stroke_state *, const fz_matrix *, fz_colorspace *, float *color, float alpha);
-	void (*clip_text)(fz_context *, fz_device *, fz_text *, const fz_matrix *, int accumulate);
-	void (*clip_stroke_text)(fz_context *, fz_device *, fz_text *, fz_stroke_state *, const fz_matrix *);
-	void (*ignore_text)(fz_context *, fz_device *, fz_text *, const fz_matrix *);
+	void (*fill_text)(fz_context *, fz_device *, const fz_text *, const fz_matrix *, fz_colorspace *, const float *color, float alpha);
+	void (*stroke_text)(fz_context *, fz_device *, const fz_text *, const fz_stroke_state *, const fz_matrix *, fz_colorspace *, const float *color, float alpha);
+	void (*clip_text)(fz_context *, fz_device *, const fz_text *, const fz_matrix *, const fz_rect *scissor);
+	void (*clip_stroke_text)(fz_context *, fz_device *, const fz_text *, const fz_stroke_state *, const fz_matrix *, const fz_rect *scissor);
+	void (*ignore_text)(fz_context *, fz_device *, const fz_text *, const fz_matrix *);
 
 	void (*fill_shade)(fz_context *, fz_device *, fz_shade *shd, const fz_matrix *ctm, float alpha);
 	void (*fill_image)(fz_context *, fz_device *, fz_image *img, const fz_matrix *ctm, float alpha);
-	void (*fill_image_mask)(fz_context *, fz_device *, fz_image *img, const fz_matrix *ctm, fz_colorspace *, float *color, float alpha);
-	void (*clip_image_mask)(fz_context *, fz_device *, fz_image *img, const fz_rect *rect, const fz_matrix *ctm);
+	void (*fill_image_mask)(fz_context *, fz_device *, fz_image *img, const fz_matrix *ctm, fz_colorspace *, const float *color, float alpha);
+	void (*clip_image_mask)(fz_context *, fz_device *, fz_image *img, const fz_matrix *ctm, const fz_rect *scissor);
 
 	void (*pop_clip)(fz_context *, fz_device *);
 
-	void (*begin_mask)(fz_context *, fz_device *, const fz_rect *, int luminosity, fz_colorspace *, float *bc);
+	void (*begin_mask)(fz_context *, fz_device *, const fz_rect *, int luminosity, fz_colorspace *, const float *bc);
 	void (*end_mask)(fz_context *, fz_device *);
 	void (*begin_group)(fz_context *, fz_device *, const fz_rect *, int isolated, int knockout, int blendmode, float alpha);
 	void (*end_group)(fz_context *, fz_device *);
 
 	int (*begin_tile)(fz_context *, fz_device *, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *ctm, int id);
 	void (*end_tile)(fz_context *, fz_device *);
+
+	void (*render_flags)(fz_context *, fz_device *, int set, int clear);
 
 	fz_rect d1_rect;
 
@@ -139,32 +139,30 @@ struct fz_device_s
 	int container_len;
 	int container_cap;
 	fz_device_container_stack *container;
-	fz_rect scissor_accumulator;
 };
 
-void fz_begin_page(fz_context *ctx, fz_device *dev, const fz_rect *rect, const fz_matrix *ctm);
-void fz_end_page(fz_context *ctx, fz_device *dev);
-void fz_fill_path(fz_context *ctx, fz_device *dev, fz_path *path, int even_odd, const fz_matrix *ctm, fz_colorspace *colorspace, float *color, float alpha);
-void fz_stroke_path(fz_context *ctx, fz_device *dev, fz_path *path, fz_stroke_state *stroke, const fz_matrix *ctm, fz_colorspace *colorspace, float *color, float alpha);
-void fz_clip_path(fz_context *ctx, fz_device *dev, fz_path *path, const fz_rect *rect, int even_odd, const fz_matrix *ctm);
-void fz_clip_stroke_path(fz_context *ctx, fz_device *dev, fz_path *path, const fz_rect *rect, fz_stroke_state *stroke, const fz_matrix *ctm);
-void fz_fill_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matrix *ctm, fz_colorspace *colorspace, float *color, float alpha);
-void fz_stroke_text(fz_context *ctx, fz_device *dev, fz_text *text, fz_stroke_state *stroke, const fz_matrix *ctm, fz_colorspace *colorspace, float *color, float alpha);
-void fz_clip_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matrix *ctm, int accumulate);
-void fz_clip_stroke_text(fz_context *ctx, fz_device *dev, fz_text *text, fz_stroke_state *stroke, const fz_matrix *ctm);
-void fz_ignore_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matrix *ctm);
+void fz_fill_path(fz_context *ctx, fz_device *dev, const fz_path *path, int even_odd, const fz_matrix *ctm, fz_colorspace *colorspace, const float *color, float alpha);
+void fz_stroke_path(fz_context *ctx, fz_device *dev, const fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, fz_colorspace *colorspace, const float *color, float alpha);
+void fz_clip_path(fz_context *ctx, fz_device *dev, const fz_path *path, int even_odd, const fz_matrix *ctm, const fz_rect *scissor);
+void fz_clip_stroke_path(fz_context *ctx, fz_device *dev, const fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, const fz_rect *scissor);
+void fz_fill_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_matrix *ctm, fz_colorspace *colorspace, const float *color, float alpha);
+void fz_stroke_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_stroke_state *stroke, const fz_matrix *ctm, fz_colorspace *colorspace, const float *color, float alpha);
+void fz_clip_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_matrix *ctm, const fz_rect *scissor);
+void fz_clip_stroke_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_stroke_state *stroke, const fz_matrix *ctm, const fz_rect *scissor);
+void fz_ignore_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_matrix *ctm);
 void fz_pop_clip(fz_context *ctx, fz_device *dev);
 void fz_fill_shade(fz_context *ctx, fz_device *dev, fz_shade *shade, const fz_matrix *ctm, float alpha);
 void fz_fill_image(fz_context *ctx, fz_device *dev, fz_image *image, const fz_matrix *ctm, float alpha);
-void fz_fill_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, const fz_matrix *ctm, fz_colorspace *colorspace, float *color, float alpha);
-void fz_clip_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, const fz_rect *rect, const fz_matrix *ctm);
-void fz_begin_mask(fz_context *ctx, fz_device *dev, const fz_rect *area, int luminosity, fz_colorspace *colorspace, float *bc);
+void fz_fill_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, const fz_matrix *ctm, fz_colorspace *colorspace, const float *color, float alpha);
+void fz_clip_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, const fz_matrix *ctm, const fz_rect *scissor);
+void fz_begin_mask(fz_context *ctx, fz_device *dev, const fz_rect *area, int luminosity, fz_colorspace *colorspace, const float *bc);
 void fz_end_mask(fz_context *ctx, fz_device *dev);
 void fz_begin_group(fz_context *ctx, fz_device *dev, const fz_rect *area, int isolated, int knockout, int blendmode, float alpha);
 void fz_end_group(fz_context *ctx, fz_device *dev);
 void fz_begin_tile(fz_context *ctx, fz_device *dev, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *ctm);
 int fz_begin_tile_id(fz_context *ctx, fz_device *dev, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *ctm, int id);
 void fz_end_tile(fz_context *ctx, fz_device *dev);
+void fz_render_flags(fz_context *ctx, fz_device *dev, int set, int clear);
 
 void *fz_new_device(fz_context *ctx, int size);
 
@@ -270,10 +268,9 @@ struct fz_cookie_s
 };
 
 /*
-	fz_new_trace_device: Create a device to print a debug trace of
-	all device calls.
+	fz_new_trace_device: Create a device to print a debug trace of all device calls.
 */
-fz_device *fz_new_trace_device(fz_context *ctx);
+fz_device *fz_new_trace_device(fz_context *ctx, fz_output *out);
 
 /*
 	fz_new_bbox_device: Create a device to compute the bounding

@@ -6,6 +6,11 @@
 #include "mupdf/fitz/buffer.h"
 
 /*
+	fz_file_exists: Return true if the named file exists and is readable.
+*/
+int fz_file_exists(fz_context *ctx, const char *path);
+
+/*
 	fz_stream is a buffered reader capable of seeking in both
 	directions.
 
@@ -20,7 +25,7 @@ typedef struct fz_stream_s fz_stream;
 	fz_open_file: Open the named file and wrap it in a stream.
 
 	filename: Path to a file. On non-Windows machines the filename should
-	be exactly as it would be passed to open(2). On Windows machines, the
+	be exactly as it would be passed to fopen(2). On Windows machines, the
 	path should be UTF-8 encoded so that non-ASCII characters can be
 	represented. Other platforms do the encoding as standard anyway (and
 	in most cases, particularly for MacOS and Linux, the encoding they
@@ -28,7 +33,7 @@ typedef struct fz_stream_s fz_stream;
 */
 fz_stream *fz_open_file(fz_context *ctx, const char *filename);
 
-fz_stream *fz_open_fd_progressive(fz_context *ctx, int fd, int bps);
+fz_stream *fz_open_file_ptr_progressive(fz_context *ctx, FILE *file, int bps);
 fz_stream *fz_open_file_progressive(fz_context *ctx, const char *filename, int bps);
 
 /*
@@ -37,20 +42,20 @@ fz_stream *fz_open_file_progressive(fz_context *ctx, const char *filename, int b
 	This function is only available when compiling for Win32.
 
 	filename: Wide character path to the file as it would be given
-	to _wopen().
+	to _wfopen().
 */
 fz_stream *fz_open_file_w(fz_context *ctx, const wchar_t *filename);
 
 /*
-	fz_open_fd: Wrap an open file descriptor in a stream.
+	fz_open_file: Wrap an open file descriptor in a stream.
 
 	file: An open file descriptor supporting bidirectional
 	seeking. The stream will take ownership of the file
 	descriptor, so it may not be modified or closed after the call
-	to fz_open_fd. When the stream is closed it will also close
+	to fz_open_file_ptr. When the stream is closed it will also close
 	the file descriptor.
 */
-fz_stream *fz_open_fd(fz_context *ctx, int file);
+fz_stream *fz_open_file_ptr(fz_context *ctx, FILE *file);
 
 /*
 	fz_open_memory: Open a block of memory as a stream.
@@ -104,7 +109,7 @@ void fz_drop_stream(fz_context *ctx, fz_stream *stm);
 /*
 	fz_tell: return the current reading position within a stream
 */
-int fz_tell(fz_context *ctx, fz_stream *stm);
+fz_off_t fz_tell(fz_context *ctx, fz_stream *stm);
 
 /*
 	fz_seek: Seek within a stream.
@@ -115,7 +120,7 @@ int fz_tell(fz_context *ctx, fz_stream *stm);
 
 	whence: From where the offset is measured (see fseek).
 */
-void fz_seek(fz_context *ctx, fz_stream *stm, int offset, int whence);
+void fz_seek(fz_context *ctx, fz_stream *stm, fz_off_t offset, int whence);
 
 /*
 	fz_read: Read from a stream into a given data block.
@@ -147,6 +152,40 @@ fz_buffer *fz_read_all(fz_context *ctx, fz_stream *stm, int initial);
 */
 fz_buffer *fz_read_file(fz_context *ctx, const char *filename);
 
+/*
+	fz_read_[u]int(16|24|32|64)(_le)?
+
+	Read a 16/32/64 bit signed/unsigned integer from stream,
+	in big or little-endian byte orders.
+
+	Throws an exception if EOF is encountered.
+*/
+uint16_t fz_read_uint16(fz_context *ctx, fz_stream *stm);
+uint32_t fz_read_uint24(fz_context *ctx, fz_stream *stm);
+uint32_t fz_read_uint32(fz_context *ctx, fz_stream *stm);
+uint64_t fz_read_uint64(fz_context *ctx, fz_stream *stm);
+
+uint16_t fz_read_uint16_le(fz_context *ctx, fz_stream *stm);
+uint32_t fz_read_uint24_le(fz_context *ctx, fz_stream *stm);
+uint32_t fz_read_uint32_le(fz_context *ctx, fz_stream *stm);
+uint64_t fz_read_uint64_le(fz_context *ctx, fz_stream *stm);
+
+int16_t fz_read_int16(fz_context *ctx, fz_stream *stm);
+int32_t fz_read_int32(fz_context *ctx, fz_stream *stm);
+int64_t fz_read_int64(fz_context *ctx, fz_stream *stm);
+
+int16_t fz_read_int16_le(fz_context *ctx, fz_stream *stm);
+int32_t fz_read_int32_le(fz_context *ctx, fz_stream *stm);
+int64_t fz_read_int64_le(fz_context *ctx, fz_stream *stm);
+
+/*
+	fz_read_string: Read a null terminated string from the stream into
+	the a buffer of a given length. The buffer will be null terminated.
+	Throws on failure (including the failure to fit the entire string
+	including the terminator into the buffer).
+*/
+void fz_read_string(fz_context *ctx, fz_stream *stm, char *buffer, int len);
+
 enum
 {
 	FZ_STREAM_META_PROGRESSIVE = 1,
@@ -157,7 +196,7 @@ int fz_stream_meta(fz_context *ctx, fz_stream *stm, int key, int size, void *ptr
 
 typedef int (fz_stream_next_fn)(fz_context *ctx, fz_stream *stm, int max);
 typedef void (fz_stream_close_fn)(fz_context *ctx, void *state);
-typedef void (fz_stream_seek_fn)(fz_context *ctx, fz_stream *stm, int offset, int whence);
+typedef void (fz_stream_seek_fn)(fz_context *ctx, fz_stream *stm, fz_off_t offset, int whence);
 typedef int (fz_stream_meta_fn)(fz_context *ctx, fz_stream *stm, int key, int size, void *ptr);
 
 struct fz_stream_s
@@ -165,7 +204,7 @@ struct fz_stream_s
 	int refs;
 	int error;
 	int eof;
-	int pos;
+	fz_off_t pos;
 	int avail;
 	int bits;
 	unsigned char *rp, *wp;
@@ -195,7 +234,14 @@ fz_stream *fz_keep_stream(fz_context *ctx, fz_stream *stm);
 */
 fz_buffer *fz_read_best(fz_context *ctx, fz_stream *stm, int initial, int *truncated);
 
-void fz_read_line(fz_context *ctx, fz_stream *stm, char *buf, int max);
+/*
+	fz_read_line: Read a line from stream into the buffer until either a
+	terminating newline or EOF, which it replaces with a null byte ('\0').
+
+	Returns buf on success, and NULL when end of file occurs while no characters
+	have been read.
+*/
+char *fz_read_line(fz_context *ctx, fz_stream *stm, char *buf, int max);
 
 /*
 	fz_available: Ask how many bytes are available immediately from
@@ -274,7 +320,7 @@ static inline int fz_peek_byte(fz_context *ctx, fz_stream *stm)
 	return c;
 }
 
-static inline void fz_unread_byte(fz_context *ctx, fz_stream *stm)
+static inline void fz_unread_byte(fz_context *ctx FZ_UNUSED, fz_stream *stm)
 {
 	stm->rp--;
 }
@@ -322,7 +368,47 @@ static inline unsigned int fz_read_bits(fz_context *ctx, fz_stream *stm, int n)
 	return x;
 }
 
-static inline void fz_sync_bits(fz_context *ctx, fz_stream *stm)
+static inline unsigned int fz_read_rbits(fz_context *ctx, fz_stream *stm, int n)
+{
+	unsigned int x;
+
+	if (n <= stm->avail)
+	{
+		x = stm->bits & ((1 << n) - 1);
+		stm->avail -= n;
+		stm->bits = stm->bits >> n;
+
+	}
+	else
+	{
+		unsigned int used = 0;
+
+		x = stm->bits & ((1 << stm->avail) - 1);
+		n -= stm->avail;
+		used = stm->avail;
+		stm->avail = 0;
+
+		while (n > 8)
+		{
+
+			x = (fz_read_byte(ctx, stm) << used) | x;
+			n -= 8;
+			used += 8;
+		}
+
+		if (n > 0)
+		{
+			stm->bits = fz_read_byte(ctx, stm);
+			x = ((stm->bits & ((1 << n) - 1)) << used) | x;
+			stm->avail = 8 - n;
+			stm->bits = stm->bits >> n;
+		}
+	}
+
+	return x;
+}
+
+static inline void fz_sync_bits(fz_context *ctx FZ_UNUSED, fz_stream *stm)
 {
 	stm->avail = 0;
 }

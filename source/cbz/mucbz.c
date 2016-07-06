@@ -6,8 +6,8 @@ typedef struct cbz_document_s cbz_document;
 typedef struct cbz_page_s cbz_page;
 
 static const char *cbz_ext_list[] = {
-	".jpg", ".jpeg", ".png",
-	".JPG", ".JPEG", ".PNG",
+	".jpg", ".jpeg", ".png", ".gif", ".bmp",
+	".JPG", ".JPEG", ".PNG", ".GIF", ".BMP",
 	NULL
 };
 
@@ -120,7 +120,7 @@ cbz_bound_page(fz_context *ctx, cbz_page *page, fz_rect *bbox)
 	fz_image *image = page->image;
 	int xres, yres;
 
-	fz_image_get_sanitised_res(image, &xres, &yres);
+	fz_image_resolution(image, &xres, &yres);
 	bbox->x0 = bbox->y0 = 0;
 	bbox->x1 = image->w * DPI / xres;
 	bbox->y1 = image->h * DPI / yres;
@@ -135,7 +135,7 @@ cbz_run_page(fz_context *ctx, cbz_page *page, fz_device *dev, const fz_matrix *c
 	int xres, yres;
 	float w, h;
 
-	fz_image_get_sanitised_res(image, &xres, &yres);
+	fz_image_resolution(image, &xres, &yres);
 	w = image->w * DPI / xres;
 	h = image->h * DPI / yres;
 	fz_pre_scale(&local_ctm, w, h);

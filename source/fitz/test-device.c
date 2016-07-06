@@ -56,32 +56,32 @@ fz_test_color(fz_context *ctx, fz_device *dev, fz_colorspace *colorspace, const 
 }
 
 static void
-fz_test_fill_path(fz_context *ctx, fz_device *dev, fz_path *path, int even_odd, const fz_matrix *ctm,
-	fz_colorspace *colorspace, float *color, float alpha)
+fz_test_fill_path(fz_context *ctx, fz_device *dev, const fz_path *path, int even_odd, const fz_matrix *ctm,
+	fz_colorspace *colorspace, const float *color, float alpha)
 {
 	if (alpha != 0.0f)
 		fz_test_color(ctx, dev, colorspace, color);
 }
 
 static void
-fz_test_stroke_path(fz_context *ctx, fz_device *dev, fz_path *path, fz_stroke_state *stroke,
-	const fz_matrix *ctm, fz_colorspace *colorspace, float *color, float alpha)
+fz_test_stroke_path(fz_context *ctx, fz_device *dev, const fz_path *path, const fz_stroke_state *stroke,
+	const fz_matrix *ctm, fz_colorspace *colorspace, const float *color, float alpha)
 {
 	if (alpha != 0.0f)
 		fz_test_color(ctx, dev, colorspace, color);
 }
 
 static void
-fz_test_fill_text(fz_context *ctx, fz_device *dev, fz_text *text, const fz_matrix *ctm,
-	fz_colorspace *colorspace, float *color, float alpha)
+fz_test_fill_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_matrix *ctm,
+	fz_colorspace *colorspace, const float *color, float alpha)
 {
 	if (alpha != 0.0f)
 		fz_test_color(ctx, dev, colorspace, color);
 }
 
 static void
-fz_test_stroke_text(fz_context *ctx, fz_device *dev, fz_text *text, fz_stroke_state *stroke,
-	const fz_matrix *ctm, fz_colorspace *colorspace, float *color, float alpha)
+fz_test_stroke_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_stroke_state *stroke,
+	const fz_matrix *ctm, fz_colorspace *colorspace, const float *color, float alpha)
 {
 	if (alpha != 0.0f)
 		fz_test_color(ctx, dev, colorspace, color);
@@ -184,7 +184,7 @@ fz_test_fill_image(fz_context *ctx, fz_device *dev, fz_image *image, const fz_ma
 		return;
 	}
 
-	pix = fz_new_pixmap_from_image(ctx, image, 0, 0);
+	pix = fz_get_pixmap_from_image(ctx, image, 0, 0);
 	if (pix == NULL) /* Should never happen really, but... */
 		return;
 
@@ -242,7 +242,7 @@ fz_test_fill_image(fz_context *ctx, fz_device *dev, fz_image *image, const fz_ma
 
 static void
 fz_test_fill_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, const fz_matrix *ctm,
-	fz_colorspace *colorspace, float *color, float alpha)
+	fz_colorspace *colorspace, const float *color, float alpha)
 {
 	/* We assume that at least some of the image pixels are non-zero */
 	fz_test_color(ctx, dev, colorspace, color);

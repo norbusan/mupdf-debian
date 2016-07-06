@@ -178,7 +178,7 @@ pdfpages_pages(fz_context *ctx, fz_output *out, char *filename, char *password, 
 				showpages(ctx, doc, out, "1-");
 			}
 
-			pdf_close_document(ctx, doc);
+			pdf_drop_document(ctx, doc);
 
 			filename = argv[argidx];
 			fz_printf(ctx, out, "%s:\n", filename);
@@ -201,7 +201,7 @@ pdfpages_pages(fz_context *ctx, fz_output *out, char *filename, char *password, 
 	if (state == NO_INFO_GATHERED)
 		showpages(ctx, doc, out, "1-");
 
-	pdf_close_document(ctx, doc);
+	pdf_drop_document(ctx, doc);
 
 	return ret;
 }
@@ -241,7 +241,7 @@ int pdfpages_main(int argc, char **argv)
 	ret = 0;
 	fz_try(ctx)
 	{
-		out = fz_new_output_with_file(ctx, stdout, 0);
+		out = fz_new_output_with_file_ptr(ctx, stdout, 0);
 		ret = pdfpages_pages(ctx, out, filename, password, &argv[fz_optind], argc-fz_optind);
 	}
 	fz_catch(ctx)

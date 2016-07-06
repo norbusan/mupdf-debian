@@ -35,7 +35,7 @@ img_bound_page(fz_context *ctx, img_page *page, fz_rect *bbox)
 {
 	fz_image *image = page->image;
 	int xres, yres;
-	fz_image_get_sanitised_res(image, &xres, &yres);
+	fz_image_resolution(image, &xres, &yres);
 	bbox->x0 = bbox->y0 = 0;
 	bbox->x1 = image->w * DPI / xres;
 	bbox->y1 = image->h * DPI / yres;
@@ -49,7 +49,7 @@ img_run_page(fz_context *ctx, img_page *page, fz_device *dev, const fz_matrix *c
 	fz_image *image = page->image;
 	int xres, yres;
 	float w, h;
-	fz_image_get_sanitised_res(image, &xres, &yres);
+	fz_image_resolution(image, &xres, &yres);
 	w = image->w * DPI / xres;
 	h = image->h * DPI / yres;
 	fz_pre_scale(&local_ctm, w, h);
@@ -158,13 +158,16 @@ img_recognize(fz_context *doc, const char *magic)
 	{
 		if (!fz_strcasecmp(ext, ".png") || !fz_strcasecmp(ext, ".jpg") ||
 			!fz_strcasecmp(ext, ".jpeg") || !fz_strcasecmp(ext, ".jfif") ||
-			!fz_strcasecmp(ext, ".jfif-tbnl") || !fz_strcasecmp(ext, ".jpe"))
+			!fz_strcasecmp(ext, ".jfif-tbnl") || !fz_strcasecmp(ext, ".jpe") ||
+			!fz_strcasecmp(ext, ".gif") || !fz_strcasecmp(ext, ".bmp"))
 			return 100;
 	}
 	if (!strcmp(magic, "png") || !strcmp(magic, "image/png") ||
 		!strcmp(magic, "jpg") || !strcmp(magic, "image/jpeg") ||
 		!strcmp(magic, "jpeg") || !strcmp(magic, "image/pjpeg") ||
-		!strcmp(magic, "jpe") || !strcmp(magic, "jfif"))
+		!strcmp(magic, "jpe") || !strcmp(magic, "jfif") ||
+		!strcmp(magic, "gif") || !strcmp(magic, "image/gif") ||
+		!strcmp(magic, "bmp") || !strcmp(magic, "image/bmp"))
 		return 100;
 
 	return 0;

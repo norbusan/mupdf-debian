@@ -119,6 +119,25 @@ static const char *require_js =
 	"require.cache = Object.create(null);\n"
 ;
 
+int eval_print(js_State *J, const char *source)
+{
+	if (js_ploadstring(J, "[string]", source)) {
+		fprintf(stderr, "%s\n", js_tostring(J, -1));
+		js_pop(J, 1);
+		return 1;
+	}
+	js_pushglobal(J);
+	if (js_pcall(J, 0)) {
+		fprintf(stderr, "%s\n", js_tostring(J, -1));
+		js_pop(J, 1);
+		return 1;
+	}
+	if (js_isdefined(J, -1))
+		printf("%s\n", js_tostring(J, -1));
+	js_pop(J, 1);
+	return 0;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -134,7 +153,7 @@ main(int argc, char **argv)
 	js_newcfunction(J, jsB_load, "load", 1);
 	js_setglobal(J, "load");
 
-	js_newcfunction(J, jsB_print, "print", 1);
+	js_newcfunction(J, jsB_print, "print", 0);
 	js_setglobal(J, "print");
 
 	js_newcfunction(J, jsB_write, "write", 0);
@@ -149,7 +168,7 @@ main(int argc, char **argv)
 	js_newcfunction(J, jsB_quit, "quit", 1);
 	js_setglobal(J, "quit");
 
-	js_dostring(J, require_js, 0);
+	js_dostring(J, require_js);
 
 	if (argc > 1) {
 		for (i = 1; i < argc; ++i) {
@@ -160,7 +179,7 @@ main(int argc, char **argv)
 	} else {
 		fputs(PS1, stdout);
 		while (fgets(line, sizeof line, stdin)) {
-			js_dostring(J, line, 1);
+			eval_print(J, line);
 			fputs(PS1, stdout);
 		}
 		putchar('\n');

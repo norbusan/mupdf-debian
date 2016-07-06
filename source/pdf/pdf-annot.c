@@ -383,18 +383,21 @@ pdf_load_link_annots(fz_context *ctx, pdf_document *doc, pdf_obj *annots, const 
 	return head;
 }
 
-void
-pdf_drop_annot(fz_context *ctx, pdf_annot *annot)
+static void
+pdf_drop_annot_imp(fz_context *ctx, pdf_annot *annot)
 {
-	pdf_annot *next;
+	if (annot->ap)
+		pdf_drop_xobject(ctx, annot->ap);
+	pdf_drop_obj(ctx, annot->obj);
+}
 
+void
+pdf_drop_annots(fz_context *ctx, pdf_annot *annot)
+{
 	while (annot)
 	{
-		next = annot->next;
-		if (annot->ap)
-			pdf_drop_xobject(ctx, annot->ap);
-		pdf_drop_obj(ctx, annot->obj);
-		fz_free(ctx, annot);
+		pdf_annot *next = annot->next;
+		fz_drop_annot(ctx, (fz_annot*)annot);
 		annot = next;
 	}
 }
@@ -478,6 +481,20 @@ fz_annot_type pdf_annot_obj_type(fz_context *ctx, pdf_obj *obj)
 		return -1;
 }
 
+pdf_annot *pdf_new_annot(fz_context *ctx, pdf_page *page)
+{
+	pdf_annot *annot = fz_new_annot(ctx, sizeof(pdf_annot));
+
+	annot->super.drop_annot_imp = (fz_annot_drop_imp_fn*)pdf_drop_annot_imp;
+	annot->super.bound_annot = (fz_annot_bound_fn*)pdf_bound_annot;
+	annot->super.run_annot = (fz_annot_run_fn*)pdf_run_annot;
+	annot->super.next_annot = (fz_annot_next_fn*)pdf_next_annot;
+
+	annot->page = page;
+
+	return annot;
+}
+
 void
 pdf_load_annots(fz_context *ctx, pdf_document *doc, pdf_page *page, pdf_obj *annots)
 {
@@ -503,18 +520,16 @@ pdf_load_annots(fz_context *ctx, pdf_document *doc, pdf_page *page, pdf_obj *ann
 		for (i = 0; i < len; i++)
 		{
 			obj = pdf_array_get(ctx, annots, i);
-			annot = fz_malloc_struct(ctx, pdf_annot);
-			annot->obj = pdf_keep_obj(ctx, obj);
-			annot->page = page;
-			annot->next = NULL;
 
+			annot = pdf_new_annot(ctx, page);
 			*itr = annot;
+			annot->obj = pdf_keep_obj(ctx, obj);
 			itr = &annot->next;
 		}
 	}
 	fz_catch(ctx)
 	{
-		pdf_drop_annot(ctx, page->annots);
+		pdf_drop_annots(ctx, page->annots);
 		page->annots = NULL;
 		fz_rethrow(ctx);
 	}
@@ -560,7 +575,7 @@ pdf_load_annots(fz_context *ctx, pdf_document *doc, pdf_page *page, pdf_obj *ann
 				n = pdf_dict_get(ctx, ap, PDF_NAME_N); /* normal state */
 
 			/* lookup current state in sub-dictionary */
-			if (!pdf_is_stream(ctx, doc, pdf_to_num(ctx, n), pdf_to_gen(ctx, n)))
+			if (!pdf_is_stream(ctx, n))
 				n = pdf_dict_get(ctx, n, as);
 
 			pdf_to_rect(ctx, rect, &annot->rect);
@@ -570,7 +585,7 @@ pdf_load_annots(fz_context *ctx, pdf_document *doc, pdf_page *page, pdf_obj *ann
 			annot->annot_type = pdf_annot_obj_type(ctx, obj);
 			annot->widget_type = annot->annot_type == FZ_ANNOT_WIDGET ? pdf_field_type(ctx, doc, obj) : PDF_WIDGET_TYPE_NOT_WIDGET;
 
-			if (pdf_is_stream(ctx, doc, pdf_to_num(ctx, n), pdf_to_gen(ctx, n)))
+			if (pdf_is_stream(ctx, n))
 			{
 				annot->ap = pdf_load_xobject(ctx, doc, n);
 				pdf_transform_annot(ctx, annot);
@@ -587,7 +602,7 @@ pdf_load_annots(fz_context *ctx, pdf_document *doc, pdf_page *page, pdf_obj *ann
 		{
 			if (fz_caught(ctx) == FZ_ERROR_TRYLATER)
 			{
-				pdf_drop_annot(ctx, page->annots);
+				pdf_drop_annots(ctx, page->annots);
 				page->annots = NULL;
 				fz_rethrow(ctx);
 			}
@@ -598,8 +613,8 @@ pdf_load_annots(fz_context *ctx, pdf_document *doc, pdf_page *page, pdf_obj *ann
 		{
 			/* Move to next item in the linked list, dropping this one */
 			*itr = annot->next;
-			annot->next = NULL; /* Required because pdf_drop_annot follows the "next" chain */
-			pdf_drop_annot(ctx, annot);
+			annot->next = NULL; /* Required because pdf_drop_annots follows the "next" chain */
+			pdf_drop_annots(ctx, annot);
 		}
 	}
 
@@ -613,13 +628,13 @@ pdf_first_annot(fz_context *ctx, pdf_page *page)
 }
 
 pdf_annot *
-pdf_next_annot(fz_context *ctx, pdf_page *page, pdf_annot *annot)
+pdf_next_annot(fz_context *ctx, pdf_annot *annot)
 {
 	return annot ? annot->next : NULL;
 }
 
 fz_rect *
-pdf_bound_annot(fz_context *ctx, pdf_page *page, pdf_annot *annot, fz_rect *rect)
+pdf_bound_annot(fz_context *ctx, pdf_annot *annot, fz_rect *rect)
 {
 	if (rect == NULL)
 		return NULL;

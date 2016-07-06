@@ -17,6 +17,38 @@ static void usage(void)
 	exit(1);
 }
 
+static void
+intersect_box(fz_context *ctx, pdf_document *doc, pdf_obj *page, pdf_obj *box_name, const fz_rect *mb)
+{
+	pdf_obj *box = pdf_dict_get(ctx, page, box_name);
+	pdf_obj *newbox;
+	fz_rect old_rect;
+
+	if (box == NULL)
+		return;
+
+	old_rect.x0 = pdf_to_real(ctx, pdf_array_get(ctx, box, 0));
+	old_rect.y0 = pdf_to_real(ctx, pdf_array_get(ctx, box, 1));
+	old_rect.x1 = pdf_to_real(ctx, pdf_array_get(ctx, box, 2));
+	old_rect.y1 = pdf_to_real(ctx, pdf_array_get(ctx, box, 3));
+
+	if (old_rect.x0 < mb->x0)
+		old_rect.x0 = mb->x0;
+	if (old_rect.y0 < mb->y0)
+		old_rect.y0 = mb->y0;
+	if (old_rect.x1 > mb->x1)
+		old_rect.x1 = mb->x1;
+	if (old_rect.y1 > mb->y1)
+		old_rect.y1 = mb->y1;
+
+	newbox = pdf_new_array(ctx, doc, 4);
+	pdf_array_push(ctx, newbox, pdf_new_real(ctx, doc, old_rect.x0));
+	pdf_array_push(ctx, newbox, pdf_new_real(ctx, doc, old_rect.y0));
+	pdf_array_push(ctx, newbox, pdf_new_real(ctx, doc, old_rect.x1));
+	pdf_array_push(ctx, newbox, pdf_new_real(ctx, doc, old_rect.y1));
+	pdf_dict_put(ctx, page, box_name, newbox);
+}
+
 /*
  * Recreate page tree with our posterised pages in.
  */
@@ -98,6 +130,11 @@ static void decimatepages(fz_context *ctx, pdf_document *doc)
 				pdf_dict_put(ctx, newpageobj, PDF_NAME_Parent, parent);
 				pdf_dict_put(ctx, newpageobj, PDF_NAME_MediaBox, newmediabox);
 
+				intersect_box(ctx, doc, newpageobj, PDF_NAME_CropBox, &mb);
+				intersect_box(ctx, doc, newpageobj, PDF_NAME_BleedBox, &mb);
+				intersect_box(ctx, doc, newpageobj, PDF_NAME_TrimBox, &mb);
+				intersect_box(ctx, doc, newpageobj, PDF_NAME_ArtBox, &mb);
+
 				/* Store page object in new kids array */
 				pdf_array_push(ctx, kids, newpageref);
 
@@ -120,15 +157,9 @@ int pdfposter_main(int argc, char **argv)
 	char *outfile = "out.pdf";
 	char *password = "";
 	int c;
-	fz_write_options opts = { 0 };
+	pdf_write_options opts = { 0 };
 	pdf_document *doc;
 	fz_context *ctx;
-
-	opts.do_incremental = 0;
-	opts.do_garbage = 0;
-	opts.do_expand = 0;
-	opts.do_ascii = 0;
-	opts.do_linear = 0;
 
 	while ((c = fz_getopt(argc, argv, "x:y:")) != -1)
 	{
@@ -166,9 +197,9 @@ int pdfposter_main(int argc, char **argv)
 
 	decimatepages(ctx, doc);
 
-	pdf_write_document(ctx, doc, outfile, &opts);
+	pdf_save_document(ctx, doc, outfile, &opts);
 
-	pdf_close_document(ctx, doc);
+	pdf_drop_document(ctx, doc);
 	fz_drop_context(ctx);
 	return 0;
 }

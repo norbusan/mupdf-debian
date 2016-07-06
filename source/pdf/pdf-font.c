@@ -2,7 +2,17 @@
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_ADVANCES_H
+#ifdef FT_FONT_FORMATS_H
+#include FT_FONT_FORMATS_H
+#else
 #include FT_XFREE86_H
+#endif
+#include FT_TRUETYPE_TABLES_H
+
+#ifndef FT_SFNT_HEAD
+#define FT_SFNT_HEAD ft_sfnt_head
+#endif
 
 static void pdf_load_font_descriptor(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc, pdf_obj *dict, char *collection, char *basefont, int iscidfont);
 
@@ -36,6 +46,36 @@ static const char *base_font_names[][10] =
 		"SymbolMT", "SymbolMT,Italic", "SymbolMT,Bold", "SymbolMT,BoldItalic", NULL },
 	{ "ZapfDingbats", NULL }
 };
+
+const char *
+pdf_lookup_substitute_font(fz_context *ctx, int mono, int serif, int bold, int italic, int *len)
+{
+	if (mono) {
+		if (bold) {
+			if (italic) return fz_lookup_base14_font(ctx, "Courier-BoldOblique", len);
+			else return fz_lookup_base14_font(ctx, "Courier-Bold", len);
+		} else {
+			if (italic) return fz_lookup_base14_font(ctx, "Courier-Oblique", len);
+			else return fz_lookup_base14_font(ctx, "Courier", len);
+		}
+	} else if (serif) {
+		if (bold) {
+			if (italic) return fz_lookup_base14_font(ctx, "Times-BoldItalic", len);
+			else return fz_lookup_base14_font(ctx, "Times-Bold", len);
+		} else {
+			if (italic) return fz_lookup_base14_font(ctx, "Times-Italic", len);
+			else return fz_lookup_base14_font(ctx, "Times-Roman", len);
+		}
+	} else {
+		if (bold) {
+			if (italic) return fz_lookup_base14_font(ctx, "Helvetica-BoldOblique", len);
+			else return fz_lookup_base14_font(ctx, "Helvetica-Bold", len);
+		} else {
+			if (italic) return fz_lookup_base14_font(ctx, "Helvetica-Oblique", len);
+			else return fz_lookup_base14_font(ctx, "Helvetica", len);
+		}
+	}
+}
 
 static int is_dynalab(char *name)
 {
@@ -79,6 +119,14 @@ static const char *clean_font_name(const char *fontname)
 	return fontname;
 }
 
+static int is_builtin_font(fz_context *ctx, fz_font *font)
+{
+	int size;
+	if (!font->buffer)
+		return 0;
+	return fz_lookup_base14_font(ctx, clean_font_name(font->name), &size) == (char*)font->buffer->data;
+}
+
 /*
  * FreeType and Rendering glue
  */
@@ -87,26 +135,30 @@ enum { UNKNOWN, TYPE1, TRUETYPE };
 
 static int ft_kind(FT_Face face)
 {
+#ifdef FT_FONT_FORMATS_H
+	const char *kind = FT_Get_Font_Format(face);
+#else
 	const char *kind = FT_Get_X11_Font_Format(face);
-	if (!strcmp(kind, "TrueType"))
-		return TRUETYPE;
-	if (!strcmp(kind, "Type 1"))
-		return TYPE1;
-	if (!strcmp(kind, "CFF"))
-		return TYPE1;
-	if (!strcmp(kind, "CID Type 1"))
-		return TYPE1;
+#endif
+	if (!strcmp(kind, "TrueType")) return TRUETYPE;
+	if (!strcmp(kind, "Type 1")) return TYPE1;
+	if (!strcmp(kind, "CFF")) return TYPE1;
+	if (!strcmp(kind, "CID Type 1")) return TYPE1;
 	return UNKNOWN;
 }
 
-static int ft_is_bold(FT_Face face)
+static int ft_font_file_kind(FT_Face face)
 {
-	return face->style_flags & FT_STYLE_FLAG_BOLD;
-}
-
-static int ft_is_italic(FT_Face face)
-{
-	return face->style_flags & FT_STYLE_FLAG_ITALIC;
+#ifdef FT_FONT_FORMATS_H
+	const char *kind = FT_Get_Font_Format(face);
+#else
+	const char *kind = FT_Get_X11_Font_Format(face);
+#endif
+	if (!strcmp(kind, "TrueType")) return 2;
+	if (!strcmp(kind, "Type 1")) return 1;
+	if (!strcmp(kind, "CFF")) return 3;
+	if (!strcmp(kind, "CID Type 1")) return 1;
+	return 0;
 }
 
 static int ft_char_index(FT_Face face, int cid)
@@ -146,17 +198,18 @@ pdf_font_cid_to_gid(fz_context *ctx, pdf_font_desc *fontdesc, int cid)
 
 static int ft_width(fz_context *ctx, pdf_font_desc *fontdesc, int cid)
 {
+	int mask = FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP | FT_LOAD_IGNORE_TRANSFORM;
 	int gid = ft_cid_to_gid(fontdesc, cid);
+	FT_Fixed adv;
 	int fterr;
 
-	fterr = FT_Load_Glyph(fontdesc->font->ft_face, gid,
-			FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP | FT_LOAD_IGNORE_TRANSFORM);
+	fterr = FT_Get_Advance(fontdesc->font->ft_face, gid, mask, &adv);
 	if (fterr)
 	{
-		fz_warn(ctx, "freetype load glyph (gid %d): %s", gid, ft_error_string(fterr));
+		fz_warn(ctx, "freetype advance glyph (gid %d): %s", gid, ft_error_string(fterr));
 		return 0;
 	}
-	return ((FT_Face)fontdesc->font->ft_face)->glyph->advance.x;
+	return adv * 1000 / ((FT_Face)fontdesc->font->ft_face)->units_per_EM;
 }
 
 static int lookup_mre_code(char *name)
@@ -181,14 +234,15 @@ pdf_load_builtin_font(fz_context *ctx, pdf_font_desc *fontdesc, char *fontname, 
 	fontdesc->font = fz_load_system_font(ctx, fontname, 0, 0, !has_descriptor);
 	if (!fontdesc->font)
 	{
-		unsigned char *data;
-		unsigned int len;
+		const char *data;
+		int len;
 
-		data = pdf_lookup_builtin_font(ctx, clean_name, &len);
+		data = fz_lookup_base14_font(ctx, clean_name, &len);
 		if (!data)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find builtin font: '%s'", fontname);
 
 		fontdesc->font = fz_new_font_from_memory(ctx, fontname, data, len, 0, 1);
+		fontdesc->font->is_serif = !!strstr(clean_name, "Times");
 	}
 
 	if (!strcmp(clean_name, "Symbol") || !strcmp(clean_name, "ZapfDingbats"))
@@ -205,19 +259,25 @@ pdf_load_substitute_font(fz_context *ctx, pdf_font_desc *fontdesc, char *fontnam
 	fontdesc->font = fz_load_system_font(ctx, fontname, bold, italic, 0);
 	if (!fontdesc->font)
 	{
-		unsigned char *data;
-		unsigned int len;
+		const char *data;
+		int len;
 
 		data = pdf_lookup_substitute_font(ctx, mono, serif, bold, italic, &len);
 		if (!data)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find substitute font");
 
 		fontdesc->font = fz_new_font_from_memory(ctx, fontname, data, len, 0, 1);
-		fontdesc->font->ft_bold = bold && !ft_is_bold(fontdesc->font->ft_face);
-		fontdesc->font->ft_italic = italic && !ft_is_italic(fontdesc->font->ft_face);
+		fontdesc->font->fake_bold = bold && !fontdesc->font->is_bold;
+		fontdesc->font->fake_italic = italic && !fontdesc->font->is_italic;
+
+		fontdesc->font->is_mono = mono;
+		fontdesc->font->is_serif = serif;
+		fontdesc->font->is_bold = bold;
+		fontdesc->font->is_italic = italic;
 	}
 
 	fontdesc->font->ft_substitute = 1;
+	fontdesc->font->ft_stretch = 1;
 }
 
 static void
@@ -226,11 +286,11 @@ pdf_load_substitute_cjk_font(fz_context *ctx, pdf_font_desc *fontdesc, char *fon
 	fontdesc->font = fz_load_system_cjk_font(ctx, fontname, ros, serif);
 	if (!fontdesc->font)
 	{
-		unsigned char *data;
-		unsigned int len;
+		const char *data;
+		int len;
 		int index;
 
-		data = pdf_lookup_substitute_cjk_font(ctx, ros, serif, fontdesc->wmode, &len, &index);
+		data = fz_lookup_cjk_font(ctx, ros, serif, fontdesc->wmode, &len, &index);
 		if (!data)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find builtin CJK font");
 
@@ -239,6 +299,7 @@ pdf_load_substitute_cjk_font(fz_context *ctx, pdf_font_desc *fontdesc, char *fon
 	}
 
 	fontdesc->font->ft_substitute = 1;
+	fontdesc->font->ft_stretch = 0;
 }
 
 static void
@@ -326,7 +387,7 @@ pdf_load_embedded_font(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontde
 pdf_font_desc *
 pdf_keep_font(fz_context *ctx, pdf_font_desc *fontdesc)
 {
-	return (pdf_font_desc *)fz_keep_storable(ctx, &fontdesc->storable);
+	return fz_keep_storable(ctx, &fontdesc->storable);
 }
 
 void
@@ -368,10 +429,10 @@ pdf_new_font_desc(fz_context *ctx)
 
 	fontdesc->flags = 0;
 	fontdesc->italic_angle = 0;
-	fontdesc->ascent = 0;
-	fontdesc->descent = 0;
-	fontdesc->cap_height = 0;
-	fontdesc->x_height = 0;
+	fontdesc->ascent = 800;
+	fontdesc->descent = -200;
+	fontdesc->cap_height = 800;
+	fontdesc->x_height = 500;
 	fontdesc->missing_width = 0;
 
 	fontdesc->encoding = NULL;
@@ -474,8 +535,6 @@ pdf_load_simple_font_by_name(fz_context *ctx, pdf_document *doc, pdf_obj *dict, 
 				fontdesc->to_unicode = pdf_load_system_cmap(ctx, "Adobe-GB1-UCS2");
 				fontdesc->to_ttf_cmap = pdf_load_system_cmap(ctx, "Adobe-GB1-UCS2");
 
-				face = fontdesc->font->ft_face;
-				/* kind = ft_kind(face); */
 				goto skip_encoding;
 			}
 		}
@@ -736,17 +795,8 @@ pdf_load_simple_font_by_name(fz_context *ctx, pdf_document *doc, pdf_obj *dict, 
 		}
 		else
 		{
-			fz_lock(ctx, FZ_LOCK_FREETYPE);
-			has_lock = 1;
-			fterr = FT_Set_Char_Size(face, 1000, 1000, 72, 72);
-			if (fterr)
-				fz_warn(ctx, "freetype set character size: %s", ft_error_string(fterr));
 			for (i = 0; i < 256; i++)
-			{
 				pdf_add_hmtx(ctx, fontdesc, i, i, ft_width(ctx, fontdesc, i));
-			}
-			fz_unlock(ctx, FZ_LOCK_FREETYPE);
-			has_lock = 0;
 		}
 
 		pdf_end_hmtx(ctx, fontdesc);
@@ -797,13 +847,11 @@ hail_mary_cmp_key(fz_context *ctx, void *k0, void *k1)
 	return k0 == k1;
 }
 
-#ifndef NDEBUG
 static void
-hail_mary_debug_key(fz_context *ctx, FILE *out, void *key_)
+hail_mary_print_key(fz_context *ctx, fz_output *out, void *key_)
 {
-	fprintf(out, "hail mary ");
+	fz_printf(ctx, out, "hail mary ");
 }
-#endif
 
 static fz_store_type hail_mary_store_type =
 {
@@ -811,9 +859,7 @@ static fz_store_type hail_mary_store_type =
 	hail_mary_keep_key,
 	hail_mary_drop_key,
 	hail_mary_cmp_key,
-#ifndef NDEBUG
-	hail_mary_debug_key
-#endif
+	hail_mary_print_key
 };
 
 pdf_font_desc *
@@ -832,6 +878,7 @@ pdf_load_hail_mary_font(fz_context *ctx, pdf_document *doc)
 
 	existing = fz_store_item(ctx, &hail_mary_store_type, fontdesc, fontdesc->size, &hail_mary_store_type);
 	assert(existing == NULL);
+	(void)existing; /* Silence warning in release builds */
 
 	return fontdesc;
 }
@@ -1161,7 +1208,7 @@ pdf_load_font_descriptor(fz_context *ctx, pdf_document *doc, pdf_font_desc *font
 	if (ft_kind(face) == TRUETYPE)
 	{
 		if (FT_IS_TRICKY(face) || is_dynalab(fontdesc->font->name))
-			fontdesc->font->ft_hint = 1;
+			fontdesc->font->force_hinting = 1;
 
 		if (fontdesc->ascent == 0.0f)
 			fontdesc->ascent = 1000.0f * face->ascender / face->units_per_EM;
@@ -1187,12 +1234,16 @@ pdf_make_width_table(fz_context *ctx, pdf_font_desc *fontdesc)
 			if (gid > n)
 				n = gid;
 		}
-	};
+	}
 
 	font->width_count = n + 1;
 	font->width_table = fz_malloc_array(ctx, font->width_count, sizeof(int));
 	memset(font->width_table, 0, font->width_count * sizeof(int));
 	fontdesc->size += font->width_count * sizeof(int);
+
+	font->width_default = fontdesc->dhmtx.w;
+	for (i = 0; i < font->width_count; i++)
+		font->width_table[i] = -1;
 
 	for (i = 0; i < fontdesc->hmtx_len; i++)
 	{
@@ -1204,6 +1255,10 @@ pdf_make_width_table(fz_context *ctx, pdf_font_desc *fontdesc)
 				font->width_table[gid] = fz_maxi(fontdesc->hmtx[i].w, font->width_table[gid]);
 		}
 	}
+
+	for (i = 0; i < font->width_count; i++)
+		if (font->width_table[i] == -1)
+			font->width_table[i] = font->width_default;
 }
 
 pdf_font_desc *
@@ -1254,9 +1309,8 @@ pdf_load_font(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, pdf_obj *dict, i
 		fontdesc = pdf_load_simple_font(ctx, doc, dict);
 	}
 
-	/* Save the widths to stretch non-CJK substitute fonts */
-	if (fontdesc->font->ft_substitute && !fontdesc->to_ttf_cmap)
-		pdf_make_width_table(ctx, fontdesc);
+	/* Create glyph width table for stretching substitute fonts and text extraction. */
+	pdf_make_width_table(ctx, fontdesc);
 
 	pdf_store_item(ctx, dict, fontdesc, fontdesc->size);
 
@@ -1266,39 +1320,37 @@ pdf_load_font(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, pdf_obj *dict, i
 	return fontdesc;
 }
 
-#ifndef NDEBUG
 void
-pdf_print_font(fz_context *ctx, pdf_font_desc *fontdesc)
+pdf_print_font(fz_context *ctx, fz_output *out, pdf_font_desc *fontdesc)
 {
 	int i;
 
-	printf("fontdesc {\n");
+	fz_printf(ctx, out, "fontdesc {\n");
 
 	if (fontdesc->font->ft_face)
-		printf("\tfreetype font\n");
+		fz_printf(ctx, out, "\tfreetype font\n");
 	if (fontdesc->font->t3procs)
-		printf("\ttype3 font\n");
+		fz_printf(ctx, out, "\ttype3 font\n");
 
-	printf("\twmode %d\n", fontdesc->wmode);
-	printf("\tDW %d\n", fontdesc->dhmtx.w);
+	fz_printf(ctx, out, "\twmode %d\n", fontdesc->wmode);
+	fz_printf(ctx, out, "\tDW %d\n", fontdesc->dhmtx.w);
 
-	printf("\tW {\n");
+	fz_printf(ctx, out, "\tW {\n");
 	for (i = 0; i < fontdesc->hmtx_len; i++)
-		printf("\t\t<%04x> <%04x> %d\n",
+		fz_printf(ctx, out, "\t\t<%04x> <%04x> %d\n",
 			fontdesc->hmtx[i].lo, fontdesc->hmtx[i].hi, fontdesc->hmtx[i].w);
-	printf("\t}\n");
+	fz_printf(ctx, out, "\t}\n");
 
 	if (fontdesc->wmode)
 	{
-		printf("\tDW2 [%d %d]\n", fontdesc->dvmtx.y, fontdesc->dvmtx.w);
-		printf("\tW2 {\n");
+		fz_printf(ctx, out, "\tDW2 [%d %d]\n", fontdesc->dvmtx.y, fontdesc->dvmtx.w);
+		fz_printf(ctx, out, "\tW2 {\n");
 		for (i = 0; i < fontdesc->vmtx_len; i++)
-			printf("\t\t<%04x> <%04x> %d %d %d\n", fontdesc->vmtx[i].lo, fontdesc->vmtx[i].hi,
+			fz_printf(ctx, out, "\t\t<%04x> <%04x> %d %d %d\n", fontdesc->vmtx[i].lo, fontdesc->vmtx[i].hi,
 				fontdesc->vmtx[i].x, fontdesc->vmtx[i].y, fontdesc->vmtx[i].w);
-		printf("\t}\n");
+		fz_printf(ctx, out, "\t}\n");
 	}
 }
-#endif
 
 fz_rect *pdf_measure_text(fz_context *ctx, pdf_font_desc *fontdesc, unsigned char *buf, int len, fz_rect *acc)
 {
@@ -1341,4 +1393,715 @@ float pdf_text_stride(fz_context *ctx, pdf_font_desc *fontdesc, float fontsize, 
 		*count = i;
 
 	return x;
+}
+
+static pdf_obj*
+pdf_add_font_file(fz_context *ctx, pdf_document *doc, fz_font *font)
+{
+	fz_buffer *buf = font->buffer;
+	pdf_obj *obj = NULL;
+	pdf_obj *ref = NULL;
+
+	fz_var(obj);
+	fz_var(ref);
+
+	/* Check for substitute fonts */
+	if (font->ft_substitute)
+		return NULL;
+
+	fz_try(ctx)
+	{
+		obj = pdf_new_dict(ctx, doc, 3);
+		pdf_dict_put_drop(ctx, obj, PDF_NAME_Length1, pdf_new_int(ctx, doc, buf->len));
+		switch (ft_font_file_kind(font->ft_face))
+		{
+		case 1:
+			/* TODO: these may not be the correct values, but I doubt it matters */
+			pdf_dict_put_drop(ctx, obj, PDF_NAME_Length2, pdf_new_int(ctx, doc, buf->len));
+			pdf_dict_put_drop(ctx, obj, PDF_NAME_Length3, pdf_new_int(ctx, doc, 0));
+			break;
+		case 2:
+			break;
+		case 3:
+			if (FT_Get_Sfnt_Table(font->ft_face, FT_SFNT_HEAD))
+				pdf_dict_put_drop(ctx, obj, PDF_NAME_Subtype, PDF_NAME_OpenType);
+			else
+				pdf_dict_put_drop(ctx, obj, PDF_NAME_Subtype, PDF_NAME_Type1C);
+			break;
+		}
+		ref = pdf_add_object(ctx, doc, obj);
+		pdf_update_stream(ctx, doc, ref, buf, 0);
+	}
+	fz_always(ctx)
+	{
+		pdf_drop_obj(ctx, obj);
+	}
+	fz_catch(ctx)
+	{
+		pdf_drop_obj(ctx, ref);
+		fz_rethrow(ctx);
+	}
+	return ref;
+}
+
+static pdf_obj*
+pdf_add_font_descriptor(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc, pdf_obj *fileref)
+{
+	pdf_obj *ref = NULL;
+	pdf_obj *fdobj = NULL;
+	pdf_obj *bbox = NULL;
+
+	fz_font *font = fontdesc->font;
+	FT_Face face = font->ft_face;
+
+	fz_var(fdobj);
+	fz_var(bbox);
+	fz_var(ref);
+
+	fz_try(ctx)
+	{
+		fdobj = pdf_new_dict(ctx, doc, 10);
+		pdf_dict_put(ctx, fdobj, PDF_NAME_Type, PDF_NAME_FontDescriptor);
+		pdf_dict_put_drop(ctx, fdobj, PDF_NAME_FontName, pdf_new_name(ctx, doc, font->name));
+
+		bbox = pdf_new_array(ctx, doc, 4);
+		pdf_array_push_drop(ctx, bbox, pdf_new_real(ctx, doc, 1000.0f * font->bbox.x0));
+		pdf_array_push_drop(ctx, bbox, pdf_new_real(ctx, doc, 1000.0f * font->bbox.y0));
+		pdf_array_push_drop(ctx, bbox, pdf_new_real(ctx, doc, 1000.0f * font->bbox.x1));
+		pdf_array_push_drop(ctx, bbox, pdf_new_real(ctx, doc, 1000.0f * font->bbox.y1));
+		pdf_dict_put(ctx, fdobj, PDF_NAME_FontBBox, bbox);
+
+		pdf_dict_put_drop(ctx, fdobj, PDF_NAME_ItalicAngle, pdf_new_real(ctx, doc, fontdesc->italic_angle));
+		pdf_dict_put_drop(ctx, fdobj, PDF_NAME_Ascent, pdf_new_real(ctx, doc, fontdesc->ascent));
+		pdf_dict_put_drop(ctx, fdobj, PDF_NAME_Descent, pdf_new_real(ctx, doc, fontdesc->descent));
+		pdf_dict_put_drop(ctx, fdobj, PDF_NAME_CapHeight, pdf_new_real(ctx, doc, fontdesc->cap_height));
+		pdf_dict_put_drop(ctx, fdobj, PDF_NAME_StemV, pdf_new_real(ctx, doc, 80));
+		pdf_dict_put_drop(ctx, fdobj, PDF_NAME_Flags, pdf_new_real(ctx, doc, fontdesc->flags));
+
+		if (fileref)
+		{
+			switch (ft_font_file_kind(face))
+			{
+			case 1: pdf_dict_put(ctx, fdobj, PDF_NAME_FontFile, fileref); break;
+			case 2: pdf_dict_put(ctx, fdobj, PDF_NAME_FontFile2, fileref); break;
+			case 3: pdf_dict_put(ctx, fdobj, PDF_NAME_FontFile3, fileref); break;
+			}
+		}
+
+		ref = pdf_add_object(ctx, doc, fdobj);
+	}
+	fz_always(ctx)
+	{
+		pdf_drop_obj(ctx, fdobj);
+		pdf_drop_obj(ctx, bbox);
+	}
+	fz_catch(ctx)
+	{
+		pdf_drop_obj(ctx, ref);
+		fz_rethrow(ctx);
+	}
+	return ref;
+}
+
+static pdf_obj*
+pdf_add_simple_font_widths(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc,
+	int *first_char, int *last_char)
+{
+	int width_table[256];
+	pdf_obj *arr;
+	int i;
+
+	*first_char = 0;
+	*last_char = 0;
+
+	for (i = 0; i < 256; ++i)
+	{
+		int glyph = fz_encode_character(ctx, fontdesc->font, i);
+		if (glyph > 0)
+		{
+			if (!*first_char)
+				*first_char = i;
+			*last_char = i;
+			width_table[i] = fz_advance_glyph(ctx, fontdesc->font, glyph, 0) * 1000;
+		}
+		else
+			width_table[i] = 0;
+	}
+
+	arr = pdf_new_array(ctx, doc, *last_char - *first_char + 1);
+	fz_try(ctx)
+	{
+		for (i = *first_char; i <= *last_char; i++)
+			pdf_array_push_drop(ctx, arr, pdf_new_int(ctx, doc, width_table[i]));
+	}
+	fz_catch(ctx)
+	{
+		pdf_drop_obj(ctx, arr);
+		fz_rethrow(ctx);
+	}
+
+	return pdf_add_object_drop(ctx, doc, arr);
+}
+
+static pdf_obj*
+pdf_add_cid_system_info(fz_context *ctx, pdf_document *doc)
+{
+	pdf_obj *fobj = pdf_new_dict(ctx, doc, 3);
+	fz_try(ctx)
+	{
+		pdf_dict_put_drop(ctx, fobj, PDF_NAME_Ordering, pdf_new_string(ctx, doc, "Identity", strlen("Identity")));
+		pdf_dict_put_drop(ctx, fobj, PDF_NAME_Registry, pdf_new_string(ctx, doc, "Adobe", strlen("Adobe")));
+		pdf_dict_put_drop(ctx, fobj, PDF_NAME_Supplement, pdf_new_int(ctx, doc, 0));
+	}
+	fz_catch(ctx)
+	{
+		pdf_drop_obj(ctx, fobj);
+		fz_rethrow(ctx);
+	}
+	return fobj;
+}
+
+/* Different states of starting, same width as last, or consecutive glyph */
+enum { FW_START, FW_SAME, FW_RUN };
+
+/* ToDo: Ignore the default sized characters */
+static pdf_obj*
+pdf_add_cid_font_widths(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc, fz_font *font)
+{
+	FT_Face face = font->ft_face;
+	pdf_obj *run_obj = NULL;
+	pdf_obj *fwobj;
+	int curr_code;
+	int prev_code;
+	int curr_size;
+	int prev_size;
+	int first_code;
+	int new_first_code;
+	int state = FW_START;
+	int new_state = FW_START;
+	int publish = 0;
+
+	fz_var(run_obj);
+
+	fwobj = pdf_new_array(ctx, doc, 10);
+	fz_try(ctx)
+	{
+		prev_code = 0;
+		prev_size = fz_advance_glyph(ctx, font, 0, 0) * 1000;
+		first_code = prev_code;
+
+		while (prev_code < face->num_glyphs)
+		{
+			curr_code = prev_code + 1;
+			curr_size = fz_advance_glyph(ctx, font, curr_code, 0) * 1000;
+
+			switch (state)
+			{
+			case FW_SAME:
+				if (curr_size != prev_size)
+				{
+					/* End of same widths for consecutive ids. Current will
+					 * be pushed as prev. below during next iteration */
+					publish = 1;
+					run_obj = pdf_new_array(ctx, doc, 10);
+					new_state = FW_RUN;
+					/* And the new first code is our current code */
+					new_first_code = curr_code;
+				}
+				break;
+			case FW_RUN:
+				if (curr_size == prev_size)
+				{
+					/* Same width, so start a new same entry starting with
+					 * the previous code. i.e. the prev size is not put
+					 * in the run */
+					publish = 1;
+					new_state = FW_SAME;
+					new_first_code = prev_code;
+				}
+				else
+				{
+					/* Add prev size to run_obj */
+					pdf_array_push_drop(ctx, run_obj, pdf_new_int(ctx, doc, prev_size));
+				}
+				break;
+			case FW_START:
+				/* Starting fresh. Determine our state */
+				if (curr_size == prev_size)
+				{
+					state = FW_SAME;
+				}
+				else
+				{
+					run_obj = pdf_new_array(ctx, doc, 10);
+					pdf_array_push_drop(ctx, run_obj, pdf_new_int(ctx, doc, prev_size));
+					state = FW_RUN;
+				}
+				new_first_code = prev_code;
+				break;
+			}
+
+			if (publish || curr_code == face->num_glyphs)
+			{
+				switch (state)
+				{
+				case FW_SAME:
+					/* Add three entries. First cid, last cid and width */
+					pdf_array_push_drop(ctx, fwobj, pdf_new_int(ctx, doc, first_code));
+					pdf_array_push_drop(ctx, fwobj, pdf_new_int(ctx, doc, prev_code));
+					pdf_array_push_drop(ctx, fwobj, pdf_new_int(ctx, doc, prev_size));
+					break;
+				case FW_RUN:
+					if (pdf_array_len(ctx, run_obj) > 0)
+					{
+						pdf_array_push_drop(ctx, fwobj, pdf_new_int(ctx, doc, first_code));
+						pdf_array_push(ctx, fwobj, run_obj);
+					}
+					pdf_drop_obj(ctx, run_obj);
+					run_obj = NULL;
+					break;
+				case FW_START:
+					/* Lone wolf. Not part of a consecutive run */
+					pdf_array_push_drop(ctx, fwobj, pdf_new_int(ctx, doc, prev_code));
+					pdf_array_push_drop(ctx, fwobj, pdf_new_int(ctx, doc, prev_code));
+					pdf_array_push_drop(ctx, fwobj, pdf_new_int(ctx, doc, prev_size));
+					break;
+				}
+
+				state = new_state;
+				first_code = new_first_code;
+				publish = 0;
+			}
+
+			prev_size = curr_size;
+			prev_code = curr_code;
+		}
+	}
+	fz_catch(ctx)
+	{
+		pdf_drop_obj(ctx, fwobj);
+		pdf_drop_obj(ctx, run_obj);
+		fz_rethrow(ctx);
+	}
+	return pdf_add_object_drop(ctx, doc, fwobj);
+}
+
+/* Descendant font construction used for CID font creation from ttf or Adobe type1 */
+static pdf_obj*
+pdf_add_descendant_font(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc)
+{
+	pdf_obj *fobj = NULL;
+	pdf_obj *fref = NULL;
+	pdf_obj *fstr_ref = NULL;
+	pdf_obj *fsys_ref = NULL;
+	pdf_obj *fdes_ref = NULL;
+	pdf_obj *fw = NULL;
+
+	const char *ps_name;
+	fz_font *font = fontdesc->font;
+	FT_Face face = font->ft_face;
+
+	fz_var(fobj);
+	fz_var(fref);
+	fz_var(fstr_ref);
+	fz_var(fsys_ref);
+	fz_var(fw);
+
+	fz_try(ctx)
+	{
+		/* refs */
+		fstr_ref = pdf_add_font_file(ctx, doc, fontdesc->font);
+		fdes_ref = pdf_add_font_descriptor(ctx, doc, fontdesc, fstr_ref);
+		fsys_ref = pdf_add_cid_system_info(ctx, doc);
+
+		/* We may have a cid font already with width info in source font and no cmap in the ft face */
+		fw = pdf_add_cid_font_widths(ctx, doc, fontdesc, font);
+
+		/* And now the font */
+		fobj = pdf_new_dict(ctx, doc, 3);
+		pdf_dict_put(ctx, fobj, PDF_NAME_Type, PDF_NAME_Font);
+		switch (ft_kind(face))
+		{
+		case TYPE1: pdf_dict_put(ctx, fobj, PDF_NAME_Subtype, PDF_NAME_CIDFontType0); break;
+		case TRUETYPE: pdf_dict_put(ctx, fobj, PDF_NAME_Subtype, PDF_NAME_CIDFontType2); break;
+		}
+		ps_name = FT_Get_Postscript_Name(face);
+		if (ps_name)
+			pdf_dict_put_drop(ctx, fobj, PDF_NAME_BaseFont, pdf_new_name(ctx, doc, ps_name));
+		else
+			pdf_dict_put_drop(ctx, fobj, PDF_NAME_BaseFont, pdf_new_name(ctx, doc, font->name));
+		pdf_dict_put(ctx, fobj, PDF_NAME_CIDSystemInfo, fsys_ref);
+		pdf_dict_put(ctx, fobj, PDF_NAME_FontDescriptor, fdes_ref);
+		if (font->width_table != NULL)
+			pdf_dict_put_drop(ctx, fobj, PDF_NAME_DW, pdf_new_int(ctx, doc, font->width_default));
+		if (fw != NULL)
+			pdf_dict_put(ctx, fobj, PDF_NAME_W, fw);
+
+		fref = pdf_add_object(ctx, doc, fobj);
+	}
+	fz_always(ctx)
+	{
+		pdf_drop_obj(ctx, fobj);
+		pdf_drop_obj(ctx, fstr_ref);
+		pdf_drop_obj(ctx, fsys_ref);
+		pdf_drop_obj(ctx, fdes_ref);
+		pdf_drop_obj(ctx, fw);
+	}
+	fz_catch(ctx)
+	{
+		pdf_drop_obj(ctx, fref);
+		fz_rethrow(ctx);
+	}
+	return fref;
+}
+
+static int next_range(int *table, int size, int k)
+{
+	int n;
+	for (n = 1; k + n < size; ++n)
+	{
+		if ((k & 0xFF00) != ((k+n) & 0xFF00)) /* high byte changes */
+			break;
+		if (table[k] + n != table[k+n])
+			break;
+	}
+	return n;
+}
+
+/* Create the ToUnicode CMap. */
+static pdf_obj*
+pdf_add_to_unicode(fz_context *ctx, pdf_document *doc, fz_font *font)
+{
+	FT_Face face = font->ft_face;
+	pdf_obj *fref = NULL;
+	pdf_obj *fobj = NULL;
+	fz_buffer *buf;
+
+	int *table;
+	int num_seq = 0;
+	int num_chr = 0;
+	int n, k;
+
+	fz_var(fref);
+	fz_var(fobj);
+
+	/* Populate reverse cmap table */
+	{
+		FT_ULong ucs;
+		FT_UInt gid;
+
+		table = fz_calloc(ctx, face->num_glyphs, sizeof *table);
+		fz_lock(ctx, FZ_LOCK_FREETYPE);
+		ucs = FT_Get_First_Char(face, &gid);
+		while (gid > 0)
+		{
+			if (gid < (FT_ULong)face->num_glyphs && face->num_glyphs > 0)
+				table[gid] = ucs;
+			ucs = FT_Get_Next_Char(face, ucs, &gid);
+		}
+		fz_unlock(ctx, FZ_LOCK_FREETYPE);
+	}
+
+	for (k = 0; k < face->num_glyphs; k += n)
+	{
+		n = next_range(table, face->num_glyphs, k);
+		if (n > 1)
+			++num_seq;
+		else if (table[k] > 0)
+			++num_chr;
+	}
+
+	/* No mappings available... */
+	if (num_seq + num_chr == 0)
+	{
+		fz_warn(ctx, "cannot create ToUnicode mapping for %s", font->name);
+		return NULL;
+	}
+
+	buf = fz_new_buffer(ctx, 0);
+	fz_try(ctx)
+	{
+		/* Header boiler plate */
+		fz_buffer_printf(ctx, buf, "/CIDInit /ProcSet findresource begin\n");
+		fz_buffer_printf(ctx, buf, "12 dict begin\n");
+		fz_buffer_printf(ctx, buf, "begincmap\n");
+		fz_buffer_printf(ctx, buf, "/CIDSystemInfo <</Registry(Adobe)/Ordering(UCS)/Supplement 0>> def\n");
+		fz_buffer_printf(ctx, buf, "/CMapName /Adobe-Identity-UCS def\n");
+		fz_buffer_printf(ctx, buf, "/CMapType 2 def\n");
+		fz_buffer_printf(ctx, buf, "1 begincodespacerange\n");
+		fz_buffer_printf(ctx, buf, "<0000> <FFFF>\n");
+		fz_buffer_printf(ctx, buf, "endcodespacerange\n");
+
+		/* Note to have a valid CMap, the number of entries in table set can
+		 * not exceed 100, so we have to break into multipe tables. Also, note
+		 * that to reduce the file size we should be looking for sequential
+		 * ranges. Per Adobe technical note #5411, we can't have a range
+		 * cross a boundary where the high order byte changes */
+
+		/* First the ranges */
+		if (num_seq > 0)
+		{
+			int count = 0;
+			if (num_seq > 100)
+			{
+				fz_buffer_printf(ctx, buf, "100 beginbfrange\n");
+				num_seq -= 100;
+			}
+			else
+				fz_buffer_printf(ctx, buf, "%d beginbfrange\n", num_seq);
+			for (k = 0; k < face->num_glyphs; k += n)
+			{
+				n = next_range(table, face->num_glyphs, k);
+				if (n > 1)
+				{
+					if (count == 100)
+					{
+						fz_buffer_printf(ctx, buf, "endbfrange\n");
+						if (num_seq > 100)
+						{
+							fz_buffer_printf(ctx, buf, "100 beginbfrange\n");
+							num_seq -= 100;
+						}
+						else
+							fz_buffer_printf(ctx, buf, "%d beginbfrange\n", num_seq);
+						count = 0;
+					}
+					fz_buffer_printf(ctx, buf, "<%04x> <%04x> <%04x>\n", k, k+n-1, table[k]);
+					++count;
+				}
+			}
+			fz_buffer_printf(ctx, buf, "endbfrange\n");
+		}
+
+		/* Then the singles */
+		if (num_chr > 0)
+		{
+			int count = 0;
+			if (num_chr > 100)
+			{
+				fz_buffer_printf(ctx, buf, "100 beginbfchar\n");
+				num_chr -= 100;
+			}
+			else
+				fz_buffer_printf(ctx, buf, "%d beginbfchar\n", num_chr);
+			for (k = 0; k < face->num_glyphs; k += n)
+			{
+				n = next_range(table, face->num_glyphs, k);
+				if (n == 1 && table[k] > 0)
+				{
+					if (count == 100)
+					{
+						fz_buffer_printf(ctx, buf, "endbfchar\n");
+						if (num_chr > 100)
+						{
+							fz_buffer_printf(ctx, buf, "100 beginbfchar\n");
+							num_chr -= 100;
+						}
+						else
+							fz_buffer_printf(ctx, buf, "%d beginbfchar\n", num_chr);
+						count = 0;
+					}
+					fz_buffer_printf(ctx, buf, "<%04x> <%04x>\n", k, table[k]);
+					++count;
+				}
+			}
+			fz_buffer_printf(ctx, buf, "endbfchar\n");
+		}
+
+		/* Trailer boiler plate */
+		fz_buffer_printf(ctx, buf, "endcmap\n");
+		fz_buffer_printf(ctx, buf, "CMapName currentdict /CMap defineresource pop\n");
+		fz_buffer_printf(ctx, buf, "end\nend\n");
+
+		fobj = pdf_new_dict(ctx, doc, 3);
+		fref = pdf_add_object(ctx, doc, fobj);
+		pdf_update_stream(ctx, doc, fref, buf, 0);
+	}
+	fz_always(ctx)
+	{
+		fz_free(ctx, table);
+		fz_drop_buffer(ctx, buf);
+		pdf_drop_obj(ctx, fobj);
+	}
+	fz_catch(ctx)
+	{
+		pdf_drop_obj(ctx, fref);
+		fz_rethrow(ctx);
+	}
+	return fref;
+}
+
+/* Creates CID font with Identity-H CMap and a ToUnicode CMap that is created by
+ * using the TTF cmap table "backwards" to go from the GID to a Unicode value.
+ * We can possibly get width information that may have been embedded in
+ * the PDF /W array (or W2 if vertical text) */
+pdf_obj *
+pdf_add_cid_font(fz_context *ctx, pdf_document *doc, fz_font *font)
+{
+	pdf_obj *fobj = NULL;
+	pdf_obj *fref = NULL;
+	pdf_obj *obj_desc_ref = NULL;
+	pdf_obj *obj_tounicode_ref = NULL;
+	pdf_obj *obj_array = NULL;
+	pdf_font_desc *fontdesc = NULL;
+
+	FT_Face face = font->ft_face;
+	unsigned char digest[16];
+
+	fz_var(fobj);
+	fz_var(fref);
+	fz_var(obj_desc_ref);
+	fz_var(obj_tounicode_ref);
+	fz_var(fontdesc);
+	fz_var(obj_array);
+
+	fz_try(ctx)
+	{
+		/* Before we add this font as a resource check if the same font
+		 * already exists in our resources for this doc. If yes, then
+		 * hand back that reference */
+		fref = pdf_find_resource(ctx, doc, doc->resources->font, font->buffer, digest);
+		if (fref == NULL)
+		{
+			/* Set up desc, width, and font file */
+			fontdesc = pdf_new_font_desc(ctx);
+			fontdesc->font = fz_keep_font(ctx, font);
+			fontdesc->flags = PDF_FD_NONSYMBOLIC; /* ToDo: FixMe. Set non-symbolic always for now */
+			fontdesc->ascent = face->ascender * 1000.0f / face->units_per_EM;
+			fontdesc->descent = face->descender * 1000.0f / face->units_per_EM;
+
+			/* Get the descendant font and the tounicode references */
+			obj_desc_ref = pdf_add_descendant_font(ctx, doc, fontdesc);
+			obj_tounicode_ref = pdf_add_to_unicode(ctx, doc, font);
+
+			/* And now the font */
+			fobj = pdf_new_dict(ctx, doc, 10);
+			pdf_dict_put(ctx, fobj, PDF_NAME_Type, PDF_NAME_Font);
+			pdf_dict_put(ctx, fobj, PDF_NAME_Subtype, PDF_NAME_Type0);
+			pdf_dict_put_drop(ctx, fobj, PDF_NAME_BaseFont, pdf_new_name(ctx, doc, font->name));
+			pdf_dict_put(ctx, fobj, PDF_NAME_Encoding, PDF_NAME_Identity_H);
+
+			obj_array = pdf_new_array(ctx, doc, 3);
+			pdf_array_insert(ctx, obj_array, obj_desc_ref, 0);
+			pdf_dict_put(ctx, fobj, PDF_NAME_DescendantFonts, obj_array);
+			if (obj_tounicode_ref)
+				pdf_dict_put(ctx, fobj, PDF_NAME_ToUnicode, obj_tounicode_ref);
+			fref = pdf_add_object(ctx, doc, fobj);
+
+			/* Add ref to our font resource hash table. */
+			fref = pdf_insert_resource(ctx, doc->resources->font, digest, fref);
+		}
+	}
+	fz_always(ctx)
+	{
+		pdf_drop_font(ctx, fontdesc);
+		pdf_drop_obj(ctx, fobj);
+		pdf_drop_obj(ctx, obj_desc_ref);
+		pdf_drop_obj(ctx, obj_array);
+		pdf_drop_obj(ctx, obj_tounicode_ref);
+	}
+	fz_catch(ctx)
+	{
+		pdf_drop_obj(ctx, fref);
+		fz_rethrow(ctx);
+	}
+	return fref;
+}
+
+/* Creates simple font */
+pdf_obj *
+pdf_add_simple_font(fz_context *ctx, pdf_document *doc, fz_font *font)
+{
+	pdf_obj *fobj = NULL;
+	pdf_obj *fref = NULL;
+	pdf_obj *fstr_ref = NULL;
+	pdf_obj *fdes_ref = NULL;
+	pdf_obj *fwidth_ref = NULL;
+	pdf_font_desc *fontdesc = NULL;
+
+	FT_Face face = font->ft_face;
+	const char *ps_name;
+	unsigned char digest[16];
+	int first_char, last_char;
+
+	fz_var(fobj);
+	fz_var(fref);
+	fz_var(fstr_ref);
+	fz_var(fdes_ref);
+	fz_var(fwidth_ref);
+	fz_var(fontdesc);
+
+	fz_try(ctx)
+	{
+		/* Before we add this font as a resource check if the same font
+		 * already exists in our resources for this doc. If yes, then
+		 * hand back that reference */
+		fref = pdf_find_resource(ctx, doc, doc->resources->font, font->buffer, digest);
+		if (fref == NULL)
+		{
+			fobj = pdf_new_dict(ctx, doc, 10);
+			pdf_dict_put_drop(ctx, fobj, PDF_NAME_Type, PDF_NAME_Font);
+			switch (ft_kind(face))
+			{
+			case TYPE1: pdf_dict_put(ctx, fobj, PDF_NAME_Subtype, PDF_NAME_Type1); break;
+			case TRUETYPE: pdf_dict_put(ctx, fobj, PDF_NAME_Subtype, PDF_NAME_TrueType); break;
+			}
+			ps_name = FT_Get_Postscript_Name(face);
+			if (ps_name)
+				pdf_dict_put_drop(ctx, fobj, PDF_NAME_BaseFont, pdf_new_name(ctx, doc, ps_name));
+			else
+				pdf_dict_put_drop(ctx, fobj, PDF_NAME_BaseFont, pdf_new_name(ctx, doc, font->name));
+			pdf_dict_put(ctx, fobj, PDF_NAME_Encoding, PDF_NAME_WinAnsiEncoding);
+
+			if (!is_builtin_font(ctx, font))
+			{
+				fontdesc = pdf_new_font_desc(ctx);
+				fontdesc->font = fz_keep_font(ctx, font);
+				fontdesc->flags = PDF_FD_NONSYMBOLIC; /* ToDo: FixMe. Set non-symbolic always for now */
+				fontdesc->ascent = face->ascender * 1000.0f / face->units_per_EM;
+				fontdesc->descent = face->descender * 1000.0f / face->units_per_EM;
+
+				fstr_ref = pdf_add_font_file(ctx, doc, font);
+				fdes_ref = pdf_add_font_descriptor(ctx, doc, fontdesc, fstr_ref);
+				fwidth_ref = pdf_add_simple_font_widths(ctx, doc, fontdesc, &first_char, &last_char);
+
+				pdf_dict_put_drop(ctx, fobj, PDF_NAME_FirstChar, pdf_new_int(ctx, doc, first_char));
+				pdf_dict_put_drop(ctx, fobj, PDF_NAME_LastChar, pdf_new_int(ctx, doc, last_char));
+				pdf_dict_put(ctx, fobj, PDF_NAME_Widths, fwidth_ref);
+				pdf_dict_put(ctx, fobj, PDF_NAME_FontDescriptor, fdes_ref);
+			}
+
+			fref = pdf_add_object(ctx, doc, fobj);
+
+			/* Add ref to our font resource hash table. */
+			fref = pdf_insert_resource(ctx, doc->resources->font, digest, fref);
+		}
+	}
+	fz_always(ctx)
+	{
+		pdf_drop_font(ctx, fontdesc);
+		pdf_drop_obj(ctx, fobj);
+		pdf_drop_obj(ctx, fstr_ref);
+		pdf_drop_obj(ctx, fdes_ref);
+		pdf_drop_obj(ctx, fwidth_ref);
+	}
+	fz_catch(ctx)
+	{
+		pdf_drop_obj(ctx, fref);
+		fz_rethrow(ctx);
+	}
+	return fref;
+}
+
+int
+pdf_font_writing_supported(fz_font *font)
+{
+	if (font->ft_face == NULL)
+		return 0;
+
+	if (ft_kind(font->ft_face) == TYPE1 || ft_kind(font->ft_face) == TRUETYPE)
+	{
+		return 1;
+	}
+	return 0;
 }

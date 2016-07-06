@@ -10,7 +10,7 @@
 #include <sys/timeb.h>
 #endif
 
-#define js_optnumber(J,I,V) (js_gettop(J) > I ? js_tonumber(J,I) : V)
+#define js_optnumber(J,I,V) (js_isdefined(J,I) ? js_tonumber(J,I) : V)
 
 static double Now(void)
 {
@@ -226,7 +226,7 @@ static double TimeClip(double t)
 {
 	if (!isfinite(t))
 		return NAN;
-	if (abs(t) > 8.64e15)
+	if (fabs(t) > 8.64e15)
 		return NAN;
 	return t < 0 ? -floor(-t) : floor(t);
 }
@@ -792,7 +792,7 @@ void jsB_initdate(js_State *J)
 		jsB_propf(J, "toISOString", Dp_toISOString, 0);
 		jsB_propf(J, "toJSON", Dp_toJSON, 1);
 	}
-	js_newcconstructor(J, jsB_Date, jsB_new_Date, "Date", 1);
+	js_newcconstructor(J, jsB_Date, jsB_new_Date, "Date", 0); /* 1 */
 	{
 		jsB_propf(J, "parse", D_parse, 1);
 		jsB_propf(J, "UTC", D_UTC, 7);

@@ -85,7 +85,6 @@ struct pdf_run_processor_s
 	fz_matrix tlm;
 	fz_matrix tm;
 	int text_mode;
-	int accumulate;
 
 	/* graphics state */
 	pdf_gstate *gstate;
@@ -521,7 +520,7 @@ pdf_show_image(fz_context *ctx, pdf_run_processor *pr, fz_image *image)
 		/* apply blend group even though we skip the soft mask */
 		if (gstate->blendmode)
 			fz_begin_group(ctx, pr->dev, &bbox, 0, 0, gstate->blendmode, 1);
-		fz_clip_image_mask(ctx, pr->dev, image->mask, &bbox, &image_ctm);
+		fz_clip_image_mask(ctx, pr->dev, image->mask, &image_ctm, &bbox);
 	}
 	else
 		gstate = pdf_begin_group(ctx, pr, &bbox, &softmask);
@@ -540,7 +539,7 @@ pdf_show_image(fz_context *ctx, pdf_run_processor *pr, fz_image *image)
 		case PDF_MAT_PATTERN:
 			if (gstate->fill.pattern)
 			{
-				fz_clip_image_mask(ctx, pr->dev, image, &bbox, &image_ctm);
+				fz_clip_image_mask(ctx, pr->dev, image, &image_ctm, &bbox);
 				pdf_show_pattern(ctx, pr, gstate->fill.pattern, &pr->gstate[gstate->fill.gstate_num], &bbox, PDF_FILL);
 				fz_pop_clip(ctx, pr->dev);
 			}
@@ -548,7 +547,7 @@ pdf_show_image(fz_context *ctx, pdf_run_processor *pr, fz_image *image)
 		case PDF_MAT_SHADE:
 			if (gstate->fill.shade)
 			{
-				fz_clip_image_mask(ctx, pr->dev, image, &bbox, &image_ctm);
+				fz_clip_image_mask(ctx, pr->dev, image, &image_ctm, &bbox);
 				fz_fill_shade(ctx, pr->dev, gstate->fill.shade, &pr->gstate[gstate->fill.gstate_num].ctm, gstate->fill.alpha);
 				fz_pop_clip(ctx, pr->dev);
 			}
@@ -605,7 +604,7 @@ pdf_show_path(fz_context *ctx, pdf_run_processor *pr, int doclose, int dofill, i
 		if (pr->clip)
 		{
 			gstate->clip_depth++;
-			fz_clip_path(ctx, pr->dev, path, &bbox, pr->clip_even_odd, &gstate->ctm);
+			fz_clip_path(ctx, pr->dev, path, pr->clip_even_odd, &gstate->ctm, &bbox);
 			pr->clip = 0;
 		}
 
@@ -646,7 +645,7 @@ pdf_show_path(fz_context *ctx, pdf_run_processor *pr, int doclose, int dofill, i
 			case PDF_MAT_PATTERN:
 				if (gstate->fill.pattern)
 				{
-					fz_clip_path(ctx, pr->dev, path, &bbox, even_odd, &gstate->ctm);
+					fz_clip_path(ctx, pr->dev, path, even_odd, &gstate->ctm, &bbox);
 					pdf_show_pattern(ctx, pr, gstate->fill.pattern, &pr->gstate[gstate->fill.gstate_num], &bbox, PDF_FILL);
 					fz_pop_clip(ctx, pr->dev);
 				}
@@ -654,7 +653,7 @@ pdf_show_path(fz_context *ctx, pdf_run_processor *pr, int doclose, int dofill, i
 			case PDF_MAT_SHADE:
 				if (gstate->fill.shade)
 				{
-					fz_clip_path(ctx, pr->dev, path, &bbox, even_odd, &gstate->ctm);
+					fz_clip_path(ctx, pr->dev, path, even_odd, &gstate->ctm, &bbox);
 					/* The cluster and page 2 of patterns.pdf shows that fz_fill_shade should NOT be called with gstate->ctm. */
 					fz_fill_shade(ctx, pr->dev, gstate->fill.shade, &pr->gstate[gstate->fill.gstate_num].ctm, gstate->fill.alpha);
 					fz_pop_clip(ctx, pr->dev);
@@ -676,7 +675,7 @@ pdf_show_path(fz_context *ctx, pdf_run_processor *pr, int doclose, int dofill, i
 			case PDF_MAT_PATTERN:
 				if (gstate->stroke.pattern)
 				{
-					fz_clip_stroke_path(ctx, pr->dev, path, &bbox, gstate->stroke_state, &gstate->ctm);
+					fz_clip_stroke_path(ctx, pr->dev, path, gstate->stroke_state, &gstate->ctm, &bbox);
 					pdf_show_pattern(ctx, pr, gstate->stroke.pattern, &pr->gstate[gstate->stroke.gstate_num], &bbox, PDF_STROKE);
 					fz_pop_clip(ctx, pr->dev);
 				}
@@ -684,7 +683,7 @@ pdf_show_path(fz_context *ctx, pdf_run_processor *pr, int doclose, int dofill, i
 			case PDF_MAT_SHADE:
 				if (gstate->stroke.shade)
 				{
-					fz_clip_stroke_path(ctx, pr->dev, path, &bbox, gstate->stroke_state, &gstate->ctm);
+					fz_clip_stroke_path(ctx, pr->dev, path, gstate->stroke_state, &gstate->ctm, &bbox);
 					fz_fill_shade(ctx, pr->dev, gstate->stroke.shade, &pr->gstate[gstate->stroke.gstate_num].ctm, gstate->stroke.alpha);
 					fz_pop_clip(ctx, pr->dev);
 				}
@@ -722,6 +721,7 @@ pdf_flush_text(fz_context *ctx, pdf_run_processor *pr)
 	int doclip;
 	int doinvisible;
 	softmask_save softmask = { NULL };
+	int knockout_group = 0;
 
 	if (!pr->text)
 		return gstate;
@@ -749,12 +749,33 @@ pdf_flush_text(fz_context *ctx, pdf_run_processor *pr)
 		fz_rect tb = pr->text_bbox;
 
 		fz_transform_rect(&tb, &gstate->ctm);
+		if (dostroke)
+			fz_adjust_rect_for_stroke(ctx, &tb, gstate->stroke_state, &gstate->ctm);
 
 		/* Don't bother sending a text group with nothing in it */
-		if (text->len == 0)
+		if (!text->head)
 			break;
 
-		gstate = pdf_begin_group(ctx, pr, &tb, &softmask);
+		if (dofill || dostroke)
+			gstate = pdf_begin_group(ctx, pr, &tb, &softmask);
+
+		if (dofill && dostroke)
+		{
+			/* We may need to push a knockout group */
+			if (gstate->stroke.alpha == 0)
+			{
+				/* No need for group, as stroke won't do anything */
+			}
+			else if (gstate->stroke.alpha == 1.0f && gstate->blendmode == FZ_BLEND_NORMAL)
+			{
+				/* No need for group, as stroke won't show up */
+			}
+			else
+			{
+				knockout_group = 1;
+				fz_begin_group(ctx, pr->dev, &tb, 0, 1, FZ_BLEND_NORMAL, 1);
+			}
+		}
 
 		if (doinvisible)
 			fz_ignore_text(ctx, pr->dev, text, &gstate->ctm);
@@ -772,7 +793,7 @@ pdf_flush_text(fz_context *ctx, pdf_run_processor *pr)
 			case PDF_MAT_PATTERN:
 				if (gstate->fill.pattern)
 				{
-					fz_clip_text(ctx, pr->dev, text, &gstate->ctm, 0);
+					fz_clip_text(ctx, pr->dev, text, &gstate->ctm, &tb);
 					pdf_show_pattern(ctx, pr, gstate->fill.pattern, &pr->gstate[gstate->fill.gstate_num], &tb, PDF_FILL);
 					fz_pop_clip(ctx, pr->dev);
 				}
@@ -780,7 +801,7 @@ pdf_flush_text(fz_context *ctx, pdf_run_processor *pr)
 			case PDF_MAT_SHADE:
 				if (gstate->fill.shade)
 				{
-					fz_clip_text(ctx, pr->dev, text, &gstate->ctm, 0);
+					fz_clip_text(ctx, pr->dev, text, &gstate->ctm, &tb);
 					/* Page 2 of patterns.pdf shows that fz_fill_shade should NOT be called with gstate->ctm */
 					fz_fill_shade(ctx, pr->dev, gstate->fill.shade, &pr->gstate[gstate->fill.gstate_num].ctm, gstate->fill.alpha);
 					fz_pop_clip(ctx, pr->dev);
@@ -802,7 +823,7 @@ pdf_flush_text(fz_context *ctx, pdf_run_processor *pr)
 			case PDF_MAT_PATTERN:
 				if (gstate->stroke.pattern)
 				{
-					fz_clip_stroke_text(ctx, pr->dev, text, gstate->stroke_state, &gstate->ctm);
+					fz_clip_stroke_text(ctx, pr->dev, text, gstate->stroke_state, &gstate->ctm, &tb);
 					pdf_show_pattern(ctx, pr, gstate->stroke.pattern, &pr->gstate[gstate->stroke.gstate_num], &tb, PDF_STROKE);
 					fz_pop_clip(ctx, pr->dev);
 				}
@@ -810,7 +831,7 @@ pdf_flush_text(fz_context *ctx, pdf_run_processor *pr)
 			case PDF_MAT_SHADE:
 				if (gstate->stroke.shade)
 				{
-					fz_clip_stroke_text(ctx, pr->dev, text, gstate->stroke_state, &gstate->ctm);
+					fz_clip_stroke_text(ctx, pr->dev, text, gstate->stroke_state, &gstate->ctm, &tb);
 					fz_fill_shade(ctx, pr->dev, gstate->stroke.shade, &pr->gstate[gstate->stroke.gstate_num].ctm, gstate->stroke.alpha);
 					fz_pop_clip(ctx, pr->dev);
 				}
@@ -818,15 +839,17 @@ pdf_flush_text(fz_context *ctx, pdf_run_processor *pr)
 			}
 		}
 
+		if (knockout_group)
+			fz_end_group(ctx, pr->dev);
+
+		if (dofill || dostroke)
+			pdf_end_group(ctx, pr, &softmask);
+
 		if (doclip)
 		{
-			if (pr->accumulate < 2)
-				gstate->clip_depth++;
-			fz_clip_text(ctx, pr->dev, text, &gstate->ctm, pr->accumulate);
-			pr->accumulate = 2;
+			gstate->clip_depth++;
+			fz_clip_text(ctx, pr->dev, text, &gstate->ctm, &tb);
 		}
-
-		pdf_end_group(ctx, pr, &softmask);
 	}
 	fz_always(ctx)
 	{
@@ -895,22 +918,12 @@ pdf_show_char(fz_context *ctx, pdf_run_processor *pr, int cid)
 	 * uncachable, then render direct. */
 	render_direct = (!fontdesc->font->ft_face && pr->nested_depth > 0) || !fz_glyph_cacheable(ctx, fontdesc->font, gid);
 
-	/* flush buffered text if face or matrix or rendermode has changed */
-	if (!pr->text ||
-		fontdesc->font != pr->text->font ||
-		fontdesc->wmode != pr->text->wmode ||
-		fabsf(trm.a - pr->text->trm.a) > FLT_EPSILON ||
-		fabsf(trm.b - pr->text->trm.b) > FLT_EPSILON ||
-		fabsf(trm.c - pr->text->trm.c) > FLT_EPSILON ||
-		fabsf(trm.d - pr->text->trm.d) > FLT_EPSILON ||
-		gstate->render != pr->text_mode ||
-		render_direct)
+	/* flush buffered text if rendermode has changed */
+	if (!pr->text || gstate->render != pr->text_mode || render_direct)
 	{
 		gstate = pdf_flush_text(ctx, pr);
 
-		pr->text = fz_new_text(ctx, fontdesc->font, &trm, fontdesc->wmode);
-		pr->text->trm.e = 0;
-		pr->text->trm.f = 0;
+		pr->text = fz_new_text(ctx);
 		pr->text_mode = gstate->render;
 		pr->text_bbox = fz_empty_rect;
 	}
@@ -930,11 +943,11 @@ pdf_show_char(fz_context *ctx, pdf_run_processor *pr, int cid)
 	fz_union_rect(&pr->text_bbox, &bbox);
 
 	/* add glyph to textobject */
-	fz_add_text(ctx, pr->text, gid, ucsbuf[0], trm.e, trm.f);
+	fz_show_glyph(ctx, pr->text, fontdesc->font, &trm, gid, ucsbuf[0], fontdesc->wmode, 0, FZ_BIDI_NEUTRAL, FZ_LANG_UNSET);
 
 	/* add filler glyphs for one-to-many unicode mapping */
 	for (i = 1; i < ucslen; i++)
-		fz_add_text(ctx, pr->text, -1, ucsbuf[i], trm.e, trm.f);
+		fz_show_glyph(ctx, pr->text, fontdesc->font, &trm, -1, ucsbuf[i], fontdesc->wmode, 0, FZ_BIDI_NEUTRAL, FZ_LANG_UNSET);
 
 	if (fontdesc->wmode == 0)
 	{
@@ -1610,7 +1623,6 @@ static void pdf_run_ET(fz_context *ctx, pdf_processor *proc)
 {
 	pdf_run_processor *pr = (pdf_run_processor *)proc;
 	pdf_flush_text(ctx, pr);
-	pr->accumulate = 1;
 }
 
 /* text state */
@@ -1632,7 +1644,7 @@ static void pdf_run_Tw(fz_context *ctx, pdf_processor *proc, float wordspace)
 static void pdf_run_Tz(fz_context *ctx, pdf_processor *proc, float scale)
 {
 	pdf_run_processor *pr = (pdf_run_processor *)proc;
-	pdf_gstate *gstate = pdf_flush_text(ctx, pr);
+	pdf_gstate *gstate = pr->gstate + pr->gtop;
 	gstate->scale = scale / 100;
 }
 
@@ -1919,7 +1931,7 @@ static void pdf_run_MP(fz_context *ctx, pdf_processor *proc, const char *tag)
 {
 }
 
-static void pdf_run_DP(fz_context *ctx, pdf_processor *proc, const char *tag, pdf_obj *properties)
+static void pdf_run_DP(fz_context *ctx, pdf_processor *proc, const char *tag, pdf_obj *raw, pdf_obj *cooked)
 {
 }
 
@@ -1927,7 +1939,7 @@ static void pdf_run_BMC(fz_context *ctx, pdf_processor *proc, const char *tag)
 {
 }
 
-static void pdf_run_BDC(fz_context *ctx, pdf_processor *proc, const char *tag, pdf_obj *properties)
+static void pdf_run_BDC(fz_context *ctx, pdf_processor *proc, const char *tag, pdf_obj *raw, pdf_obj *cooked)
 {
 }
 
@@ -1943,6 +1955,12 @@ static void pdf_run_BX(fz_context *ctx, pdf_processor *proc)
 
 static void pdf_run_EX(fz_context *ctx, pdf_processor *proc)
 {
+}
+
+static void pdf_run_END(fz_context *ctx, pdf_processor *proc)
+{
+	pdf_run_processor *pr = (pdf_run_processor *)proc;
+	pdf_flush_text(ctx, pr);
 }
 
 static void
@@ -2088,6 +2106,8 @@ pdf_new_run_processor(fz_context *ctx, fz_device *dev, const fz_matrix *ctm, con
 		/* compatibility */
 		proc->super.op_BX = pdf_run_BX;
 		proc->super.op_EX = pdf_run_EX;
+
+		proc->super.op_END = pdf_run_END;
 	}
 
 	proc->dev = dev;
@@ -2102,7 +2122,6 @@ pdf_new_run_processor(fz_context *ctx, fz_device *dev, const fz_matrix *ctm, con
 	proc->tlm = fz_identity;
 	proc->tm = fz_identity;
 	proc->text_mode = 0;
-	proc->accumulate = 1;
 
 	fz_try(ctx)
 	{

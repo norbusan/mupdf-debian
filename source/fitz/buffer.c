@@ -41,6 +41,22 @@ fz_new_buffer_from_data(fz_context *ctx, unsigned char *data, int size)
 }
 
 fz_buffer *
+fz_new_buffer_from_shared_data(fz_context *ctx, const char *data, int size)
+{
+	fz_buffer *b;
+
+	b = fz_malloc_struct(ctx, fz_buffer);
+	b->refs = 1;
+	b->data = (unsigned char *)data; /* cast away const */
+	b->cap = size;
+	b->len = size;
+	b->unused_bits = 0;
+	b->shared = 1;
+
+	return b;
+}
+
+fz_buffer *
 fz_keep_buffer(fz_context *ctx, fz_buffer *buf)
 {
 	if (buf)
@@ -55,7 +71,8 @@ fz_drop_buffer(fz_context *ctx, fz_buffer *buf)
 		return;
 	if (--buf->refs == 0)
 	{
-		fz_free(ctx, buf->data);
+		if (!buf->shared)
+			fz_free(ctx, buf->data);
 		fz_free(ctx, buf);
 	}
 }
@@ -63,6 +80,8 @@ fz_drop_buffer(fz_context *ctx, fz_buffer *buf)
 void
 fz_resize_buffer(fz_context *ctx, fz_buffer *buf, int size)
 {
+	if (buf->shared)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot resize a buffer with shared storage");
 	buf->data = fz_resize_array(ctx, buf->data, size, 1);
 	buf->cap = size;
 	if (buf->len > buf->cap)
@@ -107,7 +126,7 @@ fz_buffer_storage(fz_context *ctx, fz_buffer *buf, unsigned char **datap)
 }
 
 void
-fz_buffer_cat(fz_context *ctx, fz_buffer *buf, fz_buffer *extra)
+fz_append_buffer(fz_context *ctx, fz_buffer *buf, fz_buffer *extra)
 {
 	if (buf->cap - buf->len < extra->len)
 	{
@@ -236,9 +255,9 @@ fz_buffer_vprintf(fz_context *ctx, fz_buffer *buffer, const char *fmt, va_list o
 	len = fz_vsnprintf((char *)buffer->data + buffer->len, slack, fmt, args);
 	va_copy_end(args);
 
-	/* len = number of chars written, not including the terminating
-	 * NULL, so len+1 > slack means "truncated". */
-	if (len+1 > slack)
+	/* len is the number of characters in the formatted string (not including
+	 * the terminating zero), so if (len > slack) the string was truncated. */
+	if (len > slack)
 	{
 		/* Grow the buffer and retry */
 		fz_ensure_buffer(ctx, buffer, buffer->len + len);
@@ -255,7 +274,7 @@ fz_buffer_vprintf(fz_context *ctx, fz_buffer *buffer, const char *fmt, va_list o
 }
 
 void
-fz_buffer_cat_pdf_string(fz_context *ctx, fz_buffer *buffer, const char *text)
+fz_buffer_print_pdf_string(fz_context *ctx, fz_buffer *buffer, const char *text)
 {
 	int len = 2;
 	const char *s = text;

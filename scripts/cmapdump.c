@@ -1,10 +1,13 @@
 /* cmapdump.c -- parse a CMap file and dump it as a c-struct */
 
-#include <stdio.h>
-#include <string.h>
-
 /* We never want to build memento versions of the cmapdump util */
 #undef MEMENTO
+
+/* We never want large file access here */
+#undef FZ_LARGEFILE
+
+#include <stdio.h>
+#include <string.h>
 
 #include "mupdf/pdf.h"
 
@@ -16,8 +19,12 @@
 #include "../source/fitz/stream-open.c"
 #include "../source/fitz/stream-read.c"
 #include "../source/fitz/strtod.c"
+#include "../source/fitz/strtof.c"
 #include "../source/fitz/ftoa.c"
 #include "../source/fitz/printf.c"
+#ifdef _WIN32
+#include "../source/fitz/time.c"
+#endif
 
 #include "../source/pdf/pdf-lex.c"
 #include "../source/pdf/pdf-cmap.c"
@@ -172,6 +179,8 @@ main(int argc, char **argv)
 
 		if (getenv("verbose"))
 			printf("\t{\"%s\",&cmap_%s},\n", cmap->cmap_name, name);
+
+		pdf_drop_cmap(ctx, cmap);
 	}
 
 	if (fclose(fo))
@@ -222,13 +231,17 @@ void fz_copy_aa_context(fz_context *dst, fz_context *src)
 {
 }
 
-void *fz_keep_storable(fz_context *ctx, fz_storable *s)
+void *fz_keep_storable(fz_context *ctx, const fz_storable *sc)
 {
-	return s;
+	fz_storable *s = (fz_storable *)sc;
+	return fz_keep_imp(ctx, s, &s->refs);
 }
 
-void fz_drop_storable(fz_context *ctx, fz_storable *s)
+void fz_drop_storable(fz_context *ctx, const fz_storable *sc)
 {
+	fz_storable *s = (fz_storable *)sc;
+	if (fz_drop_imp(ctx, s, &s->refs))
+		s->drop(ctx, s);
 }
 
 void fz_new_store_context(fz_context *ctx, unsigned int max)
