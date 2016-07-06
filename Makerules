@@ -110,6 +110,11 @@ SYS_OPENJPEG_LIBS = -lopenjp2
 SYS_JBIG2DEC_LIBS = -ljbig2dec
 SYS_JPEG_LIBS = -ljpeg
 SYS_ZLIB_LIBS = -lz
+ifeq "$(shell pkg-config --exists gl glfw3 && echo yes)" "yes"
+HAVE_GLFW ?= yes
+SYS_GLFW_CFLAGS = $(shell pkg-config --cflags gl glfw3)
+SYS_GLFW_LIBS = $(shell pkg-config --libs gl glfw3)
+endif
 
 endif
 
