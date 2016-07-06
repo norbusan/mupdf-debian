@@ -38,7 +38,7 @@ Description: lightweight PDF viewer
 Package: mupdf-tools
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: commmand line tools for the MuPDF viewer
+Description: command line tools for the MuPDF viewer
  MuPDF is a lightweight PDF viewer and toolkit written in portable C.
  It also reads XPS, OpenXPS and ePub documents.
  .
