@@ -1,6 +1,3 @@
 0001-fix_libjpeg_header_mismatch.patch
 0002-mupdf_manpage.patch
 0003-Fix-build-with-libopenjp2.patch
-0004-Fix-FTBFS-with-clang.patch
-0006-Add-mudraw-F-command-switch-to-man-page.patch
-0008-Bigger-scaling.patch

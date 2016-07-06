@@ -4,14 +4,12 @@ Date: Sat, 20 Sep 2014 11:08:32 +0800
 Subject: mupdf_manpage
 
 ---
- docs/man/mupdf.1 | 10 ++++++++++
+ docs/man/mupdf.1 |   10 ++++++++++
  1 file changed, 10 insertions(+)
 
-diff --git a/docs/man/mupdf.1 b/docs/man/mupdf.1
-index 44a6a60..bfbe613 100644
 --- a/docs/man/mupdf.1
 +++ b/docs/man/mupdf.1
-@@ -121,6 +121,9 @@ Toggles fullscreen mode.
+@@ -173,6 +173,9 @@
  .B p
  Toggle presentation mode.
  .TP
@@ -21,7 +19,7 @@ index 44a6a60..bfbe613 100644
  .B c
  Toggle between color and grayscale rendering.
  .TP
-@@ -139,6 +142,13 @@ Quit.
+@@ -195,6 +198,13 @@
  Sending a \fBSIGHUP\fR signal to the mupdf process will also cause the viewed
  file to be reloaded automatically, for use in e.g. build scripts.
  
@@ -33,5 +31,5 @@ index 44a6a60..bfbe613 100644
 +and falls back to "xdg-open" if BROWSER is not defined.
 +
  .SH SEE ALSO
- .BR mudraw (1),
  .BR mutool (1).
+ 
