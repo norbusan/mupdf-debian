@@ -1,3 +1,19 @@
+mupdf (1.9a+ds1-1) unstable; urgency=medium
+
+  * New upstream release (Closes: #819101)
+  * Add glfw and harfbuzz third party libraries to Files-Excluded
+  * Building now requires libharfbuzz-dev
+  * Drop patches included in upstream release
+  * Disable mupdf to read from console. (Closes: #830143)
+  * The mudraw command is merged to mutool
+  * Update debian/watch to reflect new download page structure
+  * Fix typo in debian/control
+  * Use --uscan with gbp import-orig by default
+  * Support more options in the wrapper (Closes: #819099)
+  * Bump Standards-Version to 3.9.8, no changes needed
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Thu, 07 Jul 2016 01:58:00 +0800
+
 mupdf (1.7a-1) unstable; urgency=high
 
   * New Upstream version 1.7a
