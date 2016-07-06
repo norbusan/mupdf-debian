@@ -43,5 +43,5 @@ Description: commmand line tools for the MuPDF viewer
  It also reads XPS, OpenXPS and ePub documents.
  .
  This package contains command line tools using the MuPDF library:
-  - mutool - tool for clean, extract, inspect PDF documents.
-  - mudraw - render PDF/XPS/CBZ documents.
+  - mutool - tool for clean, extract, inspect PDF documents and
+             render PDF/XPS/CBZ documents.

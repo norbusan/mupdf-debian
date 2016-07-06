@@ -1,0 +1,6 @@
+mupdf (1.9a+ds1-1) unstable; urgency=medium
+
+  The old mudraw binary is now a subcommand of the mutool binary. Use
+  `mutool draw` to invoke the tool.
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Wed, 06 Jul 2016 23:44:20 +0800
