@@ -210,7 +210,7 @@ pdf_load_mesh_params(fz_shade *shade, pdf_document *doc, pdf_obj *dict)
 	obj = pdf_dict_gets(dict, "Decode");
 	if (pdf_array_len(obj) >= 6)
 	{
-		n = (pdf_array_len(obj) - 4) / 2;
+		n = fz_mini(FZ_MAX_COLORS, (pdf_array_len(obj) - 4) / 2);
 		shade->u.m.x0 = pdf_to_real(pdf_array_get(obj, 0));
 		shade->u.m.x1 = pdf_to_real(pdf_array_get(obj, 1));
 		shade->u.m.y0 = pdf_to_real(pdf_array_get(obj, 2));
