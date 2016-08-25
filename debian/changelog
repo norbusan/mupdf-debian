@@ -1,3 +1,11 @@
+mupdf (1.5-1+deb8u1) jessie-security; urgency=high
+
+  * Non-maintainer upload by the Security Team.
+  * CVE-2016-6265: Use after free vulnerability in pdf_xref.c (Closes: #832031)
+  * CVE-2016-6525: heap overflow in pdf_load_mesh_params() (Closes: #833417)
+
+ -- Salvatore Bonaccorso <carnil@debian.org>  Thu, 25 Aug 2016 16:43:34 +0200
+
 mupdf (1.5-1) unstable; urgency=medium
 
   * New upstream release. (Closes: #761960)

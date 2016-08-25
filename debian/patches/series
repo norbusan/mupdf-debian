@@ -5,3 +5,5 @@
 0005-Fix-unsafe-conversion-from-float-to-fz_linecap.patch
 0006-Fix-FTBFS-with-clang.patch
 0007-Add-mudraw-F-command-switch-to-man-page.patch
+0008-CVE-2016-6265.patch
+0009-CVE-2016-6525.patch
