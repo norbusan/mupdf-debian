@@ -1626,6 +1626,12 @@ pdf_close_document(fz_context *ctx, pdf_document *doc)
 
 	pdf_drop_resource_tables(ctx, doc);
 
+	for (i = 0; i < doc->orphans_count; i++)
+	{
+		pdf_drop_obj(ctx, doc->orphans[i]);
+	}
+	fz_free(ctx, doc->orphans);
+
 	fz_free(ctx, doc);
 }
 
