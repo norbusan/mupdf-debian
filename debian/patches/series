@@ -3,3 +3,5 @@
 0003-Fix-build-with-libopenjp2.patch
 0004-Fix-build-with-system-gl-and-glfw.patch
 0005-Don-t-communicate-via-tty.patch
+0006-CVE-2016-6265.patch
+0007-CVE-2016-6525.patch

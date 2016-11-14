@@ -1,3 +1,18 @@
+mupdf (1.9a+ds1-1.2) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * CVE-2016-6525: heap overflow in pdf_load_mesh_params() (Closes: #833417)
+
+ -- Salvatore Bonaccorso <carnil@debian.org>  Sat, 06 Aug 2016 13:44:07 +0200
+
+mupdf (1.9a+ds1-1.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * CVE-2016-6265: Use after free vulnerability in pdf_xref.c
+    (Closes: #832031)
+
+ -- Salvatore Bonaccorso <carnil@debian.org>  Mon, 01 Aug 2016 14:17:20 +0200
+
 mupdf (1.9a+ds1-1) unstable; urgency=medium
 
   * New upstream release (Closes: #819101)
