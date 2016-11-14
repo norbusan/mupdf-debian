@@ -1,3 +1,12 @@
+mupdf (1.9a+ds1-2) unstable; urgency=medium
+
+  * Acknowledge NMU.
+  * CVE-2016-8674: heap-use-after-free in pdf_to_num (pdf-object.c)
+    (Closes: #840957)
+  * Set debhelper compact to 9
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Tue, 15 Nov 2016 00:07:55 +0800
+
 mupdf (1.9a+ds1-1.2) unstable; urgency=medium
 
   * Non-maintainer upload.
