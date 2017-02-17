@@ -1,3 +1,10 @@
+mupdf (1.9a+ds1-4) unstable; urgency=high
+
+  * Fix patch for CVE-2017-5991: The original patch was incomplete.
+    (Closes: #855383)
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sat, 18 Feb 2017 00:43:12 +0800
+
 mupdf (1.9a+ds1-3) unstable; urgency=high
 
   * CVE-2017-5896: use-after-free in fz_subsample_pixmap()  (Closes: #854734)
