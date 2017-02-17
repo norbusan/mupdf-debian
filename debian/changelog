@@ -1,3 +1,11 @@
+mupdf (1.5-1+deb8u2) jessie-security; urgency=high
+
+  * CVE-2016-8674: heap-use-after-free in pdf_to_num (pdf-object.c) (Closes: #840957)
+  * CVE-2017-5896: use-after-free in fz_subsample_pixmap()  (Closes: #854734)
+  * CVE-2017-5991: NULL pointer dereference in pdf_run_xobject()
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sat, 18 Feb 2017 01:06:01 +0800
+
 mupdf (1.5-1+deb8u1) jessie-security; urgency=high
 
   * Non-maintainer upload by the Security Team.
