@@ -92,6 +92,7 @@ pdf_obj *pdf_dict_getsa(pdf_obj *dict, const char *key, const char *abbrev);
 void pdf_dict_put(pdf_obj *dict, pdf_obj *key, pdf_obj *val);
 void pdf_dict_puts(pdf_obj *dict, const char *key, pdf_obj *val);
 void pdf_dict_puts_drop(pdf_obj *dict, const char *key, pdf_obj *val);
+void pdf_dict_get_puts_drop(pdf_obj *dict, const char *key, pdf_obj *val, pdf_obj **old_val);
 void pdf_dict_putp(pdf_obj *dict, const char *key, pdf_obj *val);
 void pdf_dict_putp_drop(pdf_obj *dict, const char *key, pdf_obj *val);
 void pdf_dict_del(pdf_obj *dict, pdf_obj *key);

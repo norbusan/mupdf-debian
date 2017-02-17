@@ -1271,6 +1271,12 @@ pdf_close_document(pdf_document *doc)
 
 	pdf_lexbuf_fin(&doc->lexbuf.base);
 
+	for (i = 0; i < doc->orphans_count; i++)
+	{
+		pdf_drop_obj(doc->orphans[i]);
+	}
+	fz_free(ctx, doc->orphans);
+
 	fz_free(ctx, doc);
 }
 

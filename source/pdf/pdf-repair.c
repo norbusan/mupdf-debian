@@ -234,6 +234,27 @@ pdf_repair_obj_stm(pdf_document *doc, int num, int gen)
 	}
 }
 
+static void
+orphan_object(fz_context *ctx, pdf_document *doc, pdf_obj *obj)
+{
+	if (doc->orphans_count == doc->orphans_max)
+	{
+		int new_max = (doc->orphans_max ? doc->orphans_max*2 : 32);
+
+		fz_try(ctx)
+		{
+			doc->orphans = fz_resize_array(ctx, doc->orphans, new_max, sizeof(*doc->orphans));
+			doc->orphans_max = new_max;
+		}
+		fz_catch(ctx)
+		{
+			pdf_drop_obj(obj);
+			fz_rethrow(ctx);
+		}
+	}
+	doc->orphans[doc->orphans_count++] = obj;
+}
+
 void
 pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf)
 {
@@ -469,11 +490,14 @@ pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf)
 			/* correct stream length for unencrypted documents */
 			if (!encrypt && list[i].stm_len >= 0)
 			{
+				pdf_obj *old_obj = NULL;
 				dict = pdf_load_object(doc, list[i].num, list[i].gen);
 
 				length = pdf_new_int(doc, list[i].stm_len);
-				pdf_dict_puts(dict, "Length", length);
-				pdf_drop_obj(length);
+				pdf_dict_get_puts_drop(dict, "Length", length, &old_obj);
+
+				if (old_obj)
+					orphan_object(ctx, doc, old_obj);
 
 				pdf_drop_obj(dict);
 			}

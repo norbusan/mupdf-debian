@@ -286,6 +286,10 @@ struct pdf_document_s
 	int num_type3_fonts;
 	int max_type3_fonts;
 	fz_font **type3_fonts;
+
+	int orphans_max;
+	int orphans_count;
+	pdf_obj **orphans;
 };
 
 /*
