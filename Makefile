@@ -53,7 +53,7 @@ endif
 MKTGTDIR = mkdir -p $(dir $@)
 CC_CMD = $(QUIET_CC) $(MKTGTDIR) ; $(CC) $(CFLAGS) -MMD -MP -o $@ -c $<
 CXX_CMD = $(QUIET_CXX) $(MKTGTDIR) ; $(CXX) $(CFLAGS) -MMD -MP -o $@ -c $<
-AR_CMD = $(QUIET_AR) $(MKTGTDIR) ; $(AR) cr $@ $^
+AR_CMD = $(QUIET_AR) $(MKTGTDIR) ; $(AR) cr $@ `LC_ALL=C ls $^ 2>/dev/null`
 ifdef RANLIB
   RANLIB_CMD = $(QUIET_RANLIB) $(RANLIB) $@
 endif
