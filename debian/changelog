@@ -1,3 +1,15 @@
+mupdf (1.11+ds1-1) unstable; urgency=medium
+
+  * New upstream version 1.11+ds1
+    (Closes: #702479, #868821, #868822, #868052)
+  * Refresh patches
+  * debian/copyright: thirdparty/jpeg renamed to thirdparty/libjpeg
+  * Bump Standards-Version to 4.1.0. No changes needed.
+  * debian/copyright: Update copyright information for font resources
+  * debian/mupdf.sh: handle double-dash shell opts (Closes: #851942)
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sun, 24 Sep 2017 14:56:00 +0800
+
 mupdf (1.9a+ds1-4) unstable; urgency=high
 
   * Fix patch for CVE-2017-5991: The original patch was incomplete.
