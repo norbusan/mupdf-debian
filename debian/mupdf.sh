@@ -1,4 +1,5 @@
 #!/bin/sh
+# Copyright (C) 2017 by Kan-Ru Chen <koster@debian.org>
 # Copyright (c) 2001 Alcove (Yann Dirson <yann.dirson@fr.alcove.com>) - http://www.alcove.com/
 # Copyright (C) 2011 Michael Gilbert <michael.s.gilbert@gmail.com>
 # Copyright (C) 2011 Osamu Aoki <osamu@debian.org>
@@ -21,22 +22,22 @@ set -e
 
 file=""
 cmd="/usr/lib/mupdf/mupdf-x11"
-while [ "$#" -gt "0" ]; do
-    case "$1" in
-    -p|-r|-A|-C|-W|-H|-S|-U)
-	cmd="$cmd $1 "$2"" && shift ;;
-    *)
-        test -f "$1" && file="$1" && break ||
-            ( echo "error: \"$1\" file not found" && false ) ;;
+while getopts p:r:A:C:W:H:S:U: f
+do
+    case $f in
+        p|r|A|C|W|H|S|U)
+	    cmd="$cmd -$f $OPTARG";;
     esac
-    shift
 done
+shift `expr $OPTIND - 1`
+test -f "$1" && file="$1" ||
+        ( echo "error: \"$1\" file not found" && exit 1 )
 
 tmp=$(tempfile -s .pdf)
 case "$file" in
-    *.gz|*.Z)  zcat "$file" > "$tmp" && exec 3< "$tmp" && file="/dev/fd/3";;
-    *.xz)     xzcat "$file" > "$tmp" && exec 3< "$tmp" && file="/dev/fd/3";;
-    *.bz2)    bzcat "$file" > "$tmp" && exec 3< "$tmp" && file="/dev/fd/3";;
+    *.gz|*.Z)  zcat -- "$file" > "$tmp" && exec 3< "$tmp" && file="/dev/fd/3";;
+    *.xz)     xzcat -- "$file" > "$tmp" && exec 3< "$tmp" && file="/dev/fd/3";;
+    *.bz2)    bzcat -- "$file" > "$tmp" && exec 3< "$tmp" && file="/dev/fd/3";;
 esac
 rm -f "$tmp"
 
