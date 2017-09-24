@@ -7,7 +7,7 @@ Files-Excluded: thirdparty/curl
                 thirdparty/glfw
                 thirdparty/harfbuzz
                 thirdparty/jbig2dec
-                thirdparty/jpeg
+                thirdparty/libjpeg
                 thirdparty/openjpeg
                 thirdparty/zlib
 
