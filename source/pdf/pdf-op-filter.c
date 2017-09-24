@@ -929,7 +929,7 @@ pdf_filter_SC_color(fz_context *ctx, pdf_processor *proc, int n, float *color)
 	gstate->SC.shd = NULL;
 	gstate->SC.n = n;
 	for (i = 0; i < n; ++i)
-		gstate->SC.c[i] = color[i];
+		gstate->SC.c[i] = fz_clamp(color[i], 0, 1);
 }
 
 static void
@@ -943,7 +943,7 @@ pdf_filter_sc_color(fz_context *ctx, pdf_processor *proc, int n, float *color)
 	gstate->sc.shd = NULL;
 	gstate->sc.n = n;
 	for (i = 0; i < n; ++i)
-		gstate->sc.c[i] = color[i];
+		gstate->sc.c[i] = fz_clamp(color[i], 0, 1);
 }
 
 static void
@@ -1113,7 +1113,7 @@ pdf_filter_END(fz_context *ctx, pdf_processor *proc)
 }
 
 static void
-pdf_drop_imp_filter_processor(fz_context *ctx, pdf_processor *proc)
+pdf_drop_filter_processor(fz_context *ctx, pdf_processor *proc)
 {
 	pdf_filter_processor *p = (pdf_filter_processor*)proc;
 	fz_free(ctx, p->gstate);
@@ -1122,10 +1122,9 @@ pdf_drop_imp_filter_processor(fz_context *ctx, pdf_processor *proc)
 pdf_processor *
 pdf_new_filter_processor(fz_context *ctx, pdf_processor *chain, pdf_document *doc, pdf_obj *old_rdb, pdf_obj *new_rdb)
 {
-
 	pdf_filter_processor *proc = pdf_new_processor(ctx, sizeof *proc);
 	{
-		proc->super.drop_imp = pdf_drop_imp_filter_processor;
+		proc->super.drop_processor = pdf_drop_filter_processor;
 
 		/* general graphics state */
 		proc->super.op_w = pdf_filter_w;

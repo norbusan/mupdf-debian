@@ -44,8 +44,10 @@ static void jsG_freeobject(js_State *J, js_Object *obj)
 {
 	if (obj->head)
 		jsG_freeproperty(J, obj->head);
-	if (obj->type == JS_CREGEXP)
-		js_regfree(obj->u.r.prog);
+	if (obj->type == JS_CREGEXP) {
+		js_free(J, obj->u.r.source);
+		js_regfreex(J->alloc, J->actx, obj->u.r.prog);
+	}
 	if (obj->type == JS_CITERATOR)
 		jsG_freeiterator(J, obj->u.iter.head);
 	if (obj->type == JS_CUSERDATA && obj->u.user.finalize)
@@ -55,7 +57,7 @@ static void jsG_freeobject(js_State *J, js_Object *obj)
 
 static void jsG_markfunction(js_State *J, int mark, js_Function *fun)
 {
-	unsigned int i;
+	int i;
 	fun->gcmark = mark;
 	for (i = 0; i < fun->funlen; ++i)
 		if (fun->funtab[i]->gcmark != mark)

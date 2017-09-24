@@ -142,6 +142,15 @@ static int zoom_out(int oldres)
 #define MAXRES (zoom_list[nelem(zoom_list)-1])
 #define DEFRES 96
 
+static char filename[2048];
+static char *password = "";
+static float layout_w = DEFAULT_LAYOUT_W;
+static float layout_h = DEFAULT_LAYOUT_H;
+static float layout_em = DEFAULT_LAYOUT_EM;
+static char *layout_css = NULL;
+static int layout_use_doc_css = 1;
+
+static const char *fix_title = "MuPDFGL";
 static const char *title = "MuPDF/GL";
 static fz_document *doc = NULL;
 static fz_page *page = NULL;
@@ -172,6 +181,7 @@ static int showoutline = 0;
 static int showlinks = 0;
 static int showsearch = 0;
 static int showinfo = 0;
+static int showhelp = 0;
 
 static int history_count = 0;
 static int history[256];
@@ -186,7 +196,7 @@ static int search_dir = 1;
 static int search_page = -1;
 static int search_hit_page = -1;
 static int search_hit_count = 0;
-static fz_rect search_hit_bbox[500];
+static fz_rect search_hit_bbox[5000];
 
 static unsigned int next_power_of_two(unsigned int n)
 {
@@ -227,7 +237,8 @@ void texture_from_pixmap(struct texture *tex, fz_pixmap *pix)
 	{
 		if (tex->w > max_texture_size || tex->h > max_texture_size)
 			fz_warn(ctx, "texture size (%d x %d) exceeds implementation limit (%d)", tex->w, tex->h, max_texture_size);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tex->w, tex->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pix->samples);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tex->w, tex->h, 0, pix->n == 4 ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, pix->samples);
 		tex->s = 1;
 		tex->t = 1;
 	}
@@ -237,8 +248,9 @@ void texture_from_pixmap(struct texture *tex, fz_pixmap *pix)
 		int h2 = next_power_of_two(tex->h);
 		if (w2 > max_texture_size || h2 > max_texture_size)
 			fz_warn(ctx, "texture size (%d x %d) exceeds implementation limit (%d)", w2, h2, max_texture_size);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w2, h2, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tex->w, tex->h, GL_RGBA, GL_UNSIGNED_BYTE, pix->samples);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tex->w, tex->h, pix->n == 4 ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, pix->samples);
 		tex->s = (float)tex->w / w2;
 		tex->t = (float)tex->h / h2;
 	}
@@ -261,18 +273,22 @@ void render_page(void)
 	links = NULL;
 	links = fz_load_links(ctx, page);
 
-	pix = fz_new_pixmap_from_page_contents(ctx, page, &page_ctm, fz_device_rgb(ctx));
+	pix = fz_new_pixmap_from_page_contents(ctx, page, &page_ctm, fz_device_rgb(ctx), 0);
 	texture_from_pixmap(&page_tex, pix);
 	fz_drop_pixmap(ctx, pix);
 
 	annot_count = 0;
 	for (annot = fz_first_annot(ctx, page); annot; annot = fz_next_annot(ctx, annot))
 	{
-		pix = fz_new_pixmap_from_annot(ctx, annot, &page_ctm, fz_device_rgb(ctx));
+		pix = fz_new_pixmap_from_annot(ctx, annot, &page_ctm, fz_device_rgb(ctx), 1);
 		texture_from_pixmap(&annot_tex[annot_count++], pix);
 		fz_drop_pixmap(ctx, pix);
+		if (annot_count >= nelem(annot_tex))
+		{
+			fz_warn(ctx, "too many annotations to display!");
+			break;
+		}
 	}
-
 }
 
 static void push_history(void)
@@ -348,12 +364,11 @@ static void do_copy_region(fz_rect *screen_sel, int xofs, int yofs)
 	fz_transform_rect(&page_sel, &page_inv_ctm);
 
 #ifdef _WIN32
-	buf = fz_new_buffer_from_page(ctx, page, &page_sel, 1);
+	buf = fz_new_buffer_from_page(ctx, page, &page_sel, 1, NULL);
 #else
-	buf = fz_new_buffer_from_page(ctx, page, &page_sel, 0);
+	buf = fz_new_buffer_from_page(ctx, page, &page_sel, 0, NULL);
 #endif
-	fz_write_buffer_rune(ctx, buf, 0);
-	glfwSetClipboardString(window, (char*)buf->data);
+	glfwSetClipboardString(window, fz_string_from_buffer(ctx, buf));
 	fz_drop_buffer(ctx, buf);
 }
 
@@ -450,10 +465,9 @@ static int do_outline_imp(fz_outline *node, int end, int x0, int x1, int x, int 
 
 	while (node)
 	{
-		if (node->dest.kind == FZ_LINK_GOTO)
+		p = node->page;
+		if (p >= 0)
 		{
-			p = node->dest.ld.gotor.page;
-
 			if (ui.x >= x0 && ui.x < x1 && ui.y >= y + h && ui.y < y + h + ui.lineheight)
 			{
 				ui.hot = node;
@@ -466,9 +480,9 @@ static int do_outline_imp(fz_outline *node, int end, int x0, int x1, int x, int 
 			}
 
 			n = end;
-			if (node->next && node->next->dest.kind == FZ_LINK_GOTO)
+			if (node->next && node->next->page >= 0)
 			{
-				n = node->next->dest.ld.gotor.page;
+				n = node->next->page;
 			}
 			if (currentpage == p || (currentpage > p && currentpage < n))
 			{
@@ -573,12 +587,18 @@ static void do_links(fz_link *link, int xofs, int yofs)
 		{
 			if (ui.hot == link)
 			{
-				if (link->dest.kind == FZ_LINK_GOTO)
-					jump_to_page(link->dest.ld.gotor.page);
-				else if (link->dest.kind == FZ_LINK_URI)
-					open_browser(link->dest.ld.uri.uri);
+				if (fz_is_external_link(ctx, link->uri))
+					open_browser(link->uri);
+				else
+				{
+					int p = fz_resolve_link(ctx, doc, link->uri, NULL, NULL);
+					if (p >= 0)
+						jump_to_page(p);
+					else
+						fz_warn(ctx, "cannot find link destination '%s'", link->uri);
+					ui_needs_update = 1;
+				}
 			}
-			ui_needs_update = 1;
 		}
 
 		link = link->next;
@@ -672,7 +692,7 @@ static void do_forms(float xofs, float yofs)
 		{
 			if (pdf->focus)
 				ui.active = do_forms;
-			pdf_update_page(ctx, pdf, (pdf_page*)page);
+			pdf_update_page(ctx, (pdf_page*)page);
 			render_page();
 			ui_needs_update = 1;
 		}
@@ -685,7 +705,7 @@ static void do_forms(float xofs, float yofs)
 		event.event.pointer.ptype = PDF_POINTER_UP;
 		if (pdf_pass_event(ctx, pdf, (pdf_page*)page, &event))
 		{
-			pdf_update_page(ctx, pdf, (pdf_page*)page);
+			pdf_update_page(ctx, (pdf_page*)page);
 			render_page();
 			ui_needs_update = 1;
 		}
@@ -694,25 +714,24 @@ static void do_forms(float xofs, float yofs)
 
 static void toggle_fullscreen(void)
 {
-#if 0
-	static int oldw = 100, oldh = 100, oldx = 0, oldy = 0;
-
+	GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+	static int win_x = 0, win_y = 0;
+	static int win_w = 100, win_h = 100;
+	static int win_rr = 60;
 	if (!isfullscreen)
 	{
-		oldw = glutGet(GLUT_WINDOW_WIDTH);
-		oldh = glutGet(GLUT_WINDOW_HEIGHT);
-		oldx = glutGet(GLUT_WINDOW_X);
-		oldy = glutGet(GLUT_WINDOW_Y);
-		glutFullScreen();
+		const GLFWvidmode *mode = glfwGetVideoMode(monitor);
+		glfwGetWindowPos(window, &win_x, &win_y);
+		glfwGetWindowSize(window, &win_w, &win_h);
+		win_rr = mode->refreshRate;
+		glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
 		isfullscreen = 1;
 	}
 	else
 	{
-		glutPositionWindow(oldx, oldy);
-		glutReshapeWindow(oldw, oldh);
+		glfwSetWindowMonitor(window, NULL, win_x, win_y, win_w, win_h, win_rr);
 		isfullscreen = 0;
 	}
-#endif
 }
 
 static void shrinkwrap(void)
@@ -722,6 +741,38 @@ static void shrinkwrap(void)
 	if (isfullscreen)
 		toggle_fullscreen();
 	glfwSetWindowSize(window, w, h);
+}
+
+static void reload(void)
+{
+	fz_drop_outline(ctx, outline);
+	fz_drop_document(ctx, doc);
+
+	doc = fz_open_document(ctx, filename);
+	if (fz_needs_password(ctx, doc))
+	{
+		if (!fz_authenticate_password(ctx, doc, password))
+		{
+			fprintf(stderr, "Invalid password.\n");
+			exit(1);
+		}
+	}
+
+	fz_layout_document(ctx, doc, layout_w, layout_h, layout_em);
+
+	fz_try(ctx)
+		outline = fz_load_outline(ctx, doc);
+	fz_catch(ctx)
+		outline = NULL;
+
+	pdf = pdf_specifics(ctx, doc);
+	if (pdf)
+		pdf_enable_js(ctx, pdf);
+
+	currentpage = fz_clampi(currentpage, 0, fz_count_pages(ctx, doc) - 1);
+
+	render_page();
+	update_title();
 }
 
 static void toggle_outline(void)
@@ -819,7 +870,7 @@ static void do_app(void)
 		quit();
 
 	if (ui.down || ui.middle || ui.right || ui.key)
-		showinfo = 0;
+		showinfo = showhelp = 0;
 
 	if (!ui.focus && ui.key)
 	{
@@ -880,6 +931,7 @@ static void do_app(void)
 			break;
 		case 'f': toggle_fullscreen(); break;
 		case 'w': shrinkwrap(); break;
+		case 'r': reload(); break;
 		case 'o': toggle_outline(); break;
 		case 'W': auto_zoom_w(); break;
 		case 'H': auto_zoom_h(); break;
@@ -897,14 +949,15 @@ static void do_app(void)
 		case '-': currentzoom = zoom_out(currentzoom); break;
 		case '[': currentrotate += 90; break;
 		case ']': currentrotate -= 90; break;
-		case 'l': showlinks = !showlinks; break;
+		case 'L': showlinks = !showlinks; break;
 		case 'i': showinfo = !showinfo; break;
 		case '/': search_dir = 1; showsearch = 1; search_input.p = search_input.text; search_input.q = search_input.end; break;
 		case '?': search_dir = -1; showsearch = 1; search_input.p = search_input.text; search_input.q = search_input.end; break;
-		case KEY_UP: scroll_y -= 10; break;
-		case KEY_DOWN: scroll_y += 10; break;
-		case KEY_LEFT: scroll_x -= 10; break;
-		case KEY_RIGHT: scroll_x += 10; break;
+		case 'k': case KEY_UP: scroll_y -= 10; break;
+		case 'j': case KEY_DOWN: scroll_y += 10; break;
+		case 'h': case KEY_LEFT: scroll_x -= 10; break;
+		case 'l': case KEY_RIGHT: scroll_x += 10; break;
+		case KEY_F1: showhelp = !showhelp; break;
 		}
 
 		if (ui.key >= '0' && ui.key <= '9')
@@ -941,7 +994,7 @@ static void do_info(void)
 	int x = canvas_x + 4 * ui.lineheight;
 	int y = canvas_y + 4 * ui.lineheight;
 	int w = canvas_w - 8 * ui.lineheight;
-	int h = 7 * ui.lineheight;
+	int h = 9 * ui.lineheight;
 
 	glBegin(GL_TRIANGLE_STRIP);
 	{
@@ -967,6 +1020,10 @@ static void do_info(void)
 		y = do_info_line(x, y, "Encryption", buf);
 	if (pdf_specifics(ctx, doc))
 	{
+		if (fz_lookup_metadata(ctx, doc, "info:Creator", buf, sizeof buf) > 0)
+			y = do_info_line(x, y, "PDF Creator", buf);
+		if (fz_lookup_metadata(ctx, doc, "info:Producer", buf, sizeof buf) > 0)
+			y = do_info_line(x, y, "PDF Producer", buf);
 		buf[0] = 0;
 		if (fz_has_permission(ctx, doc, FZ_PERMISSION_PRINT))
 			fz_strlcat(buf, "print, ", sizeof buf);
@@ -982,6 +1039,68 @@ static void do_info(void)
 			fz_strlcat(buf, "none", sizeof buf);
 		y = do_info_line(x, y, "Permissions", buf);
 	}
+}
+
+static int do_help_line(int x, int y, char *label, char *text)
+{
+	ui_draw_string(ctx, x, y, label);
+	ui_draw_string(ctx, x+100, y, text);
+	return y + ui.lineheight;
+}
+
+static void do_help(void)
+{
+	int x = canvas_x + 4 * ui.lineheight;
+	int y = canvas_y + 4 * ui.lineheight;
+	int w = canvas_w - 8 * ui.lineheight;
+	int h = 34 * ui.lineheight;
+
+	glBegin(GL_TRIANGLE_STRIP);
+	{
+		glColor4f(0.9f, 0.9f, 0.9f, 1.0f);
+		glVertex2f(x, y);
+		glVertex2f(x, y + h);
+		glVertex2f(x + w, y);
+		glVertex2f(x + w, y + h);
+	}
+	glEnd();
+
+	x += ui.lineheight;
+	y += ui.lineheight + ui.baseline;
+
+	glColor4f(0, 0, 0, 1);
+	y = do_help_line(x, y, "MuPDF", FZ_VERSION);
+	y += ui.lineheight;
+	y = do_help_line(x, y, "q", "quit");
+	y = do_help_line(x, y, "r", "reload file");
+	y = do_help_line(x, y, "f", "fullscreen window");
+	y = do_help_line(x, y, "w", "shrink wrap window");
+	y = do_help_line(x, y, "i", "show document information");
+	y = do_help_line(x, y, "o", "show/hide outline");
+	y = do_help_line(x, y, "L", "show/hide links");
+	y += ui.lineheight;
+	y = do_help_line(x, y, "b", "smart move backward");
+	y = do_help_line(x, y, "Space", "smart move forward");
+	y = do_help_line(x, y, ", or PgUp", "go backward");
+	y = do_help_line(x, y, ". or PgDn", "go forward");
+	y = do_help_line(x, y, "<", "go backward 10 pages");
+	y = do_help_line(x, y, ">", "go forward 10 pages");
+	y = do_help_line(x, y, "N g", "go to page N");
+	y = do_help_line(x, y, "G", "go to last page");
+	y += ui.lineheight;
+	y = do_help_line(x, y, "t", "go backward in history");
+	y = do_help_line(x, y, "T", "go forward in history");
+	y = do_help_line(x, y, "N m", "save location in bookmark N");
+	y = do_help_line(x, y, "N t", "go to bookmark N");
+	y = do_help_line(x, y, "/ or ?", "search for text");
+	y = do_help_line(x, y, "n or N", "repeat search");
+	y += ui.lineheight;
+	y = do_help_line(x, y, "[ or ]", "rotate left or right");
+	y = do_help_line(x, y, "+ or -", "zoom in or out");
+	y = do_help_line(x, y, "W or H", "fit to width or height");
+	y = do_help_line(x, y, "Z", "fit to page");
+	y = do_help_line(x, y, "z", "reset zoom");
+	y = do_help_line(x, y, "N z", "set zoom to N");
 }
 
 static void do_canvas(void)
@@ -1124,6 +1243,8 @@ static void run_main_loop(void)
 
 	if (showinfo)
 		do_info();
+	else if (showhelp)
+		do_help();
 
 	if (showoutline)
 		do_outline(outline, canvas_x);
@@ -1272,7 +1393,11 @@ static void on_display(GLFWwindow *window)
 
 static void on_error(int error, const char *msg)
 {
+#ifdef _WIN32
+	MessageBoxA(NULL, msg, "MuPDF GLFW Error", MB_ICONERROR);
+#else
 	fprintf(stderr, "gl error %d: %s\n", error, msg);
+#endif
 }
 
 static void usage(const char *argv0)
@@ -1285,6 +1410,7 @@ static void usage(const char *argv0)
 	fprintf(stderr, "\t-H -\tpage height for EPUB layout\n");
 	fprintf(stderr, "\t-S -\tfont size for EPUB layout\n");
 	fprintf(stderr, "\t-U -\tuser style sheet for EPUB layout\n");
+	fprintf(stderr, "\t-X\tdisable document styles for EPUB layout\n");
 	exit(1);
 }
 
@@ -1295,15 +1421,9 @@ int main(int argc, char **argv)
 #endif
 {
 	const GLFWvidmode *video_mode;
-	char filename[2048];
-	char *password = "";
-	float layout_w = DEFAULT_LAYOUT_W;
-	float layout_h = DEFAULT_LAYOUT_H;
-	float layout_em = DEFAULT_LAYOUT_EM;
-	char *layout_css = NULL;
 	int c;
 
-	while ((c = fz_getopt(argc, argv, "p:r:W:H:S:U:")) != -1)
+	while ((c = fz_getopt(argc, argv, "p:r:W:H:S:U:X")) != -1)
 	{
 		switch (c)
 		{
@@ -1314,6 +1434,7 @@ int main(int argc, char **argv)
 		case 'H': layout_h = fz_atof(fz_optarg); break;
 		case 'S': layout_em = fz_atof(fz_optarg); break;
 		case 'U': layout_css = fz_optarg; break;
+		case 'X': layout_use_doc_css = 0; break;
 		}
 	}
 
@@ -1346,6 +1467,8 @@ int main(int argc, char **argv)
 	search_input.q = search_input.p;
 	search_input.end = search_input.p;
 
+	glfwSetErrorCallback(on_error);
+
 	if (!glfwInit()) {
 		fprintf(stderr, "cannot initialize glfw\n");
 		exit(1);
@@ -1355,9 +1478,7 @@ int main(int argc, char **argv)
 	screen_w = video_mode->width;
 	screen_h = video_mode->height;
 
-	glfwSetErrorCallback(on_error);
-
-	window = glfwCreateWindow(DEFAULT_WINDOW_W, DEFAULT_WINDOW_H, filename, NULL, NULL);
+	window = glfwCreateWindow(DEFAULT_WINDOW_W, DEFAULT_WINDOW_H, fix_title, NULL, NULL);
 	if (!window) {
 		fprintf(stderr, "cannot create glfw window\n");
 		exit(1);
@@ -1371,10 +1492,11 @@ int main(int argc, char **argv)
 	if (layout_css)
 	{
 		fz_buffer *buf = fz_read_file(ctx, layout_css);
-		fz_write_buffer_byte(ctx, buf, 0);
-		fz_set_user_css(ctx, (char*)buf->data);
+		fz_set_user_css(ctx, fz_string_from_buffer(ctx, buf));
 		fz_drop_buffer(ctx, buf);
 	}
+
+	fz_set_use_document_css(ctx, layout_use_doc_css);
 
 	has_ARB_texture_non_power_of_two = glfwExtensionSupported("GL_ARB_texture_non_power_of_two");
 	if (!has_ARB_texture_non_power_of_two)
@@ -1388,25 +1510,8 @@ int main(int argc, char **argv)
 
 	ui_init_fonts(ctx, ui.fontsize);
 
-	doc = fz_open_document(ctx, filename);
-	if (fz_needs_password(ctx, doc))
-	{
-		if (!fz_authenticate_password(ctx, doc, password))
-		{
-			fprintf(stderr, "Invalid password.\n");
-			exit(1);
-		}
-	}
+	reload();
 
-	outline = fz_load_outline(ctx, doc);
-	pdf = pdf_specifics(ctx, doc);
-	if (pdf)
-		pdf_enable_js(ctx, pdf);
-
-	fz_layout_document(ctx, doc, layout_w, layout_h, layout_em);
-
-	render_page();
-	update_title();
 	shrinkwrap();
 
 	glfwSetFramebufferSizeCallback(window, on_reshape);

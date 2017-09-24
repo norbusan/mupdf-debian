@@ -9,15 +9,17 @@
 static void usage(void)
 {
 	fprintf(stderr,
-		"usage: mutool create [-o output.pdf] [-adlsz] page.txt [page2.txt ...]\n"
+		"usage: mutool create [-o output.pdf] [-O options] page.txt [page2.txt ...]\n"
 		"\t-o\tname of PDF file to create\n"
-		"\t-a\tascii hex encode binary streams\n"
-		"\t-d\tdecompress all streams\n"
-		"\t-l\tlinearize PDF\n"
-		"\t-s\tclean content streams\n"
-		"\t-z\tdeflate uncompressed streams\n"
-		"\tpage.txt file defines page size, fonts, images and contents\n"
+		"\t-O\tcomma separated list of output options\n"
+		"\tpage.txt\tcontent stream with annotations for creating resources\n\n"
+		"Content stream special commands:\n"
+		"\t%%%%MediaBox LLX LLY URX URY\n"
+		"\t%%%%Rotate Angle\n"
+		"\t%%%%Font Name Filename (or base 14 font name)\n"
+		"\t%%%%Image Name Filename\n\n"
 		);
+	fprintf(stderr, "%s\n", fz_pdf_write_options_usage);
 	exit(1);
 }
 
@@ -127,13 +129,13 @@ static void create_page(char *input)
 		}
 		else
 		{
-			fz_write_buffer(ctx, contents, line, strlen(line));
-			fz_write_buffer_byte(ctx, contents, '\n');
+			fz_append_string(ctx, contents, line);
+			fz_append_byte(ctx, contents, '\n');
 		}
 	}
 	fz_drop_stream(ctx, stm);
 
-	page = pdf_add_page(ctx, doc, &mediabox, rotate, contents, resources);
+	page = pdf_add_page(ctx, doc, &mediabox, rotate, resources, contents);
 	pdf_insert_page(ctx, doc, -1, page);
 	pdf_drop_obj(ctx, page);
 
@@ -145,18 +147,15 @@ int pdfcreate_main(int argc, char **argv)
 {
 	pdf_write_options opts = { 0 };
 	char *output = "out.pdf";
+	char *flags = "compress";
 	int i, c;
 
-	while ((c = fz_getopt(argc, argv, "adlszo:")) != -1)
+	while ((c = fz_getopt(argc, argv, "o:O:")) != -1)
 	{
 		switch (c)
 		{
 		case 'o': output = fz_optarg; break;
-		case 'a': opts.do_ascii ++; break;
-		case 'd': opts.do_expand ^= PDF_EXPAND_ALL; break;
-		case 'l': opts.do_linear ++; break;
-		case 's': opts.do_clean ++; break;
-		case 'z': opts.do_deflate ++; break;
+		case 'O': flags = fz_optarg; break;
 		default: usage(); break;
 		}
 	}
@@ -170,6 +169,8 @@ int pdfcreate_main(int argc, char **argv)
 		fprintf(stderr, "cannot initialise context\n");
 		exit(1);
 	}
+
+	pdf_parse_write_options(ctx, &opts, flags);
 
 	doc = pdf_create_document(ctx);
 

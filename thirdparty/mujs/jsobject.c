@@ -20,29 +20,35 @@ static void jsB_Object(js_State *J)
 
 static void Op_toString(js_State *J)
 {
-	js_Object *self = js_toobject(J, 0);
-	switch (self->type) {
-	case JS_COBJECT: js_pushliteral(J, "[object Object]"); break;
-	case JS_CARRAY: js_pushliteral(J, "[object Array]"); break;
-	case JS_CFUNCTION: js_pushliteral(J, "[object Function]"); break;
-	case JS_CSCRIPT: js_pushliteral(J, "[object Function]"); break;
-	case JS_CCFUNCTION: js_pushliteral(J, "[object Function]"); break;
-	case JS_CERROR: js_pushliteral(J, "[object Error]"); break;
-	case JS_CBOOLEAN: js_pushliteral(J, "[object Boolean]"); break;
-	case JS_CNUMBER: js_pushliteral(J, "[object Number]"); break;
-	case JS_CSTRING: js_pushliteral(J, "[object String]"); break;
-	case JS_CREGEXP: js_pushliteral(J, "[object RegExp]"); break;
-	case JS_CDATE: js_pushliteral(J, "[object Date]"); break;
-	case JS_CMATH: js_pushliteral(J, "[object Math]"); break;
-	case JS_CJSON: js_pushliteral(J, "[object JSON]"); break;
-	case JS_CITERATOR: js_pushliteral(J, "[Iterator]"); break;
-	case JS_CUSERDATA:
-		js_pushliteral(J, "[object ");
-		js_pushliteral(J, self->u.user.tag);
-		js_concat(J);
-		js_pushliteral(J, "]");
-		js_concat(J);
-		break;
+	if (js_isundefined(J, 0))
+		js_pushliteral(J, "[object Undefined]");
+	else if (js_isnull(J, 0))
+		js_pushliteral(J, "[object Null]");
+	else {
+		js_Object *self = js_toobject(J, 0);
+		switch (self->type) {
+		case JS_COBJECT: js_pushliteral(J, "[object Object]"); break;
+		case JS_CARRAY: js_pushliteral(J, "[object Array]"); break;
+		case JS_CFUNCTION: js_pushliteral(J, "[object Function]"); break;
+		case JS_CSCRIPT: js_pushliteral(J, "[object Function]"); break;
+		case JS_CCFUNCTION: js_pushliteral(J, "[object Function]"); break;
+		case JS_CERROR: js_pushliteral(J, "[object Error]"); break;
+		case JS_CBOOLEAN: js_pushliteral(J, "[object Boolean]"); break;
+		case JS_CNUMBER: js_pushliteral(J, "[object Number]"); break;
+		case JS_CSTRING: js_pushliteral(J, "[object String]"); break;
+		case JS_CREGEXP: js_pushliteral(J, "[object RegExp]"); break;
+		case JS_CDATE: js_pushliteral(J, "[object Date]"); break;
+		case JS_CMATH: js_pushliteral(J, "[object Math]"); break;
+		case JS_CJSON: js_pushliteral(J, "[object JSON]"); break;
+		case JS_CITERATOR: js_pushliteral(J, "[Iterator]"); break;
+		case JS_CUSERDATA:
+				   js_pushliteral(J, "[object ");
+				   js_pushliteral(J, self->u.user.tag);
+				   js_concat(J);
+				   js_pushliteral(J, "]");
+				   js_concat(J);
+				   break;
+		}
 	}
 }
 
@@ -135,7 +141,7 @@ static void O_getOwnPropertyNames(js_State *J)
 {
 	js_Object *obj;
 	js_Property *ref;
-	unsigned int k;
+	int k;
 	int i;
 
 	if (!js_isobject(J, 1))
@@ -292,7 +298,7 @@ static void O_keys(js_State *J)
 {
 	js_Object *obj;
 	js_Property *ref;
-	unsigned int k;
+	int k;
 	int i;
 
 	if (!js_isobject(J, 1))
@@ -418,29 +424,29 @@ void jsB_initobject(js_State *J)
 {
 	js_pushobject(J, J->Object_prototype);
 	{
-		jsB_propf(J, "toString", Op_toString, 0);
-		jsB_propf(J, "toLocaleString", Op_toString, 0);
-		jsB_propf(J, "valueOf", Op_valueOf, 0);
-		jsB_propf(J, "hasOwnProperty", Op_hasOwnProperty, 1);
-		jsB_propf(J, "isPrototypeOf", Op_isPrototypeOf, 1);
-		jsB_propf(J, "propertyIsEnumerable", Op_propertyIsEnumerable, 1);
+		jsB_propf(J, "Object.prototype.toString", Op_toString, 0);
+		jsB_propf(J, "Object.prototype.toLocaleString", Op_toString, 0);
+		jsB_propf(J, "Object.prototype.valueOf", Op_valueOf, 0);
+		jsB_propf(J, "Object.prototype.hasOwnProperty", Op_hasOwnProperty, 1);
+		jsB_propf(J, "Object.prototype.isPrototypeOf", Op_isPrototypeOf, 1);
+		jsB_propf(J, "Object.prototype.propertyIsEnumerable", Op_propertyIsEnumerable, 1);
 	}
 	js_newcconstructor(J, jsB_Object, jsB_new_Object, "Object", 1);
 	{
 		/* ES5 */
-		jsB_propf(J, "getPrototypeOf", O_getPrototypeOf, 1);
-		jsB_propf(J, "getOwnPropertyDescriptor", O_getOwnPropertyDescriptor, 2);
-		jsB_propf(J, "getOwnPropertyNames", O_getOwnPropertyNames, 1);
-		jsB_propf(J, "create", O_create, 2);
-		jsB_propf(J, "defineProperty", O_defineProperty, 3);
-		jsB_propf(J, "defineProperties", O_defineProperties, 2);
-		jsB_propf(J, "seal", O_seal, 1);
-		jsB_propf(J, "freeze", O_freeze, 1);
-		jsB_propf(J, "preventExtensions", O_preventExtensions, 1);
-		jsB_propf(J, "isSealed", O_isSealed, 1);
-		jsB_propf(J, "isFrozen", O_isFrozen, 1);
-		jsB_propf(J, "isExtensible", O_isExtensible, 1);
-		jsB_propf(J, "keys", O_keys, 1);
+		jsB_propf(J, "Object.getPrototypeOf", O_getPrototypeOf, 1);
+		jsB_propf(J, "Object.getOwnPropertyDescriptor", O_getOwnPropertyDescriptor, 2);
+		jsB_propf(J, "Object.getOwnPropertyNames", O_getOwnPropertyNames, 1);
+		jsB_propf(J, "Object.create", O_create, 2);
+		jsB_propf(J, "Object.defineProperty", O_defineProperty, 3);
+		jsB_propf(J, "Object.defineProperties", O_defineProperties, 2);
+		jsB_propf(J, "Object.seal", O_seal, 1);
+		jsB_propf(J, "Object.freeze", O_freeze, 1);
+		jsB_propf(J, "Object.preventExtensions", O_preventExtensions, 1);
+		jsB_propf(J, "Object.isSealed", O_isSealed, 1);
+		jsB_propf(J, "Object.isFrozen", O_isFrozen, 1);
+		jsB_propf(J, "Object.isExtensible", O_isExtensible, 1);
+		jsB_propf(J, "Object.keys", O_keys, 1);
 	}
 	js_defglobal(J, "Object", JS_DONTENUM);
 }

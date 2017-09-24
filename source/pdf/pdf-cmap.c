@@ -8,8 +8,7 @@ void
 pdf_drop_cmap_imp(fz_context *ctx, fz_storable *cmap_)
 {
 	pdf_cmap *cmap = (pdf_cmap *)cmap_;
-	if (cmap->usecmap)
-		pdf_drop_cmap(ctx, cmap->usecmap);
+	pdf_drop_cmap(ctx, cmap->usecmap);
 	fz_free(ctx, cmap->ranges);
 	fz_free(ctx, cmap->xranges);
 	fz_free(ctx, cmap->mranges);
@@ -43,8 +42,7 @@ pdf_set_usecmap(fz_context *ctx, pdf_cmap *cmap, pdf_cmap *usecmap)
 {
 	int i;
 
-	if (cmap->usecmap)
-		pdf_drop_cmap(ctx, cmap->usecmap);
+	pdf_drop_cmap(ctx, cmap->usecmap);
 	cmap->usecmap = pdf_keep_cmap(ctx, usecmap);
 
 	if (cmap->codespace_len == 0)
@@ -147,17 +145,6 @@ add_mrange(fz_context *ctx, pdf_cmap *cmap, unsigned int low, int *out, int len)
 	for (; i < PDF_MRANGE_CAP; ++i)
 		cmap->mranges[cmap->mlen].out[i] = 0;
 	cmap->mlen++;
-}
-
-/*
- * Add a range-to-table mapping.
- */
-void
-pdf_map_range_to_table(fz_context *ctx, pdf_cmap *cmap, unsigned int low, int *table, int len)
-{
-	int i;
-	for (i = 0; i < len; i++)
-		add_range(ctx, cmap, low + i, low + i, table[i]);
 }
 
 /*

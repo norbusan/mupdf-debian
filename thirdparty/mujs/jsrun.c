@@ -29,7 +29,7 @@ static void js_outofmemory(js_State *J)
 	js_throw(J);
 }
 
-void *js_malloc(js_State *J, unsigned int size)
+void *js_malloc(js_State *J, int size)
 {
 	void *ptr = J->alloc(J->actx, NULL, size);
 	if (!ptr)
@@ -37,12 +37,20 @@ void *js_malloc(js_State *J, unsigned int size)
 	return ptr;
 }
 
-void *js_realloc(js_State *J, void *ptr, unsigned int size)
+void *js_realloc(js_State *J, void *ptr, int size)
 {
 	ptr = J->alloc(J->actx, ptr, size);
 	if (!ptr)
 		js_outofmemory(J);
 	return ptr;
+}
+
+char *js_strdup(js_State *J, const char *s)
+{
+	int n = strlen(s) + 1;
+	char *p = js_malloc(J, n);
+	memcpy(p, s, n);
+	return p;
 }
 
 void js_free(js_State *J, void *ptr)
@@ -52,7 +60,7 @@ void js_free(js_State *J, void *ptr)
 
 js_String *jsV_newmemstring(js_State *J, const char *s, int n)
 {
-	js_String *v = js_malloc(J, offsetof(js_String, p) + n + 1);
+	js_String *v = js_malloc(J, soffsetof(js_String, p) + n + 1);
 	memcpy(v->p, s, n);
 	v->p[n] = 0;
 	v->gcmark = 0;
@@ -103,9 +111,9 @@ void js_pushnumber(js_State *J, double v)
 
 void js_pushstring(js_State *J, const char *v)
 {
-	unsigned int n = strlen(v);
+	int n = strlen(v);
 	CHECKSTACK(1);
-	if (n <= offsetof(js_Value, type)) {
+	if (n <= soffsetof(js_Value, type)) {
 		char *s = STACK[TOP].u.shrstr;
 		while (n--) *s++ = *v++;
 		*s = 0;
@@ -117,10 +125,10 @@ void js_pushstring(js_State *J, const char *v)
 	++TOP;
 }
 
-void js_pushlstring(js_State *J, const char *v, unsigned int n)
+void js_pushlstring(js_State *J, const char *v, int n)
 {
 	CHECKSTACK(1);
-	if (n <= offsetof(js_Value, type)) {
+	if (n <= soffsetof(js_Value, type)) {
 		char *s = STACK[TOP].u.shrstr;
 		while (n--) *s++ = *v++;
 		*s = 0;
@@ -192,6 +200,7 @@ int js_isnumber(js_State *J, int idx) { return stackidx(J, idx)->type == JS_TNUM
 int js_isstring(js_State *J, int idx) { enum js_Type t = stackidx(J, idx)->type; return t == JS_TSHRSTR || t == JS_TLITSTR || t == JS_TMEMSTR; }
 int js_isprimitive(js_State *J, int idx) { return stackidx(J, idx)->type != JS_TOBJECT; }
 int js_isobject(js_State *J, int idx) { return stackidx(J, idx)->type == JS_TOBJECT; }
+int js_iscoercible(js_State *J, int idx) { js_Value *v = stackidx(J, idx); return v->type != JS_TUNDEFINED && v->type != JS_TNULL; }
 
 int js_iscallable(js_State *J, int idx)
 {
@@ -252,7 +261,7 @@ double js_tonumber(js_State *J, int idx)
 	return jsV_tonumber(J, stackidx(J, idx));
 }
 
-double js_tointeger(js_State *J, int idx)
+int js_tointeger(js_State *J, int idx)
 {
 	return jsV_numbertointeger(jsV_tonumber(J, stackidx(J, idx)));
 }
@@ -433,10 +442,10 @@ void js_rot(js_State *J, int n)
 
 /* Property access that takes care of attributes and getters/setters */
 
-int js_isarrayindex(js_State *J, const char *str, unsigned int *idx)
+int js_isarrayindex(js_State *J, const char *str, int *idx)
 {
 	char buf[32];
-	*idx = jsV_numbertouint32(jsV_stringtonumber(J, str));
+	*idx = jsV_numbertointeger(jsV_stringtonumber(J, str));
 	sprintf(buf, "%u", *idx);
 	return !strcmp(buf, str);
 }
@@ -455,7 +464,7 @@ static void js_pushrune(js_State *J, Rune rune)
 static int jsR_hasproperty(js_State *J, js_Object *obj, const char *name)
 {
 	js_Property *ref;
-	unsigned int k;
+	int k;
 
 	if (obj->type == JS_CARRAY) {
 		if (!strcmp(name, "length")) {
@@ -528,14 +537,14 @@ static void jsR_setproperty(js_State *J, js_Object *obj, const char *name)
 {
 	js_Value *value = stackidx(J, -1);
 	js_Property *ref;
-	unsigned int k;
+	int k;
 	int own;
 
 	if (obj->type == JS_CARRAY) {
 		if (!strcmp(name, "length")) {
 			double rawlen = jsV_tonumber(J, value);
-			unsigned int newlen = jsV_numbertouint32(rawlen);
-			if (newlen != rawlen)
+			int newlen = jsV_numbertointeger(rawlen);
+			if (newlen != rawlen || newlen < 0)
 				js_rangeerror(J, "array length");
 			jsV_resizearray(J, obj, newlen);
 			return;
@@ -602,7 +611,7 @@ static void jsR_defproperty(js_State *J, js_Object *obj, const char *name,
 	int atts, js_Value *value, js_Object *getter, js_Object *setter)
 {
 	js_Property *ref;
-	unsigned int k;
+	int k;
 
 	if (obj->type == JS_CARRAY) {
 		if (!strcmp(name, "length"))
@@ -663,7 +672,7 @@ readonly:
 static int jsR_delproperty(js_State *J, js_Object *obj, const char *name)
 {
 	js_Property *ref;
-	unsigned int k;
+	int k;
 
 	if (obj->type == JS_CARRAY) {
 		if (!strcmp(name, "length"))
@@ -920,15 +929,15 @@ static void jsR_restorescope(js_State *J)
 	J->E = J->envstack[--J->envtop];
 }
 
-static void jsR_calllwfunction(js_State *J, unsigned int n, js_Function *F, js_Environment *scope)
+static void jsR_calllwfunction(js_State *J, int n, js_Function *F, js_Environment *scope)
 {
 	js_Value v;
-	unsigned int i;
+	int i;
 
 	jsR_savescope(J, scope);
 
 	if (n > F->numparams) {
-		js_pop(J, F->numparams - n);
+		js_pop(J, n - F->numparams);
 		n = F->numparams;
 	}
 	for (i = n; i < F->varlen; ++i)
@@ -942,10 +951,10 @@ static void jsR_calllwfunction(js_State *J, unsigned int n, js_Function *F, js_E
 	jsR_restorescope(J);
 }
 
-static void jsR_callfunction(js_State *J, unsigned int n, js_Function *F, js_Environment *scope)
+static void jsR_callfunction(js_State *J, int n, js_Function *F, js_Environment *scope)
 {
 	js_Value v;
-	unsigned int i;
+	int i;
 
 	scope = jsR_newenvironment(J, jsV_newobject(J, JS_COBJECT, NULL), scope);
 
@@ -986,7 +995,7 @@ static void jsR_callfunction(js_State *J, unsigned int n, js_Function *F, js_Env
 	jsR_restorescope(J);
 }
 
-static void jsR_callscript(js_State *J, unsigned int n, js_Function *F, js_Environment *scope)
+static void jsR_callscript(js_State *J, int n, js_Function *F, js_Environment *scope)
 {
 	js_Value v;
 
@@ -1003,9 +1012,9 @@ static void jsR_callscript(js_State *J, unsigned int n, js_Function *F, js_Envir
 		jsR_restorescope(J);
 }
 
-static void jsR_callcfunction(js_State *J, unsigned int n, unsigned int min, js_CFunction F)
+static void jsR_callcfunction(js_State *J, int n, int min, js_CFunction F)
 {
-	unsigned int i;
+	int i;
 	js_Value v;
 
 	for (i = n; i < min; ++i)
@@ -1019,8 +1028,9 @@ static void jsR_callcfunction(js_State *J, unsigned int n, unsigned int min, js_
 
 static void jsR_pushtrace(js_State *J, const char *name, const char *file, int line)
 {
-	if (++J->tracetop == JS_ENVLIMIT)
+	if (J->tracetop + 1 == JS_ENVLIMIT)
 		js_error(J, "call stack overflow");
+	++J->tracetop;
 	J->trace[J->tracetop].name = name;
 	J->trace[J->tracetop].file = file;
 	J->trace[J->tracetop].line = line;
@@ -1051,7 +1061,7 @@ void js_call(js_State *J, int n)
 		jsR_callscript(J, n, obj->u.f.function, obj->u.f.scope);
 		--J->tracetop;
 	} else if (obj->type == JS_CCFUNCTION) {
-		jsR_pushtrace(J, obj->u.c.name, "[C]", 0);
+		jsR_pushtrace(J, obj->u.c.name, "native", 0);
 		jsR_callcfunction(J, n, obj->u.c.length, obj->u.c.function);
 		--J->tracetop;
 	}
@@ -1078,7 +1088,7 @@ void js_construct(js_State *J, int n)
 			js_rot(J, n + 1);
 		BOT = TOP - n - 1;
 
-		jsR_pushtrace(J, obj->u.c.name, "[C]", 0);
+		jsR_pushtrace(J, obj->u.c.name, "native", 0);
 		jsR_callcfunction(J, n, obj->u.c.length, obj->u.c.constructor);
 		--J->tracetop;
 
@@ -1232,10 +1242,13 @@ void js_stacktrace(js_State *J)
 		const char *name = J->trace[n].name;
 		const char *file = J->trace[n].file;
 		int line = J->trace[n].line;
-		if (line > 0)
-			printf("\t%s:%d: in function '%s'\n", file, line, name);
-		else
-			printf("\t%s: in function '%s'\n", file, name);
+		if (line > 0) {
+			if (name[0])
+				printf("\tat %s (%s:%d)\n", name, file, line);
+			else
+				printf("\tat %s:%d\n", file, line);
+		} else
+			printf("\tat %s (%s)\n", name, file);
 	}
 }
 

@@ -35,6 +35,11 @@ static inline int iswhite(int ch)
 		ch == '\040';
 }
 
+static inline int fz_isprint(int ch)
+{
+	return ch >= ' ' && ch <= '~';
+}
+
 static inline int unhex(int ch)
 {
 	if (ch >= '0' && ch <= '9') return ch - '0';
@@ -439,8 +444,13 @@ pdf_token_from_keyword(char *key)
 	case 'x':
 		if (!strcmp(key, "xref")) return PDF_TOK_XREF;
 		break;
-	default:
-		break;
+	}
+
+	while (*key)
+	{
+		if (!fz_isprint(*key))
+			return PDF_TOK_ERROR;
+		++key;
 	}
 
 	return PDF_TOK_KEYWORD;
@@ -605,47 +615,45 @@ pdf_lex_no_string(fz_context *ctx, fz_stream *f, pdf_lexbuf *buf)
 	}
 }
 
-void pdf_print_token(fz_context *ctx, fz_buffer *fzbuf, int tok, pdf_lexbuf *buf)
+void pdf_append_token(fz_context *ctx, fz_buffer *fzbuf, int tok, pdf_lexbuf *buf)
 {
 	switch (tok)
 	{
 	case PDF_TOK_NAME:
-		fz_buffer_printf(ctx, fzbuf, "/%s", buf->scratch);
+		fz_append_printf(ctx, fzbuf, "/%s", buf->scratch);
 		break;
 	case PDF_TOK_STRING:
 		if (buf->len >= buf->size)
 			pdf_lexbuf_grow(ctx, buf);
 		buf->scratch[buf->len] = 0;
-		fz_buffer_print_pdf_string(ctx, fzbuf, buf->scratch);
+		fz_append_pdf_string(ctx, fzbuf, buf->scratch);
 		break;
 	case PDF_TOK_OPEN_DICT:
-		fz_buffer_printf(ctx, fzbuf, "<<");
+		fz_append_string(ctx, fzbuf, "<<");
 		break;
 	case PDF_TOK_CLOSE_DICT:
-		fz_buffer_printf(ctx, fzbuf, ">>");
+		fz_append_string(ctx, fzbuf, ">>");
 		break;
 	case PDF_TOK_OPEN_ARRAY:
-		fz_buffer_printf(ctx, fzbuf, "[");
+		fz_append_byte(ctx, fzbuf, '[');
 		break;
 	case PDF_TOK_CLOSE_ARRAY:
-		fz_buffer_printf(ctx, fzbuf, "]");
+		fz_append_byte(ctx, fzbuf, ']');
 		break;
 	case PDF_TOK_OPEN_BRACE:
-		fz_buffer_printf(ctx, fzbuf, "{");
+		fz_append_byte(ctx, fzbuf, '{');
 		break;
 	case PDF_TOK_CLOSE_BRACE:
-		fz_buffer_printf(ctx, fzbuf, "}");
+		fz_append_byte(ctx, fzbuf, '}');
 		break;
 	case PDF_TOK_INT:
-		fz_buffer_printf(ctx, fzbuf, "%d", buf->i);
+		fz_append_printf(ctx, fzbuf, "%d", buf->i);
 		break;
 	case PDF_TOK_REAL:
-		{
-			fz_buffer_printf(ctx, fzbuf, "%g", buf->f);
-		}
+		fz_append_printf(ctx, fzbuf, "%g", buf->f);
 		break;
 	default:
-		fz_buffer_printf(ctx, fzbuf, "%s", buf->scratch);
+		fz_append_data(ctx, fzbuf, buf->scratch, buf->len);
 		break;
 	}
 }

@@ -1,12 +1,23 @@
 #ifndef MUPDF_FITZ_SYSTEM_H
 #define MUPDF_FITZ_SYSTEM_H
 
+#if _MSC_VER >= 1400 /* MSVC 8 (Visual Studio 2005) or newer */
+#define FZ_LARGEFILE
+#endif
+
 /* The very first decision we need to make is, are we using the 64bit
  * file pointers code. This must happen before the stdio.h include. */
 #ifdef FZ_LARGEFILE
 /* Set _LARGEFILE64_SOURCE so that we know fopen64 et al will be declared. */
 #ifndef _LARGEFILE64_SOURCE
 #define _LARGEFILE64_SOURCE
+#endif
+#endif
+
+/* Turn on valgrind pacification in debug builds. */
+#ifndef NDEBUG
+#ifndef PACIFY_VALGRIND
+#define PACIFY_VALGRIND
 #endif
 #endif
 
@@ -31,6 +42,7 @@
 #include <setjmp.h>
 
 #include "mupdf/memento.h"
+#include "mupdf/fitz/track-usage.h"
 
 #define nelem(x) (sizeof(x)/sizeof((x)[0]))
 
@@ -40,6 +52,16 @@
 
 #ifndef M_SQRT2
 #define M_SQRT2 1.41421356237309504880
+#endif
+
+/*
+	Spot architectures where we have optimisations.
+*/
+
+#if defined(__arm__) || defined(__thumb__)
+#ifndef ARCH_ARM
+#define ARCH_ARM
+#endif
 #endif
 
 /*
@@ -70,6 +92,11 @@
 #define fz_jmp_buf jmp_buf
 #endif
 
+#ifndef _MSC_VER
+/* For gettimeofday */
+#include <sys/time.h>
+#endif
+
 #ifdef _MSC_VER /* Microsoft Visual C */
 
 /* MSVC up to VS2012 */
@@ -90,6 +117,10 @@ static __inline int signbit(double x)
 
 #else
 #define va_copy_end(a) va_end(a)
+#endif
+
+#ifndef PATH_MAX
+#define PATH_MAX (1024)
 #endif
 
 typedef signed char int8_t;
@@ -133,21 +164,22 @@ static int msvc_snprintf(char *str, size_t size, const char *fmt, ...)
 }
 #endif
 
-#if _MSC_VER < 1700 /* MSVC 2012 */
+#if _MSC_VER <= 1700 /* MSVC 2012 */
 #define isnan(x) _isnan(x)
 #define isinf(x) (!_finite(x))
 #endif
 
 #define hypotf _hypotf
 
-FILE *fz_fopen_utf8(const char *name, const char *mode);
-
 #define fz_fopen fz_fopen_utf8
+#define fz_remove fz_remove_utf8
 
 char *fz_utf8_from_wchar(const wchar_t *s);
 wchar_t *fz_wchar_from_utf8(const char *s);
 
 FILE *fz_fopen_utf8(const char *name, const char *mode);
+int fz_remove_utf8(const char *name);
+
 char **fz_argv_from_wargv(int argc, wchar_t **wargv);
 void fz_free_argv(int argc, char **argv);
 
@@ -155,10 +187,15 @@ void fz_free_argv(int argc, char **argv);
 #define ftello64 _ftelli64
 #define atoll _atoi64
 
+#include <sys/stat.h>
+
+#define stat _stat
+
 #else /* Unix or close enough */
 
 #include <stdint.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #ifndef O_BINARY
 #define O_BINARY 0
@@ -181,6 +218,9 @@ typedef int64_t fz_off_t;
 #ifndef fz_fopen
 #define fz_fopen fopen
 #endif
+#ifndef fz_remove
+#define fz_remove remove
+#endif
 #define fz_fseek fseek
 #define fz_ftell ftell
 typedef int fz_off_t;
@@ -188,14 +228,24 @@ typedef int fz_off_t;
 #define fz_atoo_imp atoi
 #endif
 
+/* Portable way to format a size_t */
+#if defined(_WIN64)
+#define FMT_zu "%llu"
+#elif defined(_WIN32)
+#define FMT_zu "%u"
+#else
+#define FMT_zu "%zu"
+#endif
+
 #ifdef __ANDROID__
 #include <android/log.h>
-#define LOG_TAG "libmupdf"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO,LOG_TAG,__VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,__VA_ARGS__)
-#else
-#define LOGI(...) do {} while(0)
-#define LOGE(...) do {} while(0)
+int fz_android_fprintf(FILE *file, const char *fmt, ...);
+#ifndef NDEBUG
+/* Capture fprintf for stdout/stderr to the android logging
+ * stream. Only do this in debug builds as this implies a
+ * delay */
+#define fprintf fz_android_fprintf
+#endif
 #endif
 
 /* inline is standard in C++. For some compilers we can enable it within C too. */

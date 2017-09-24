@@ -18,9 +18,6 @@ static void
 fz_drop_glyph_imp(fz_context *ctx, fz_storable *glyph_)
 {
 	fz_glyph *glyph = (fz_glyph *)glyph_;
-
-	if (glyph == NULL)
-		return;
 	fz_drop_pixmap(ctx, glyph->pixmap);
 	fz_free(ctx, glyph);
 }
@@ -145,7 +142,7 @@ fz_new_glyph_from_pixmap(fz_context *ctx, fz_pixmap *pix)
 			glyph->pixmap = fz_keep_pixmap(ctx, pix);
 		}
 		else
-			glyph = fz_new_glyph_from_8bpp_data(ctx, pix->x, pix->y, pix->w, pix->h, pix->samples, pix->w);
+			glyph = fz_new_glyph_from_8bpp_data(ctx, pix->x, pix->y, pix->w, pix->h, pix->samples, pix->stride);
 	}
 	fz_always(ctx)
 	{

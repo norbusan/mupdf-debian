@@ -1,20 +1,65 @@
-#include "mupdf/fitz.h"
+#include "fitz-imp.h"
 
-void *
-fz_new_device(fz_context *ctx, int size)
+fz_device *
+fz_new_device_of_size(fz_context *ctx, int size)
 {
-	return Memento_label(fz_calloc(ctx, 1, size), "fz_device");
+	fz_device *dev = Memento_label(fz_calloc(ctx, 1, size), "fz_device");
+	dev->refs = 1;
+	return dev;
+}
+
+void
+fz_close_device(fz_context *ctx, fz_device *dev)
+{
+	if (dev == NULL)
+		return;
+	if (dev->close_device)
+		dev->close_device(ctx, dev);
+
+	/* Don't call more than once! */
+	dev->close_device = NULL;
+
+	/* And disable all further device calls. */
+	dev->fill_path = NULL;
+	dev->stroke_path = NULL;
+	dev->clip_path = NULL;
+	dev->clip_stroke_path = NULL;
+	dev->fill_text = NULL;
+	dev->stroke_text = NULL;
+	dev->clip_text = NULL;
+	dev->clip_stroke_text = NULL;
+	dev->ignore_text = NULL;
+	dev->fill_shade = NULL;
+	dev->fill_image = NULL;
+	dev->fill_image_mask = NULL;
+	dev->clip_image_mask = NULL;
+	dev->pop_clip = NULL;
+	dev->begin_mask = NULL;
+	dev->end_mask = NULL;
+	dev->begin_group = NULL;
+	dev->end_group = NULL;
+	dev->begin_tile = NULL;
+	dev->end_tile = NULL;
+}
+
+fz_device *
+fz_keep_device(fz_context *ctx, fz_device *dev)
+{
+	return fz_keep_imp(ctx, dev, &dev->refs);
 }
 
 void
 fz_drop_device(fz_context *ctx, fz_device *dev)
 {
-	if (dev == NULL)
-		return;
-	if (dev->drop_imp)
-		dev->drop_imp(ctx, dev);
-	fz_free(ctx, dev->container);
-	fz_free(ctx, dev);
+	if (fz_drop_imp(ctx, dev, &dev->refs))
+	{
+		if (dev->close_device)
+			fz_warn(ctx, "dropping unclosed device");
+		if (dev->drop_device)
+			dev->drop_device(ctx, dev);
+		fz_free(ctx, dev->container);
+		fz_free(ctx, dev);
+	}
 }
 
 void

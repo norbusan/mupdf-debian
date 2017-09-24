@@ -6,15 +6,16 @@ extern "C" {
 #endif
 
 #include "mupdf/fitz/version.h"
+#include "mupdf/fitz/config.h"
 #include "mupdf/fitz/system.h"
 #include "mupdf/fitz/context.h"
 
 #include "mupdf/fitz/crypt.h"
 #include "mupdf/fitz/getopt.h"
+#include "mupdf/fitz/geometry.h"
 #include "mupdf/fitz/hash.h"
-#include "mupdf/fitz/math.h"
 #include "mupdf/fitz/pool.h"
-#include "mupdf/fitz/string.h"
+#include "mupdf/fitz/string-util.h"
 #include "mupdf/fitz/tree.h"
 #include "mupdf/fitz/ucdn.h"
 #include "mupdf/fitz/bidi.h"
@@ -26,7 +27,7 @@ extern "C" {
 #include "mupdf/fitz/compressed-buffer.h"
 #include "mupdf/fitz/filter.h"
 #include "mupdf/fitz/output.h"
-#include "mupdf/fitz/unzip.h"
+#include "mupdf/fitz/archive.h"
 
 /* Resources */
 #include "mupdf/fitz/store.h"
@@ -58,6 +59,8 @@ extern "C" {
 #include "mupdf/fitz/util.h"
 
 /* Output formats */
+#include "mupdf/fitz/writer.h"
+#include "mupdf/fitz/band-writer.h"
 #include "mupdf/fitz/output-pnm.h"
 #include "mupdf/fitz/output-png.h"
 #include "mupdf/fitz/output-pwg.h"

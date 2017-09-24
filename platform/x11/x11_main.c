@@ -176,14 +176,8 @@ char *winpassword(pdfapp_t *app, char *filename)
 
 char *wintextinput(pdfapp_t *app, char *inittext, int retry)
 {
-	static char buf[256];
-
-	if (retry)
-		return NULL;
-
-	printf("> [%s] ", inittext);
-	fgets(buf, sizeof buf, stdin);
-	return buf;
+	/* We don't support text input on the x11 viewer */
+	return NULL;
 }
 
 int winchoiceinput(pdfapp_t *app, int nopts, char *opts[], int *nvals, char *vals[])
@@ -388,10 +382,16 @@ void winhelp(pdfapp_t *app)
 
 void winresize(pdfapp_t *app, int w, int h)
 {
-	int image_w = fz_pixmap_width(gapp.ctx, gapp.image);
-	int image_h = fz_pixmap_height(gapp.ctx, gapp.image);
+	int image_w = gapp.layout_w;
+	int image_h = gapp.layout_h;
 	XWindowChanges values;
 	int mask, width, height;
+
+	if (gapp.image)
+	{
+		image_w = fz_pixmap_width(gapp.ctx, gapp.image);
+		image_h = fz_pixmap_height(gapp.ctx, gapp.image);
+	}
 
 	mask = CWWidth | CWHeight;
 	values.width = w;
@@ -487,72 +487,80 @@ static void winblitstatusbar(pdfapp_t *app)
 
 static void winblit(pdfapp_t *app)
 {
-	int image_w = fz_pixmap_width(gapp.ctx, gapp.image);
-	int image_h = fz_pixmap_height(gapp.ctx, gapp.image);
-	int image_n = fz_pixmap_components(gapp.ctx, gapp.image);
-	unsigned char *image_samples = fz_pixmap_samples(gapp.ctx, gapp.image);
-	int x0 = gapp.panx;
-	int y0 = gapp.pany;
-	int x1 = gapp.panx + image_w;
-	int y1 = gapp.pany + image_h;
-
-	XSetForeground(xdpy, xgc, xbgcolor.pixel);
-	fillrect(0, 0, x0, gapp.winh);
-	fillrect(x1, 0, gapp.winw - x1, gapp.winh);
-	fillrect(0, 0, gapp.winw, y0);
-	fillrect(0, y1, gapp.winw, gapp.winh - y1);
-
-	XSetForeground(xdpy, xgc, xshcolor.pixel);
-	fillrect(x0+2, y1, image_w, 2);
-	fillrect(x1, y0+2, 2, image_h);
-
-	if (gapp.iscopying || justcopied)
+	if (gapp.image)
 	{
-		pdfapp_invert(&gapp, &gapp.selr);
-		justcopied = 1;
-	}
+		int image_w = fz_pixmap_width(gapp.ctx, gapp.image);
+		int image_h = fz_pixmap_height(gapp.ctx, gapp.image);
+		int image_n = fz_pixmap_components(gapp.ctx, gapp.image);
+		unsigned char *image_samples = fz_pixmap_samples(gapp.ctx, gapp.image);
+		int x0 = gapp.panx;
+		int y0 = gapp.pany;
+		int x1 = gapp.panx + image_w;
+		int y1 = gapp.pany + image_h;
 
-	pdfapp_inverthit(&gapp);
+		XSetForeground(xdpy, xgc, xbgcolor.pixel);
+		fillrect(0, 0, x0, gapp.winh);
+		fillrect(x1, 0, gapp.winw - x1, gapp.winh);
+		fillrect(0, 0, gapp.winw, y0);
+		fillrect(0, y1, gapp.winw, gapp.winh - y1);
 
-	if (image_n == 4)
-		ximage_blit(xwin, xgc,
-			x0, y0,
-			image_samples,
-			0, 0,
-			image_w,
-			image_h,
-			image_w * image_n);
-	else if (image_n == 2)
-	{
-		int i = image_w*image_h;
-		unsigned char *color = malloc(i*4);
-		if (color)
+		XSetForeground(xdpy, xgc, xshcolor.pixel);
+		fillrect(x0+2, y1, image_w, 2);
+		fillrect(x1, y0+2, 2, image_h);
+
+		if (gapp.iscopying || justcopied)
 		{
-			unsigned char *s = image_samples;
-			unsigned char *d = color;
-			for (; i > 0 ; i--)
-			{
-				d[2] = d[1] = d[0] = *s++;
-				d[3] = *s++;
-				d += 4;
-			}
+			pdfapp_invert(&gapp, &gapp.selr);
+			justcopied = 1;
+		}
+
+		pdfapp_inverthit(&gapp);
+
+		if (image_n == 4)
 			ximage_blit(xwin, xgc,
 				x0, y0,
-				color,
+				image_samples,
 				0, 0,
 				image_w,
 				image_h,
-				image_w * 4);
-			free(color);
+				image_w * image_n);
+		else if (image_n == 2)
+		{
+			int i = image_w*image_h;
+			unsigned char *color = malloc(i*4);
+			if (color)
+			{
+				unsigned char *s = image_samples;
+				unsigned char *d = color;
+				for (; i > 0 ; i--)
+				{
+					d[2] = d[1] = d[0] = *s++;
+					d[3] = *s++;
+					d += 4;
+				}
+				ximage_blit(xwin, xgc,
+					x0, y0,
+					color,
+					0, 0,
+					image_w,
+					image_h,
+					image_w * 4);
+				free(color);
+			}
+		}
+
+		pdfapp_inverthit(&gapp);
+
+		if (gapp.iscopying || justcopied)
+		{
+			pdfapp_invert(&gapp, &gapp.selr);
+			justcopied = 1;
 		}
 	}
-
-	pdfapp_inverthit(&gapp);
-
-	if (gapp.iscopying || justcopied)
+	else
 	{
-		pdfapp_invert(&gapp, &gapp.selr);
-		justcopied = 1;
+		XSetForeground(xdpy, xgc, xbgcolor.pixel);
+		fillrect(0, 0, gapp.winw, gapp.winh);
 	}
 
 	winblitstatusbar(app);
@@ -804,8 +812,10 @@ static void usage(void)
 	fprintf(stderr, "\t-C -\tRRGGBB (tint color in hexadecimal syntax)\n");
 	fprintf(stderr, "\t-W -\tpage width for EPUB layout\n");
 	fprintf(stderr, "\t-H -\tpage height for EPUB layout\n");
+	fprintf(stderr, "\t-I -\tinvert colors\n");
 	fprintf(stderr, "\t-S -\tfont size for EPUB layout\n");
 	fprintf(stderr, "\t-U -\tuser style sheet for EPUB layout\n");
+	fprintf(stderr, "\t-X\tdisable document styles for EPUB layout\n");
 	exit(1);
 }
 
@@ -826,6 +836,7 @@ int main(int argc, char **argv)
 	struct timeval now;
 	struct timeval *timeout;
 	struct timeval tmo_advance_delay;
+	int bps = 0;
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
 	if (!ctx)
@@ -836,7 +847,7 @@ int main(int argc, char **argv)
 
 	pdfapp_init(ctx, &gapp);
 
-	while ((c = fz_getopt(argc, argv, "p:r:A:C:W:H:S:U:")) != -1)
+	while ((c = fz_getopt(argc, argv, "Ip:r:A:C:W:H:S:U:Xb:")) != -1)
 	{
 		switch (c)
 		{
@@ -849,11 +860,14 @@ int main(int argc, char **argv)
 			break;
 		case 'p': password = fz_optarg; break;
 		case 'r': resolution = atoi(fz_optarg); break;
+		case 'I': gapp.invert = 1; break;
 		case 'A': fz_set_aa_level(ctx, atoi(fz_optarg)); break;
 		case 'W': gapp.layout_w = fz_atof(fz_optarg); break;
 		case 'H': gapp.layout_h = fz_atof(fz_optarg); break;
 		case 'S': gapp.layout_em = fz_atof(fz_optarg); break;
 		case 'U': gapp.layout_css = fz_optarg; break;
+		case 'X': gapp.layout_use_doc_css = 0; break;
+		case 'b': bps = (fz_optarg && *fz_optarg) ? fz_atoi(fz_optarg) : 4096; break;
 		default: usage();
 		}
 	}
@@ -885,7 +899,10 @@ int main(int argc, char **argv)
 	tmo_at.tv_usec = 0;
 	timeout = NULL;
 
-	pdfapp_open(&gapp, filename, 0);
+	if (bps)
+		pdfapp_open_progressive(&gapp, filename, 0, bps);
+	else
+		pdfapp_open(&gapp, filename, 0);
 
 	FD_ZERO(&fds);
 

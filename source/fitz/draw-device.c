@@ -1,4 +1,5 @@
-#include "mupdf/fitz.h"
+#include "fitz-imp.h"
+#include "glyph-cache-imp.h"
 #include "draw-imp.h"
 
 #define STACK_SIZE 96
@@ -27,7 +28,6 @@ struct fz_draw_state_s {
 	fz_pixmap *mask;
 	fz_pixmap *shape;
 	int blendmode;
-	int luminosity;
 	int id;
 	float alpha;
 	fz_matrix ctm;
@@ -38,6 +38,7 @@ struct fz_draw_state_s {
 struct fz_draw_device_s
 {
 	fz_device super;
+	fz_matrix transform;
 	fz_gel *gel;
 	int flags;
 	int top;
@@ -63,7 +64,7 @@ static void fz_dump_blend(fz_context *ctx, fz_pixmap *pix, const char *s)
 		printf("%s%02d", s, group_dump_count);
 	group_dump_count++;
 
-	fz_save_pixmap_as_png(ctx, pix, name, (pix->n > 1));
+	fz_save_pixmap_as_png(ctx, pix, name);
 }
 
 static void dump_spaces(int x, const char *s)
@@ -162,7 +163,7 @@ fz_knockout_begin(fz_context *ctx, fz_draw_device *dev)
 
 	fz_pixmap_bbox(ctx, state->dest, &bbox);
 	fz_intersect_irect(&bbox, &state->scissor);
-	dest = fz_new_pixmap_with_bbox(ctx, state->dest->colorspace, &bbox);
+	dest = fz_new_pixmap_with_bbox(ctx, state->dest->colorspace, &bbox, state->dest->alpha || isolated);
 
 	if (isolated)
 	{
@@ -193,7 +194,7 @@ fz_knockout_begin(fz_context *ctx, fz_draw_device *dev)
 	}
 	else
 	{
-		shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+		shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 		fz_clear_pixmap(ctx, shape);
 	}
 #ifdef DUMP_GROUP_BLENDS
@@ -264,30 +265,38 @@ static void fz_knockout_end(fz_context *ctx, fz_draw_device *dev)
 #endif
 }
 
+static inline fz_matrix concat(const fz_matrix *one, const fz_matrix *two)
+{
+	fz_matrix ctm;
+	fz_concat(&ctm, one, two);
+	return ctm;
+}
+
 static void
-fz_draw_fill_path(fz_context *ctx, fz_device *devp, const fz_path *path, int even_odd, const fz_matrix *ctm,
+fz_draw_fill_path(fz_context *ctx, fz_device *devp, const fz_path *path, int even_odd, const fz_matrix *in_ctm,
 	fz_colorspace *colorspace, const float *color, float alpha)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
+	fz_matrix ctm = concat(in_ctm, &dev->transform);
 	fz_gel *gel = dev->gel;
 
-	float expansion = fz_matrix_expansion(ctm);
+	float expansion = fz_matrix_expansion(&ctm);
 	float flatness = 0.3f / expansion;
 	unsigned char colorbv[FZ_MAX_COLORS + 1];
 	float colorfv[FZ_MAX_COLORS];
 	fz_irect bbox;
-	int i;
+	int i, n;
 	fz_draw_state *state = &dev->stack[dev->top];
 	fz_colorspace *model = state->dest->colorspace;
 
-	if (model == NULL)
-		model = fz_device_gray(ctx);
+	if (colorspace == NULL && model != NULL)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "color destination requires source color");
 
 	if (flatness < 0.001f)
 		flatness = 0.001f;
 
 	fz_reset_gel(ctx, gel, &state->scissor);
-	fz_flatten_fill_path(ctx, gel, path, ctm, flatness);
+	fz_flatten_fill_path(ctx, gel, path, &ctm, flatness);
 	fz_sort_gel(ctx, gel);
 
 	fz_intersect_irect(fz_bound_gel(ctx, gel, &bbox), &state->scissor);
@@ -298,16 +307,22 @@ fz_draw_fill_path(fz_context *ctx, fz_device *devp, const fz_path *path, int eve
 	if (state->blendmode & FZ_BLEND_KNOCKOUT)
 		state = fz_knockout_begin(ctx, dev);
 
-	fz_convert_color(ctx, model, colorfv, colorspace, color);
-	for (i = 0; i < model->n; i++)
-		colorbv[i] = colorfv[i] * 255;
+	n = fz_colorspace_n(ctx, model);
+	if (n > 0)
+	{
+		fz_convert_color(ctx, model, colorfv, colorspace, color);
+		for (i = 0; i < n; i++)
+			colorbv[i] = colorfv[i] * 255;
+	}
+	else
+		i = 0;
 	colorbv[i] = alpha * 255;
 
 	fz_scan_convert(ctx, gel, even_odd, &bbox, state->dest, colorbv);
 	if (state->shape)
 	{
 		fz_reset_gel(ctx, gel, &state->scissor);
-		fz_flatten_fill_path(ctx, gel, path, ctm, flatness);
+		fz_flatten_fill_path(ctx, gel, path, &ctm, flatness);
 		fz_sort_gel(ctx, gel);
 
 		colorbv[0] = alpha * 255;
@@ -319,35 +334,40 @@ fz_draw_fill_path(fz_context *ctx, fz_device *devp, const fz_path *path, int eve
 }
 
 static void
-fz_draw_stroke_path(fz_context *ctx, fz_device *devp, const fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm,
+fz_draw_stroke_path(fz_context *ctx, fz_device *devp, const fz_path *path, const fz_stroke_state *stroke, const fz_matrix *in_ctm,
 	fz_colorspace *colorspace, const float *color, float alpha)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
+	fz_matrix ctm = concat(in_ctm, &dev->transform);
 	fz_gel *gel = dev->gel;
 
-	float expansion = fz_matrix_expansion(ctm);
+	float expansion = fz_matrix_expansion(&ctm);
 	float flatness = 0.3f / expansion;
 	float linewidth = stroke->linewidth;
 	unsigned char colorbv[FZ_MAX_COLORS + 1];
 	float colorfv[FZ_MAX_COLORS];
 	fz_irect bbox;
-	int i;
+	int i, n;
+	float aa_level = 2.0f/(fz_graphics_aa_level(ctx)+2);
 	fz_draw_state *state = &dev->stack[dev->top];
 	fz_colorspace *model = state->dest->colorspace;
+	float mlw = fz_graphics_min_line_width(ctx);
 
-	if (model == NULL)
-		model = fz_device_gray(ctx);
+	if (colorspace == NULL && model != NULL)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "color destination requires source color");
 
-	if (linewidth * expansion < 0.1f)
-		linewidth = 1 / expansion;
+	if (mlw > aa_level)
+		aa_level = mlw;
+	if (linewidth * expansion < aa_level)
+		linewidth = aa_level / expansion;
 	if (flatness < 0.001f)
 		flatness = 0.001f;
 
 	fz_reset_gel(ctx, gel, &state->scissor);
 	if (stroke->dash_len > 0)
-		fz_flatten_dash_path(ctx, gel, path, stroke, ctm, flatness, linewidth);
+		fz_flatten_dash_path(ctx, gel, path, stroke, &ctm, flatness, linewidth);
 	else
-		fz_flatten_stroke_path(ctx, gel, path, stroke, ctm, flatness, linewidth);
+		fz_flatten_stroke_path(ctx, gel, path, stroke, &ctm, flatness, linewidth);
 	fz_sort_gel(ctx, gel);
 
 	fz_intersect_irect(fz_bound_gel(ctx, gel, &bbox), &state->scissor);
@@ -358,36 +378,57 @@ fz_draw_stroke_path(fz_context *ctx, fz_device *devp, const fz_path *path, const
 	if (state->blendmode & FZ_BLEND_KNOCKOUT)
 		state = fz_knockout_begin(ctx, dev);
 
-	fz_convert_color(ctx, model, colorfv, colorspace, color);
-	for (i = 0; i < model->n; i++)
-		colorbv[i] = colorfv[i] * 255;
+	n = fz_colorspace_n(ctx, model);
+	if (n > 0)
+	{
+		fz_convert_color(ctx, model, colorfv, colorspace, color);
+		for (i = 0; i < n; i++)
+			colorbv[i] = colorfv[i] * 255;
+	}
+	else
+		i = 0;
 	colorbv[i] = alpha * 255;
 
+#ifdef DUMP_GROUP_BLENDS
+	dump_spaces(dev->top, "");
+	fz_dump_blend(ctx, state->dest, "Before stroke ");
+	if (state->shape)
+		fz_dump_blend(ctx, state->shape, "/");
+	printf("\n");
+#endif
 	fz_scan_convert(ctx, gel, 0, &bbox, state->dest, colorbv);
 	if (state->shape)
 	{
 		fz_reset_gel(ctx, gel, &state->scissor);
 		if (stroke->dash_len > 0)
-			fz_flatten_dash_path(ctx, gel, path, stroke, ctm, flatness, linewidth);
+			fz_flatten_dash_path(ctx, gel, path, stroke, &ctm, flatness, linewidth);
 		else
-			fz_flatten_stroke_path(ctx, gel, path, stroke, ctm, flatness, linewidth);
+			fz_flatten_stroke_path(ctx, gel, path, stroke, &ctm, flatness, linewidth);
 		fz_sort_gel(ctx, gel);
 
 		colorbv[0] = 255;
 		fz_scan_convert(ctx, gel, 0, &bbox, state->shape, colorbv);
 	}
+#ifdef DUMP_GROUP_BLENDS
+	dump_spaces(dev->top, "");
+	fz_dump_blend(ctx, state->dest, "After stroke ");
+	if (state->shape)
+		fz_dump_blend(ctx, state->shape, "/");
+	printf("\n");
+#endif
 
 	if (state->blendmode & FZ_BLEND_KNOCKOUT)
 		fz_knockout_end(ctx, dev);
 }
 
 static void
-fz_draw_clip_path(fz_context *ctx, fz_device *devp, const fz_path *path, int even_odd, const fz_matrix *ctm, const fz_rect *scissor)
+fz_draw_clip_path(fz_context *ctx, fz_device *devp, const fz_path *path, int even_odd, const fz_matrix *in_ctm, const fz_rect *scissor)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
+	fz_matrix ctm = concat(in_ctm, &dev->transform);
 	fz_gel *gel = dev->gel;
 
-	float expansion = fz_matrix_expansion(ctm);
+	float expansion = fz_matrix_expansion(&ctm);
 	float flatness = 0.3f / expansion;
 	fz_irect bbox;
 	fz_draw_state *state = &dev->stack[dev->top];
@@ -397,7 +438,7 @@ fz_draw_clip_path(fz_context *ctx, fz_device *devp, const fz_path *path, int eve
 		flatness = 0.001f;
 
 	fz_reset_gel(ctx, gel, &state->scissor);
-	fz_flatten_fill_path(ctx, gel, path, ctm, flatness);
+	fz_flatten_fill_path(ctx, gel, path, &ctm, flatness);
 	fz_sort_gel(ctx, gel);
 
 	state = push_stack(ctx, dev);
@@ -408,7 +449,9 @@ fz_draw_clip_path(fz_context *ctx, fz_device *devp, const fz_path *path, int eve
 	if (scissor)
 	{
 		fz_irect bbox2;
-		fz_intersect_irect(&bbox, fz_irect_from_rect(&bbox2, scissor));
+		fz_rect tscissor = *scissor;
+		fz_transform_rect(&tscissor, &dev->transform);
+		fz_intersect_irect(&bbox, fz_irect_from_rect(&bbox2, &tscissor));
 	}
 
 	if (fz_is_empty_irect(&bbox) || fz_is_rect_gel(ctx, gel))
@@ -423,13 +466,13 @@ fz_draw_clip_path(fz_context *ctx, fz_device *devp, const fz_path *path, int eve
 
 	fz_try(ctx)
 	{
-		state[1].mask = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+		state[1].mask = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 		fz_clear_pixmap(ctx, state[1].mask);
-		state[1].dest = fz_new_pixmap_with_bbox(ctx, model, &bbox);
-		fz_clear_pixmap(ctx, state[1].dest);
+		state[1].dest = fz_new_pixmap_with_bbox(ctx, model, &bbox, state[0].dest->alpha);
+		fz_copy_pixmap_rect(ctx, state[1].dest, state[0].dest, &bbox);
 		if (state[1].shape)
 		{
-			state[1].shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+			state[1].shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 			fz_clear_pixmap(ctx, state[1].shape);
 		}
 
@@ -448,28 +491,33 @@ fz_draw_clip_path(fz_context *ctx, fz_device *devp, const fz_path *path, int eve
 }
 
 static void
-fz_draw_clip_stroke_path(fz_context *ctx, fz_device *devp, const fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, const fz_rect *scissor)
+fz_draw_clip_stroke_path(fz_context *ctx, fz_device *devp, const fz_path *path, const fz_stroke_state *stroke, const fz_matrix *in_ctm, const fz_rect *scissor)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
+	fz_matrix ctm = concat(in_ctm, &dev->transform);
 	fz_gel *gel = dev->gel;
 
-	float expansion = fz_matrix_expansion(ctm);
+	float expansion = fz_matrix_expansion(&ctm);
 	float flatness = 0.3f / expansion;
 	float linewidth = stroke->linewidth;
 	fz_irect bbox;
 	fz_draw_state *state = &dev->stack[dev->top];
 	fz_colorspace *model;
+	float aa_level = 2.0f/(fz_graphics_aa_level(ctx)+2);
+	float mlw = fz_graphics_min_line_width(ctx);
 
-	if (linewidth * expansion < 0.1f)
-		linewidth = 1 / expansion;
+	if (mlw > aa_level)
+		aa_level = mlw;
+	if (linewidth * expansion < aa_level)
+		linewidth = aa_level / expansion;
 	if (flatness < 0.001f)
 		flatness = 0.001f;
 
 	fz_reset_gel(ctx, gel, &state->scissor);
 	if (stroke->dash_len > 0)
-		fz_flatten_dash_path(ctx, gel, path, stroke, ctm, flatness, linewidth);
+		fz_flatten_dash_path(ctx, gel, path, stroke, &ctm, flatness, linewidth);
 	else
-		fz_flatten_stroke_path(ctx, gel, path, stroke, ctm, flatness, linewidth);
+		fz_flatten_stroke_path(ctx, gel, path, stroke, &ctm, flatness, linewidth);
 	fz_sort_gel(ctx, gel);
 
 	state = push_stack(ctx, dev);
@@ -480,18 +528,27 @@ fz_draw_clip_stroke_path(fz_context *ctx, fz_device *devp, const fz_path *path, 
 	if (scissor)
 	{
 		fz_irect bbox2;
-		fz_intersect_irect(&bbox, fz_irect_from_rect(&bbox2, scissor));
+		fz_rect tscissor = *scissor;
+		fz_transform_rect(&tscissor, &dev->transform);
+		fz_intersect_irect(&bbox, fz_irect_from_rect(&bbox2, &tscissor));
 	}
 
 	fz_try(ctx)
 	{
-		state[1].mask = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+		state[1].mask = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 		fz_clear_pixmap(ctx, state[1].mask);
-		state[1].dest = fz_new_pixmap_with_bbox(ctx, model, &bbox);
-		fz_clear_pixmap(ctx, state[1].dest);
+		/* When there is no alpha in the current destination (state[0].dest->alpha == 0)
+		 * we have a choice. We can either create the new destination WITH alpha, or
+		 * we can copy the old pixmap contents in. We opt for the latter here, but
+		 * may want to revisit this decision in the future. */
+		state[1].dest = fz_new_pixmap_with_bbox(ctx, model, &bbox, state[0].dest->alpha);
+		if (state[0].dest->alpha)
+			fz_clear_pixmap(ctx, state[1].dest);
+		else
+			fz_copy_pixmap_rect(ctx, state[1].dest, state[0].dest, &bbox);
 		if (state->shape)
 		{
-			state[1].shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+			state[1].shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 			fz_clear_pixmap(ctx, state[1].shape);
 		}
 
@@ -535,47 +592,79 @@ draw_glyph(unsigned char *colorbv, fz_pixmap *dst, fz_glyph *glyph,
 	skip_x = x - glyph->x - xorig;
 	skip_y = y - glyph->y - yorig;
 
-	dp = dst->samples + (unsigned int)(((y - dst->y) * dst->w + (x - dst->x)) * dst->n);
-
 	msk = glyph->pixmap;
+	dp = dst->samples + (unsigned int)((y - dst->y) * dst->stride + (x - dst->x) * dst->n);
 	if (msk == NULL)
 	{
 		fz_paint_glyph(colorbv, dst, dp, glyph, w, h, skip_x, skip_y);
 	}
 	else
 	{
-		unsigned char *mp = msk->samples + skip_y * msk->w + skip_x;
-		while (h--)
+		unsigned char *mp = msk->samples + skip_y * msk->stride + skip_x;
+		int da = dst->alpha;
+
+		if (dst->colorspace)
 		{
-			if (dst->colorspace)
-				fz_paint_span_with_color(dp, mp, dst->n, w, colorbv);
-			else
-				fz_paint_span(dp, mp, 1, w, 255);
-			dp += dst->w * dst->n;
-			mp += msk->w;
+			fz_span_color_painter_t *fn;
+
+			fn = fz_get_span_color_painter(dst->n, da, colorbv);
+			assert(fn);
+			if (fn == NULL)
+				return;
+			while (h--)
+			{
+				(*fn)(dp, mp, dst->n, w, colorbv, da);
+				dp += dst->stride;
+				mp += msk->stride;
+			}
+		}
+		else
+		{
+			fz_span_painter_t *fn;
+
+			fn = fz_get_span_painter(da, 1, 0, 255);
+			assert(fn);
+			if (fn == NULL)
+				return;
+			while (h--)
+			{
+				(*fn)(dp, da, mp, 1, 0, w, 255);
+				dp += dst->stride;
+				mp += msk->stride;
+			}
 		}
 	}
 }
 
 static void
-fz_draw_fill_text(fz_context *ctx, fz_device *devp, const fz_text *text, const fz_matrix *ctm,
+fz_draw_fill_text(fz_context *ctx, fz_device *devp, const fz_text *text, const fz_matrix *in_ctm,
 	fz_colorspace *colorspace, const float *color, float alpha)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
+	fz_matrix ctm = concat(in_ctm, &dev->transform);
 	fz_draw_state *state = &dev->stack[dev->top];
 	fz_colorspace *model = state->dest->colorspace;
 	unsigned char colorbv[FZ_MAX_COLORS + 1];
 	unsigned char shapebv;
 	float colorfv[FZ_MAX_COLORS];
 	fz_text_span *span;
-	int i;
+	int i, n;
+
+	if (colorspace == NULL && model != NULL)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "color destination requires source color");
 
 	if (state->blendmode & FZ_BLEND_KNOCKOUT)
 		state = fz_knockout_begin(ctx, dev);
 
-	fz_convert_color(ctx, model, colorfv, colorspace, color);
-	for (i = 0; i < model->n; i++)
-		colorbv[i] = colorfv[i] * 255;
+	n = fz_colorspace_n(ctx, model);
+	if (n > 0)
+	{
+		fz_convert_color(ctx, model, colorfv, colorspace, color);
+		for (i = 0; i < n; i++)
+			colorbv[i] = colorfv[i] * 255;
+	}
+	else
+		i = 0;
 	colorbv[i] = alpha * 255;
 	shapebv = 255;
 
@@ -595,9 +684,9 @@ fz_draw_fill_text(fz_context *ctx, fz_device *devp, const fz_text *text, const f
 
 			tm.e = span->items[i].x;
 			tm.f = span->items[i].y;
-			fz_concat(&trm, &tm, ctm);
+			fz_concat(&trm, &tm, &ctm);
 
-			glyph = fz_render_glyph(ctx, span->font, gid, &trm, model, &state->scissor);
+			glyph = fz_render_glyph(ctx, span->font, gid, &trm, model, &state->scissor, state->dest->alpha);
 			if (glyph)
 			{
 				fz_pixmap *pixmap = glyph->pixmap;
@@ -623,7 +712,7 @@ fz_draw_fill_text(fz_context *ctx, fz_device *devp, const fz_text *text, const f
 				fz_path *path = fz_outline_glyph(ctx, span->font, gid, &tm);
 				if (path)
 				{
-					fz_draw_fill_path(ctx, devp, path, 0, ctm, colorspace, color, alpha);
+					fz_draw_fill_path(ctx, devp, path, 0, in_ctm, colorspace, color, alpha);
 					fz_drop_path(ctx, path);
 				}
 				else
@@ -640,23 +729,33 @@ fz_draw_fill_text(fz_context *ctx, fz_device *devp, const fz_text *text, const f
 
 static void
 fz_draw_stroke_text(fz_context *ctx, fz_device *devp, const fz_text *text, const fz_stroke_state *stroke,
-	const fz_matrix *ctm, fz_colorspace *colorspace,
+	const fz_matrix *in_ctm, fz_colorspace *colorspace,
 	const float *color, float alpha)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
+	fz_matrix ctm = concat(in_ctm, &dev->transform);
 	fz_draw_state *state = &dev->stack[dev->top];
 	fz_colorspace *model = state->dest->colorspace;
 	unsigned char colorbv[FZ_MAX_COLORS + 1];
 	float colorfv[FZ_MAX_COLORS];
 	fz_text_span *span;
-	int i;
+	int i, n;
+
+	if (colorspace == NULL && model != NULL)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "color destination requires source color");
 
 	if (state->blendmode & FZ_BLEND_KNOCKOUT)
 		state = fz_knockout_begin(ctx, dev);
 
-	fz_convert_color(ctx, model, colorfv, colorspace, color);
-	for (i = 0; i < model->n; i++)
-		colorbv[i] = colorfv[i] * 255;
+	n = fz_colorspace_n(ctx, model);
+	if (n > 0)
+	{
+		fz_convert_color(ctx, model, colorfv, colorspace, color);
+		for (i = 0; i < n; i++)
+			colorbv[i] = colorfv[i] * 255;
+	}
+	else
+		i = 0;
 	colorbv[i] = alpha * 255;
 
 	for (span = text->head; span; span = span->next)
@@ -675,9 +774,9 @@ fz_draw_stroke_text(fz_context *ctx, fz_device *devp, const fz_text *text, const
 
 			tm.e = span->items[i].x;
 			tm.f = span->items[i].y;
-			fz_concat(&trm, &tm, ctm);
+			fz_concat(&trm, &tm, &ctm);
 
-			glyph = fz_render_stroked_glyph(ctx, span->font, gid, &trm, ctm, stroke, &state->scissor);
+			glyph = fz_render_stroked_glyph(ctx, span->font, gid, &trm, &ctm, stroke, &state->scissor);
 			if (glyph)
 			{
 				int x = (int)trm.e;
@@ -692,7 +791,7 @@ fz_draw_stroke_text(fz_context *ctx, fz_device *devp, const fz_text *text, const
 				fz_path *path = fz_outline_glyph(ctx, span->font, gid, &tm);
 				if (path)
 				{
-					fz_draw_stroke_path(ctx, devp, path, stroke, ctm, colorspace, color, alpha);
+					fz_draw_stroke_path(ctx, devp, path, stroke, in_ctm, colorspace, color, alpha);
 					fz_drop_path(ctx, path);
 				}
 				else
@@ -708,9 +807,10 @@ fz_draw_stroke_text(fz_context *ctx, fz_device *devp, const fz_text *text, const
 }
 
 static void
-fz_draw_clip_text(fz_context *ctx, fz_device *devp, const fz_text *text, const fz_matrix *ctm, const fz_rect *scissor)
+fz_draw_clip_text(fz_context *ctx, fz_device *devp, const fz_text *text, const fz_matrix *in_ctm, const fz_rect *scissor)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
+	fz_matrix ctm = concat(in_ctm, &dev->transform);
 	fz_irect bbox;
 	fz_pixmap *mask, *dest, *shape;
 	fz_matrix tm, trm;
@@ -726,23 +826,32 @@ fz_draw_clip_text(fz_context *ctx, fz_device *devp, const fz_text *text, const f
 	model = state->dest->colorspace;
 
 	/* make the mask the exact size needed */
-	fz_irect_from_rect(&bbox, fz_bound_text(ctx, text, NULL, ctm, &rect));
+	fz_irect_from_rect(&bbox, fz_bound_text(ctx, text, NULL, &ctm, &rect));
 	fz_intersect_irect(&bbox, &state->scissor);
 	if (scissor)
 	{
 		fz_irect bbox2;
-		fz_intersect_irect(&bbox, fz_irect_from_rect(&bbox2, scissor));
+		fz_rect tscissor = *scissor;
+		fz_transform_rect(&tscissor, &dev->transform);
+		fz_intersect_irect(&bbox, fz_irect_from_rect(&bbox2, &tscissor));
 	}
 
 	fz_try(ctx)
 	{
-		mask = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+		mask = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 		fz_clear_pixmap(ctx, mask);
-		dest = fz_new_pixmap_with_bbox(ctx, model, &bbox);
-		fz_clear_pixmap(ctx, dest);
+		/* When there is no alpha in the current destination (state[0].dest->alpha == 0)
+		 * we have a choice. We can either create the new destination WITH alpha, or
+		 * we can copy the old pixmap contents in. We opt for the latter here, but
+		 * may want to revisit this decision in the future. */
+		dest = fz_new_pixmap_with_bbox(ctx, model, &bbox, state[0].dest->alpha);
+		if (state[0].dest->alpha)
+			fz_clear_pixmap(ctx, dest);
+		else
+			fz_copy_pixmap_rect(ctx, dest, state[0].dest, &bbox);
 		if (state->shape)
 		{
-			shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+			shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 			fz_clear_pixmap(ctx, shape);
 		}
 		else
@@ -771,9 +880,9 @@ fz_draw_clip_text(fz_context *ctx, fz_device *devp, const fz_text *text, const f
 
 					tm.e = span->items[i].x;
 					tm.f = span->items[i].y;
-					fz_concat(&trm, &tm, ctm);
+					fz_concat(&trm, &tm, &ctm);
 
-					glyph = fz_render_glyph(ctx, span->font, gid, &trm, model, &state->scissor);
+					glyph = fz_render_glyph(ctx, span->font, gid, &trm, model, &state->scissor, state[1].dest->alpha);
 					if (glyph)
 					{
 						int x = (int)trm.e;
@@ -796,7 +905,7 @@ fz_draw_clip_text(fz_context *ctx, fz_device *devp, const fz_text *text, const f
 							state[1].mask = NULL;
 							fz_try(ctx)
 							{
-								fz_draw_fill_path(ctx, devp, path, 0, ctm, fz_device_gray(ctx), &white, 1);
+								fz_draw_fill_path(ctx, devp, path, 0, in_ctm, fz_device_gray(ctx), &white, 1);
 							}
 							fz_always(ctx)
 							{
@@ -826,9 +935,10 @@ fz_draw_clip_text(fz_context *ctx, fz_device *devp, const fz_text *text, const f
 }
 
 static void
-fz_draw_clip_stroke_text(fz_context *ctx, fz_device *devp, const fz_text *text, const fz_stroke_state *stroke, const fz_matrix *ctm, const fz_rect *scissor)
+fz_draw_clip_stroke_text(fz_context *ctx, fz_device *devp, const fz_text *text, const fz_stroke_state *stroke, const fz_matrix *in_ctm, const fz_rect *scissor)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
+	fz_matrix ctm = concat(in_ctm, &dev->transform);
 	fz_irect bbox;
 	fz_pixmap *mask, *dest, *shape;
 	fz_matrix tm, trm;
@@ -841,23 +951,32 @@ fz_draw_clip_stroke_text(fz_context *ctx, fz_device *devp, const fz_text *text, 
 
 	STACK_PUSHED("clip stroke text");
 	/* make the mask the exact size needed */
-	fz_irect_from_rect(&bbox, fz_bound_text(ctx, text, stroke, ctm, &rect));
+	fz_irect_from_rect(&bbox, fz_bound_text(ctx, text, stroke, &ctm, &rect));
 	fz_intersect_irect(&bbox, &state->scissor);
 	if (scissor)
 	{
 		fz_irect bbox2;
-		fz_intersect_irect(&bbox, fz_irect_from_rect(&bbox2, scissor));
+		fz_rect tscissor = *scissor;
+		fz_transform_rect(&tscissor, &dev->transform);
+		fz_intersect_irect(&bbox, fz_irect_from_rect(&bbox2, &tscissor));
 	}
 
 	fz_try(ctx)
 	{
-		state[1].mask = mask = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+		state[1].mask = mask = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 		fz_clear_pixmap(ctx, mask);
-		state[1].dest = dest = fz_new_pixmap_with_bbox(ctx, model, &bbox);
-		fz_clear_pixmap(ctx, dest);
+		/* When there is no alpha in the current destination (state[0].dest->alpha == 0)
+		 * we have a choice. We can either create the new destination WITH alpha, or
+		 * we can copy the old pixmap contents in. We opt for the latter here, but
+		 * may want to revisit this decision in the future. */
+		state[1].dest = dest = fz_new_pixmap_with_bbox(ctx, model, &bbox, state[0].dest->alpha);
+		if (state[0].dest->alpha)
+			fz_clear_pixmap(ctx, state[1].dest);
+		else
+			fz_copy_pixmap_rect(ctx, state[1].dest, state[0].dest, &bbox);
 		if (state->shape)
 		{
-			state[1].shape = shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+			state[1].shape = shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 			fz_clear_pixmap(ctx, shape);
 		}
 		else
@@ -883,9 +1002,9 @@ fz_draw_clip_stroke_text(fz_context *ctx, fz_device *devp, const fz_text *text, 
 
 					tm.e = span->items[i].x;
 					tm.f = span->items[i].y;
-					fz_concat(&trm, &tm, ctm);
+					fz_concat(&trm, &tm, &ctm);
 
-					glyph = fz_render_stroked_glyph(ctx, span->font, gid, &trm, ctm, stroke, &state->scissor);
+					glyph = fz_render_stroked_glyph(ctx, span->font, gid, &trm, &ctm, stroke, &state->scissor);
 					if (glyph)
 					{
 						int x = (int)trm.e;
@@ -909,7 +1028,7 @@ fz_draw_clip_stroke_text(fz_context *ctx, fz_device *devp, const fz_text *text, 
 							state[0].mask = NULL;
 							fz_try(ctx)
 							{
-								fz_draw_stroke_path(ctx, devp, path, stroke, ctm, fz_device_gray(ctx), &white, 1);
+								fz_draw_stroke_path(ctx, devp, path, stroke, in_ctm, fz_device_gray(ctx), &white, 1);
 							}
 							fz_always(ctx)
 							{
@@ -943,9 +1062,10 @@ fz_draw_ignore_text(fz_context *ctx, fz_device *dev, const fz_text *text, const 
 }
 
 static void
-fz_draw_fill_shade(fz_context *ctx, fz_device *devp, fz_shade *shade, const fz_matrix *ctm, float alpha)
+fz_draw_fill_shade(fz_context *ctx, fz_device *devp, fz_shade *shade, const fz_matrix *in_ctm, float alpha)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
+	fz_matrix ctm = concat(in_ctm, &dev->transform);
 	fz_rect bounds;
 	fz_irect bbox, scissor;
 	fz_pixmap *dest, *shape;
@@ -954,18 +1074,12 @@ fz_draw_fill_shade(fz_context *ctx, fz_device *devp, fz_shade *shade, const fz_m
 	fz_draw_state *state = &dev->stack[dev->top];
 	fz_colorspace *model = state->dest->colorspace;
 
-	fz_bound_shade(ctx, shade, ctm, &bounds);
+	fz_bound_shade(ctx, shade, &ctm, &bounds);
 	scissor = state->scissor;
 	fz_intersect_irect(fz_irect_from_rect(&bbox, &bounds), &scissor);
 
 	if (fz_is_empty_irect(&bbox))
 		return;
-
-	if (!model)
-	{
-		fz_warn(ctx, "cannot render shading directly to an alpha mask");
-		return;
-	}
 
 	if (state->blendmode & FZ_BLEND_KNOCKOUT)
 		state = fz_knockout_begin(ctx, dev);
@@ -975,11 +1089,14 @@ fz_draw_fill_shade(fz_context *ctx, fz_device *devp, fz_shade *shade, const fz_m
 
 	if (alpha < 1)
 	{
-		dest = fz_new_pixmap_with_bbox(ctx, state->dest->colorspace, &bbox);
-		fz_clear_pixmap(ctx, dest);
+		dest = fz_new_pixmap_with_bbox(ctx, state->dest->colorspace, &bbox, state->dest->alpha);
+		if (state->dest->alpha)
+			fz_clear_pixmap(ctx, dest);
+		else
+			fz_copy_pixmap_rect(ctx, dest, state[0].dest, &bbox);
 		if (shape)
 		{
-			shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+			shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 			fz_clear_pixmap(ctx, shape);
 		}
 	}
@@ -988,15 +1105,21 @@ fz_draw_fill_shade(fz_context *ctx, fz_device *devp, fz_shade *shade, const fz_m
 	{
 		unsigned char *s;
 		int x, y, n, i;
-		fz_convert_color(ctx, model, colorfv, shade->colorspace, shade->background);
-		for (i = 0; i < model->n; i++)
-			colorbv[i] = colorfv[i] * 255;
+		n = fz_colorspace_n(ctx, model);
+		if (n > 0)
+		{
+			fz_convert_color(ctx, model, colorfv, shade->colorspace, shade->background);
+			for (i = 0; i < n; i++)
+				colorbv[i] = colorfv[i] * 255;
+		}
+		else
+			i = 0;
 		colorbv[i] = 255;
 
 		n = dest->n;
 		for (y = scissor.y0; y < scissor.y1; y++)
 		{
-			s = dest->samples + (unsigned int)(((scissor.x0 - dest->x) + (y - dest->y) * dest->w) * dest->n);
+			s = dest->samples + (unsigned int)((y - dest->y) * dest->stride + (scissor.x0 - dest->x) * n);
 			for (x = scissor.x0; x < scissor.x1; x++)
 			{
 				for (i = 0; i < n; i++)
@@ -1007,7 +1130,7 @@ fz_draw_fill_shade(fz_context *ctx, fz_device *devp, fz_shade *shade, const fz_m
 		{
 			for (y = scissor.y0; y < scissor.y1; y++)
 			{
-				s = shape->samples + (unsigned int)((scissor.x0 - shape->x) + (y - shape->y) * shape->w);
+				s = shape->samples + (unsigned int)((y - shape->y) * shape->stride + (scissor.x0 - shape->x));
 				for (x = scissor.x0; x < scissor.x1; x++)
 				{
 					*s++ = 255;
@@ -1016,9 +1139,17 @@ fz_draw_fill_shade(fz_context *ctx, fz_device *devp, fz_shade *shade, const fz_m
 		}
 	}
 
-	fz_paint_shade(ctx, shade, ctm, dest, &bbox);
+	fz_paint_shade(ctx, shade, &ctm, dest, &bbox);
 	if (shape)
 		fz_clear_pixmap_rect_with_value(ctx, shape, 255, &bbox);
+
+#ifdef DUMP_GROUP_BLENDS
+	dump_spaces(dev->top, "");
+	fz_dump_blend(ctx, dest, "Shade ");
+	if (shape)
+		fz_dump_blend(ctx, shape, "/");
+	printf("\n");
+#endif
 
 	if (alpha < 1)
 	{
@@ -1092,43 +1223,74 @@ fz_transform_pixmap(fz_context *ctx, fz_draw_device *dev, const fz_pixmap *image
 	return NULL;
 }
 
+int
+fz_default_image_scale(void *arg, int dst_w, int dst_h, int src_w, int src_h)
+{
+	(void)arg;
+	return dst_w < src_w && dst_h < src_h;
+}
+
 static void
-fz_draw_fill_image(fz_context *ctx, fz_device *devp, fz_image *image, const fz_matrix *ctm, float alpha)
+fz_draw_fill_image(fz_context *ctx, fz_device *devp, fz_image *image, const fz_matrix *in_ctm, float alpha)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
-	fz_pixmap *converted = NULL;
-	fz_pixmap *scaled = NULL;
+	fz_matrix local_ctm = concat(in_ctm, &dev->transform);
 	fz_pixmap *pixmap;
-	fz_pixmap *orig_pixmap;
 	int after;
 	int dx, dy;
 	fz_draw_state *state = &dev->stack[dev->top];
 	fz_colorspace *model = state->dest->colorspace;
 	fz_irect clip;
-	fz_matrix local_ctm = *ctm;
+	fz_matrix inverse;
+	fz_irect src_area;
 
 	fz_intersect_irect(fz_pixmap_bbox(ctx, state->dest, &clip), &state->scissor);
-
-	fz_var(scaled);
-
-	if (!model)
-	{
-		fz_warn(ctx, "cannot render image directly to an alpha mask");
-		return;
-	}
 
 	if (image->w == 0 || image->h == 0)
 		return;
 
-	dx = sqrtf(local_ctm.a * local_ctm.a + local_ctm.b * local_ctm.b);
-	dy = sqrtf(local_ctm.c * local_ctm.c + local_ctm.d * local_ctm.d);
+	/* ctm maps the image (expressed as the unit square) onto the
+	 * destination device. Reverse that to get a mapping from
+	 * the destination device to the source pixels. */
+	if (fz_try_invert_matrix(&inverse, &local_ctm))
+	{
+		/* Not invertible. Could just bail? Use the whole image
+		 * for now. */
+		src_area.x0 = 0;
+		src_area.x1 = image->w;
+		src_area.y0 = 0;
+		src_area.y1 = image->h;
+	}
+	else
+	{
+		float exp;
+		fz_rect rect;
+		fz_irect sane;
+		/* We want to scale from image coords, not from unit square */
+		fz_post_scale(&inverse, image->w, image->h);
+		/* Are we scaling up or down? exp < 1 means scaling down. */
+		exp = fz_matrix_max_expansion(&inverse);
+		fz_rect_from_irect(&rect, &clip);
+		fz_transform_rect(&rect, &inverse);
+		/* Allow for support requirements for scalers. */
+		fz_expand_rect(&rect, fz_max(exp, 1) * 4);
+		fz_irect_from_rect(&src_area, &rect);
+		sane.x0 = 0;
+		sane.y0 = 0;
+		sane.x1 = image->w;
+		sane.y1 = image->h;
+		fz_intersect_irect(&src_area, &sane);
+		if (fz_is_empty_irect(&src_area))
+			return;
+	}
 
-	pixmap = fz_get_pixmap_from_image(ctx, image, dx, dy);
-	orig_pixmap = pixmap;
+	pixmap = fz_get_pixmap_from_image(ctx, image, &src_area, &local_ctm, &dx, &dy);
 
 	/* convert images with more components (cmyk->rgb) before scaling */
-	/* convert images with fewer components (gray->rgb after scaling */
+	/* convert images with fewer components (gray->rgb) after scaling */
 	/* convert images with expensive colorspace transforms after scaling */
+
+	fz_var(pixmap);
 
 	fz_try(ctx)
 	{
@@ -1141,17 +1303,15 @@ fz_draw_fill_image(fz_context *ctx, fz_device *devp, fz_image *image, const fz_m
 
 		if (pixmap->colorspace != model && !after)
 		{
-			fz_irect bbox;
-			fz_pixmap_bbox(ctx, pixmap, &bbox);
-			converted = fz_new_pixmap_with_bbox(ctx, model, &bbox);
-			fz_convert_pixmap(ctx, converted, pixmap);
+			fz_pixmap *converted = fz_convert_pixmap(ctx, pixmap, model, 1);
+			fz_drop_pixmap(ctx, pixmap);
 			pixmap = converted;
 		}
 
-		if (dx < pixmap->w && dy < pixmap->h && !(devp->hints & FZ_DONT_INTERPOLATE_IMAGES))
+		if (!(devp->hints & FZ_DONT_INTERPOLATE_IMAGES) && ctx->tuning->image_scale(ctx->tuning->image_scale_arg, dx, dy, pixmap->w, pixmap->h))
 		{
 			int gridfit = alpha == 1.0f && !(dev->flags & FZ_DRAWDEV_FLAGS_TYPE3);
-			scaled = fz_transform_pixmap(ctx, dev, pixmap, &local_ctm, state->dest->x, state->dest->y, dx, dy, gridfit, &clip);
+			fz_pixmap *scaled = fz_transform_pixmap(ctx, dev, pixmap, &local_ctm, state->dest->x, state->dest->y, dx, dy, gridfit, &clip);
 			if (!scaled)
 			{
 				if (dx < 1)
@@ -1161,22 +1321,25 @@ fz_draw_fill_image(fz_context *ctx, fz_device *devp, fz_image *image, const fz_m
 				scaled = fz_scale_pixmap_cached(ctx, pixmap, pixmap->x, pixmap->y, dx, dy, NULL, dev->cache_x, dev->cache_y);
 			}
 			if (scaled)
+			{
+				fz_drop_pixmap(ctx, pixmap);
 				pixmap = scaled;
+			}
 		}
 
 		if (pixmap->colorspace != model)
 		{
+#if FZ_PLOTTERS_RGB
 			if ((pixmap->colorspace == fz_device_gray(ctx) && model == fz_device_rgb(ctx)) ||
 				(pixmap->colorspace == fz_device_gray(ctx) && model == fz_device_bgr(ctx)))
 			{
 				/* We have special case rendering code for gray -> rgb/bgr */
 			}
 			else
+#endif
 			{
-				fz_irect bbox;
-				fz_pixmap_bbox(ctx, pixmap, &bbox);
-				converted = fz_new_pixmap_with_bbox(ctx, model, &bbox);
-				fz_convert_pixmap(ctx, converted, pixmap);
+				fz_pixmap *converted = fz_convert_pixmap(ctx, pixmap, model, 1);
+				fz_drop_pixmap(ctx, pixmap);
 				pixmap = converted;
 			}
 		}
@@ -1187,33 +1350,31 @@ fz_draw_fill_image(fz_context *ctx, fz_device *devp, fz_image *image, const fz_m
 			fz_knockout_end(ctx, dev);
 	}
 	fz_always(ctx)
-	{
-		fz_drop_pixmap(ctx, scaled);
-		fz_drop_pixmap(ctx, converted);
-		fz_drop_pixmap(ctx, orig_pixmap);
-	}
+		fz_drop_pixmap(ctx, pixmap);
 	fz_catch(ctx)
-	{
 		fz_rethrow(ctx);
-	}
 }
 
 static void
-fz_draw_fill_image_mask(fz_context *ctx, fz_device *devp, fz_image *image, const fz_matrix *ctm,
+fz_draw_fill_image_mask(fz_context *ctx, fz_device *devp, fz_image *image, const fz_matrix *in_ctm,
 	fz_colorspace *colorspace, const float *color, float alpha)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
+	fz_matrix local_ctm = concat(in_ctm, &dev->transform);
 	unsigned char colorbv[FZ_MAX_COLORS + 1];
 	float colorfv[FZ_MAX_COLORS];
 	fz_pixmap *scaled = NULL;
 	fz_pixmap *pixmap;
-	fz_pixmap *orig_pixmap;
 	int dx, dy;
-	int i;
+	int i, n;
 	fz_draw_state *state = &dev->stack[dev->top];
 	fz_colorspace *model = state->dest->colorspace;
 	fz_irect clip;
-	fz_matrix local_ctm = *ctm;
+	fz_matrix inverse;
+	fz_irect src_area;
+
+	if (colorspace == NULL && model != NULL)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "color destination requires source color");
 
 	fz_pixmap_bbox(ctx, state->dest, &clip);
 	fz_intersect_irect(&clip, &state->scissor);
@@ -1221,17 +1382,51 @@ fz_draw_fill_image_mask(fz_context *ctx, fz_device *devp, fz_image *image, const
 	if (image->w == 0 || image->h == 0)
 		return;
 
-	dx = sqrtf(local_ctm.a * local_ctm.a + local_ctm.b * local_ctm.b);
-	dy = sqrtf(local_ctm.c * local_ctm.c + local_ctm.d * local_ctm.d);
-	pixmap = fz_get_pixmap_from_image(ctx, image, dx, dy);
-	orig_pixmap = pixmap;
+	/* ctm maps the image (expressed as the unit square) onto the
+	 * destination device. Reverse that to get a mapping from
+	 * the destination device to the source pixels. */
+	if (fz_try_invert_matrix(&inverse, &local_ctm))
+	{
+		/* Not invertible. Could just bail? Use the whole image
+		 * for now. */
+		src_area.x0 = 0;
+		src_area.x1 = image->w;
+		src_area.y0 = 0;
+		src_area.y1 = image->h;
+	}
+	else
+	{
+		float exp;
+		fz_rect rect;
+		fz_irect sane;
+		/* We want to scale from image coords, not from unit square */
+		fz_post_scale(&inverse, image->w, image->h);
+		/* Are we scaling up or down? exp < 1 means scaling down. */
+		exp = fz_matrix_max_expansion(&inverse);
+		fz_rect_from_irect(&rect, &clip);
+		fz_transform_rect(&rect, &inverse);
+		/* Allow for support requirements for scalers. */
+		fz_expand_rect(&rect, fz_max(exp, 1) * 4);
+		fz_irect_from_rect(&src_area, &rect);
+		sane.x0 = 0;
+		sane.y0 = 0;
+		sane.x1 = image->w;
+		sane.y1 = image->h;
+		fz_intersect_irect(&src_area, &sane);
+		if (fz_is_empty_irect(&src_area))
+			return;
+	}
+
+	pixmap = fz_get_pixmap_from_image(ctx, image, &src_area, &local_ctm, &dx, &dy);
+
+	fz_var(pixmap);
 
 	fz_try(ctx)
 	{
 		if (state->blendmode & FZ_BLEND_KNOCKOUT)
 			state = fz_knockout_begin(ctx, dev);
 
-		if (dx < pixmap->w && dy < pixmap->h)
+		if (ctx->tuning->image_scale(ctx->tuning->image_scale_arg, dx, dy, pixmap->w, pixmap->h))
 		{
 			int gridfit = alpha == 1.0f && !(dev->flags & FZ_DRAWDEV_FLAGS_TYPE3);
 			scaled = fz_transform_pixmap(ctx, dev, pixmap, &local_ctm, state->dest->x, state->dest->y, dx, dy, gridfit, &clip);
@@ -1244,59 +1439,54 @@ fz_draw_fill_image_mask(fz_context *ctx, fz_device *devp, fz_image *image, const
 				scaled = fz_scale_pixmap_cached(ctx, pixmap, pixmap->x, pixmap->y, dx, dy, NULL, dev->cache_x, dev->cache_y);
 			}
 			if (scaled)
+			{
+				fz_drop_pixmap(ctx, pixmap);
 				pixmap = scaled;
+			}
 		}
 
-		fz_convert_color(ctx, model, colorfv, colorspace, color);
-		for (i = 0; i < model->n; i++)
-			colorbv[i] = colorfv[i] * 255;
+		n = fz_colorspace_n(ctx, model);
+		if (n > 0)
+		{
+			fz_convert_color(ctx, model, colorfv, colorspace, color);
+			for (i = 0; i < n; i++)
+				colorbv[i] = colorfv[i] * 255;
+		}
+		else
+			i = 0;
 		colorbv[i] = alpha * 255;
 
 		fz_paint_image_with_color(state->dest, &state->scissor, state->shape, pixmap, &local_ctm, colorbv, !(devp->hints & FZ_DONT_INTERPOLATE_IMAGES), devp->flags & FZ_DEVFLAG_GRIDFIT_AS_TILED);
-
-		if (scaled)
-			fz_drop_pixmap(ctx, scaled);
 
 		if (state->blendmode & FZ_BLEND_KNOCKOUT)
 			fz_knockout_end(ctx, dev);
 	}
 	fz_always(ctx)
-	{
-		fz_drop_pixmap(ctx, orig_pixmap);
-	}
+		fz_drop_pixmap(ctx, pixmap);
 	fz_catch(ctx)
-	{
 		fz_rethrow(ctx);
-	}
 }
 
 static void
-fz_draw_clip_image_mask(fz_context *ctx, fz_device *devp, fz_image *image, const fz_matrix *ctm, const fz_rect *scissor)
+fz_draw_clip_image_mask(fz_context *ctx, fz_device *devp, fz_image *image, const fz_matrix *in_ctm, const fz_rect *scissor)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
+	fz_matrix local_ctm = concat(in_ctm, &dev->transform);
 	fz_irect bbox;
 	fz_pixmap *mask = NULL;
 	fz_pixmap *dest = NULL;
 	fz_pixmap *shape = NULL;
 	fz_pixmap *scaled = NULL;
 	fz_pixmap *pixmap = NULL;
-	fz_pixmap *orig_pixmap = NULL;
 	int dx, dy;
 	fz_draw_state *state = push_stack(ctx, dev);
 	fz_colorspace *model = state->dest->colorspace;
 	fz_irect clip;
-	fz_matrix local_ctm = *ctm;
 	fz_rect urect;
 
 	STACK_PUSHED("clip image mask");
 	fz_pixmap_bbox(ctx, state->dest, &clip);
 	fz_intersect_irect(&clip, &state->scissor);
-
-	fz_var(mask);
-	fz_var(dest);
-	fz_var(shape);
-	fz_var(pixmap);
-	fz_var(orig_pixmap);
 
 	if (image->w == 0 || image->h == 0)
 	{
@@ -1318,32 +1508,42 @@ fz_draw_clip_image_mask(fz_context *ctx, fz_device *devp, fz_image *image, const
 	if (scissor)
 	{
 		fz_irect bbox2;
-		fz_intersect_irect(&bbox, fz_irect_from_rect(&bbox2, scissor));
+		fz_rect tscissor = *scissor;
+		fz_transform_rect(&tscissor, &dev->transform);
+		fz_intersect_irect(&bbox, fz_irect_from_rect(&bbox2, &tscissor));
 	}
 
-	dx = sqrtf(local_ctm.a * local_ctm.a + local_ctm.b * local_ctm.b);
-	dy = sqrtf(local_ctm.c * local_ctm.c + local_ctm.d * local_ctm.d);
+	pixmap = fz_get_pixmap_from_image(ctx, image, NULL, &local_ctm, &dx, &dy);
+
+	fz_var(mask);
+	fz_var(dest);
+	fz_var(shape);
+	fz_var(pixmap);
 
 	fz_try(ctx)
 	{
-		pixmap = fz_get_pixmap_from_image(ctx, image, dx, dy);
-		orig_pixmap = pixmap;
-
-		state[1].mask = mask = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+		state[1].mask = mask = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 		fz_clear_pixmap(ctx, mask);
 
-		state[1].dest = dest = fz_new_pixmap_with_bbox(ctx, model, &bbox);
-		fz_clear_pixmap(ctx, dest);
+		/* When there is no alpha in the current destination (state[0].dest->alpha == 0)
+		 * we have a choice. We can either create the new destination WITH alpha, or
+		 * we can copy the old pixmap contents in. We opt for the latter here, but
+		 * may want to revisit this decision in the future. */
+		state[1].dest = dest = fz_new_pixmap_with_bbox(ctx, model, &bbox, state[0].dest->alpha);
+		if (state[0].dest->alpha)
+			fz_clear_pixmap(ctx, state[1].dest);
+		else
+			fz_copy_pixmap_rect(ctx, state[1].dest, state[0].dest, &bbox);
 		if (state->shape)
 		{
-			state[1].shape = shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+			state[1].shape = shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 			fz_clear_pixmap(ctx, shape);
 		}
 
 		state[1].blendmode |= FZ_BLEND_ISOLATED;
 		state[1].scissor = bbox;
 
-		if (dx < pixmap->w && dy < pixmap->h)
+		if (ctx->tuning->image_scale(ctx->tuning->image_scale_arg, dx, dy, pixmap->w, pixmap->h))
 		{
 			int gridfit = !(dev->flags & FZ_DRAWDEV_FLAGS_TYPE3);
 			scaled = fz_transform_pixmap(ctx, dev, pixmap, &local_ctm, state->dest->x, state->dest->y, dx, dy, gridfit, &clip);
@@ -1356,19 +1556,31 @@ fz_draw_clip_image_mask(fz_context *ctx, fz_device *devp, fz_image *image, const
 				scaled = fz_scale_pixmap_cached(ctx, pixmap, pixmap->x, pixmap->y, dx, dy, NULL, dev->cache_x, dev->cache_y);
 			}
 			if (scaled)
+			{
+				fz_drop_pixmap(ctx, pixmap);
 				pixmap = scaled;
+			}
 		}
+#ifdef DUMP_GROUP_BLENDS
+		dump_spaces(dev->top, "");
+		fz_dump_blend(ctx, pixmap, "Plotting imagemask ");
+		fz_dump_blend(ctx, mask, "/");
+		fz_dump_blend(ctx, state[1].dest, " onto ");
+		if (state[1].shape)
+			fz_dump_blend(ctx, state[1].shape, "/");
+#endif
 		fz_paint_image(mask, &bbox, state->shape, pixmap, &local_ctm, 255, !(devp->hints & FZ_DONT_INTERPOLATE_IMAGES), devp->flags & FZ_DEVFLAG_GRIDFIT_AS_TILED);
+#ifdef DUMP_GROUP_BLENDS
+		fz_dump_blend(ctx, state[1].dest, " to get ");
+		if (state[1].shape)
+			fz_dump_blend(ctx, state[1].shape, "/");
+		printf("\n");
+#endif
 	}
 	fz_always(ctx)
-	{
-		fz_drop_pixmap(ctx, scaled);
-		fz_drop_pixmap(ctx, orig_pixmap);
-	}
+		fz_drop_pixmap(ctx, pixmap);
 	fz_catch(ctx)
-	{
 		emergency_pop_stack(ctx, dev, state);
-	}
 }
 
 static void
@@ -1436,13 +1648,25 @@ fz_draw_begin_mask(fz_context *ctx, fz_device *devp, const fz_rect *rect, int lu
 	fz_irect bbox;
 	fz_draw_state *state = push_stack(ctx, dev);
 	fz_pixmap *shape = state->shape;
+	fz_rect trect = *rect;
 
 	STACK_PUSHED("mask");
-	fz_intersect_irect(fz_irect_from_rect(&bbox, rect), &state->scissor);
+	fz_transform_rect(&trect, &dev->transform);
+	fz_intersect_irect(fz_irect_from_rect(&bbox, &trect), &state->scissor);
+
+	/* Reset the blendmode for the mask rendering. In particular,
+	 * don't carry forward knockout or isolated. */
+	state[1].blendmode = 0;
 
 	fz_try(ctx)
 	{
-		state[1].dest = dest = fz_new_pixmap_with_bbox(ctx, fz_device_gray(ctx), &bbox);
+		/* If luminosity, then we generate a mask from the greyscale value of the shapes.
+		 * If !luminosity, then we generate a mask from the alpha value of the shapes.
+		 */
+		if (luminosity)
+			state[1].dest = dest = fz_new_pixmap_with_bbox(ctx, fz_device_gray(ctx), &bbox, 0);
+		else
+			state[1].dest = dest = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 		if (state->shape)
 		{
 			/* FIXME: If we ever want to support AIS true, then
@@ -1475,7 +1699,6 @@ fz_draw_begin_mask(fz_context *ctx, fz_device *devp, const fz_rect *rect, int lu
 		dump_spaces(dev->top-1, "Mask begin\n");
 #endif
 		state[1].scissor = bbox;
-		state[1].luminosity = luminosity;
 	}
 	fz_catch(ctx)
 	{
@@ -1489,7 +1712,6 @@ fz_draw_end_mask(fz_context *ctx, fz_device *devp)
 	fz_draw_device *dev = (fz_draw_device*)devp;
 	fz_pixmap *temp, *dest;
 	fz_irect bbox;
-	int luminosity;
 	fz_draw_state *state;
 
 	if (dev->top == 0)
@@ -1499,16 +1721,17 @@ fz_draw_end_mask(fz_context *ctx, fz_device *devp)
 	}
 	state = &dev->stack[dev->top-1];
 	STACK_CONVERT("(mask)");
-	/* pop soft mask buffer */
-	luminosity = state[1].luminosity;
 
 #ifdef DUMP_GROUP_BLENDS
-	dump_spaces(dev->top-1, "Mask -> Clip\n");
+	dump_spaces(dev->top-1, "Mask -> Clip: ");
+	fz_dump_blend(ctx, state[1].dest, "Mask ");
+	if (state[1].shape)
+		fz_dump_blend(ctx, state[1].shape, "/");
 #endif
 	fz_try(ctx)
 	{
 		/* convert to alpha mask */
-		temp = fz_alpha_from_gray(ctx, state[1].dest, luminosity);
+		temp = fz_alpha_from_gray(ctx, state[1].dest);
 		if (state[1].mask != state[0].mask)
 			fz_drop_pixmap(ctx, state[1].mask);
 		state[1].mask = temp;
@@ -1519,10 +1742,15 @@ fz_draw_end_mask(fz_context *ctx, fz_device *devp)
 			fz_drop_pixmap(ctx, state[1].shape);
 		state[1].shape = NULL;
 
+#ifdef DUMP_GROUP_BLENDS
+		fz_dump_blend(ctx, temp, "-> Clip ");
+		printf("\n");
+#endif
+
 		/* create new dest scratch buffer */
 		fz_pixmap_bbox(ctx, temp, &bbox);
-		dest = fz_new_pixmap_with_bbox(ctx, state->dest->colorspace, &bbox);
-		fz_clear_pixmap(ctx, dest);
+		dest = fz_new_pixmap_with_bbox(ctx, state->dest->colorspace, &bbox, state->dest->alpha);
+		fz_copy_pixmap_rect(ctx, dest, state->dest, &bbox);
 
 		/* push soft mask as clip mask */
 		state[1].dest = dest;
@@ -1531,7 +1759,7 @@ fz_draw_end_mask(fz_context *ctx, fz_device *devp)
 		 * clip mask when we pop. So create a new shape now. */
 		if (state[0].shape)
 		{
-			state[1].shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+			state[1].shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 			fz_clear_pixmap(ctx, state[1].shape);
 		}
 		state[1].scissor = bbox;
@@ -1550,22 +1778,24 @@ fz_draw_begin_group(fz_context *ctx, fz_device *devp, const fz_rect *rect, int i
 	fz_pixmap *dest;
 	fz_draw_state *state = &dev->stack[dev->top];
 	fz_colorspace *model = state->dest->colorspace;
+	fz_rect trect = *rect;
 
 	if (state->blendmode & FZ_BLEND_KNOCKOUT)
 		fz_knockout_begin(ctx, dev);
 
 	state = push_stack(ctx, dev);
 	STACK_PUSHED("group");
-	fz_intersect_irect(fz_irect_from_rect(&bbox, rect), &state->scissor);
+	fz_transform_rect(&trect, &dev->transform);
+	fz_intersect_irect(fz_irect_from_rect(&bbox, &trect), &state->scissor);
 
 	fz_try(ctx)
 	{
-		state[1].dest = dest = fz_new_pixmap_with_bbox(ctx, model, &bbox);
-
 #ifndef ATTEMPT_KNOCKOUT_AND_ISOLATED
 		knockout = 0;
 		isolated = 1;
 #endif
+
+		state[1].dest = dest = fz_new_pixmap_with_bbox(ctx, model, &bbox, state[0].dest->alpha || isolated);
 
 		if (isolated)
 		{
@@ -1584,7 +1814,7 @@ fz_draw_begin_group(fz_context *ctx, fz_device *devp, const fz_rect *rect, int i
 		}
 		else
 		{
-			state[1].shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+			state[1].shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 			fz_clear_pixmap(ctx, state[1].shape);
 		}
 
@@ -1720,10 +1950,10 @@ static void
 fz_print_tile(fz_context *ctx, fz_output *out, void *key_)
 {
 	tile_key *key = (tile_key *)key_;
-	fz_printf(ctx, out, "(tile id=%x, ctm=%g %g %g %g) ", key->id, key->ctm[0], key->ctm[1], key->ctm[2], key->ctm[3]);
+	fz_write_printf(ctx, out, "(tile id=%x, ctm=%g %g %g %g) ", key->id, key->ctm[0], key->ctm[1], key->ctm[2], key->ctm[3]);
 }
 
-static fz_store_type fz_tile_store_type =
+static const fz_store_type fz_tile_store_type =
 {
 	fz_make_hash_tile_key,
 	fz_keep_tile_key,
@@ -1757,7 +1987,7 @@ fz_new_tile_record(fz_context *ctx, fz_pixmap *dest, fz_pixmap *shape)
 	return tile;
 }
 
-unsigned int
+size_t
 fz_tile_size(fz_context *ctx, tile_record *tile)
 {
 	if (!tile)
@@ -1766,9 +1996,10 @@ fz_tile_size(fz_context *ctx, tile_record *tile)
 }
 
 static int
-fz_draw_begin_tile(fz_context *ctx, fz_device *devp, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *ctm, int id)
+fz_draw_begin_tile(fz_context *ctx, fz_device *devp, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *in_ctm, int id)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
+	fz_matrix ctm = concat(in_ctm, &dev->transform);
 	fz_pixmap *dest = NULL;
 	fz_pixmap *shape;
 	fz_irect bbox;
@@ -1784,7 +2015,7 @@ fz_draw_begin_tile(fz_context *ctx, fz_device *devp, const fz_rect *area, const 
 
 	state = push_stack(ctx, dev);
 	STACK_PUSHED("tile");
-	fz_irect_from_rect(&bbox, fz_transform_rect(&local_view, ctm));
+	fz_irect_from_rect(&bbox, fz_transform_rect(&local_view, &ctm));
 	/* We should never have a bbox that entirely covers our destination.
 	 * If we do, then the check for only 1 tile being visible above has
 	 * failed. Actually, this *can* fail due to the round_rect, at extreme
@@ -1798,10 +2029,10 @@ fz_draw_begin_tile(fz_context *ctx, fz_device *devp, const fz_rect *area, const 
 	{
 		tile_key tk;
 		tile_record *tile;
-		tk.ctm[0] = ctm->a;
-		tk.ctm[1] = ctm->b;
-		tk.ctm[2] = ctm->c;
-		tk.ctm[3] = ctm->d;
+		tk.ctm[0] = ctm.a;
+		tk.ctm[1] = ctm.b;
+		tk.ctm[2] = ctm.c;
+		tk.ctm[3] = ctm.d;
 		tk.id = id;
 
 		tile = fz_find_item(ctx, fz_drop_tile_record_imp, &tk, &fz_tile_store_type);
@@ -1814,7 +2045,7 @@ fz_draw_begin_tile(fz_context *ctx, fz_device *devp, const fz_rect *area, const 
 			state[1].ystep = ystep;
 			state[1].id = id;
 			fz_irect_from_rect(&state[1].area, area);
-			state[1].ctm = *ctm;
+			state[1].ctm = ctm;
 #ifdef DUMP_GROUP_BLENDS
 			dump_spaces(dev->top-1, "Tile begin (cached)\n");
 #endif
@@ -1827,12 +2058,13 @@ fz_draw_begin_tile(fz_context *ctx, fz_device *devp, const fz_rect *area, const 
 
 	fz_try(ctx)
 	{
-		state[1].dest = dest = fz_new_pixmap_with_bbox(ctx, model, &bbox);
+		/* Patterns can be transparent, so we need to have an alpha here. */
+		state[1].dest = dest = fz_new_pixmap_with_bbox(ctx, model, &bbox, 1);
 		fz_clear_pixmap(ctx, dest);
 		shape = state[0].shape;
 		if (shape)
 		{
-			state[1].shape = shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox);
+			state[1].shape = shape = fz_new_pixmap_with_bbox(ctx, NULL, &bbox, 1);
 			fz_clear_pixmap(ctx, shape);
 		}
 		state[1].blendmode |= FZ_BLEND_ISOLATED;
@@ -1840,7 +2072,7 @@ fz_draw_begin_tile(fz_context *ctx, fz_device *devp, const fz_rect *area, const 
 		state[1].ystep = ystep;
 		state[1].id = id;
 		fz_irect_from_rect(&state[1].area, area);
-		state[1].ctm = *ctm;
+		state[1].ctm = ctm;
 #ifdef DUMP_GROUP_BLENDS
 		dump_spaces(dev->top-1, "Tile begin\n");
 #endif
@@ -1861,9 +2093,9 @@ fz_draw_end_tile(fz_context *ctx, fz_device *devp)
 	fz_draw_device *dev = (fz_draw_device*)devp;
 	float xstep, ystep;
 	fz_matrix ttm, ctm, shapectm;
-	fz_irect area, scissor;
-	fz_rect scissor_tmp;
-	int x0, y0, x1, y1, x, y;
+	fz_irect area, scissor, tile_bbox;
+	fz_rect scissor_tmp, tile_tmp;
+	int x0, y0, x1, y1, x, y, extra_x, extra_y;
 	fz_draw_state *state;
 	tile_record *tile;
 	tile_key *key;
@@ -1887,22 +2119,29 @@ fz_draw_end_tile(fz_context *ctx, fz_device *devp)
 	fz_transform_rect(fz_expand_rect(&scissor_tmp, 1), fz_invert_matrix(&ttm, &ctm));
 	fz_intersect_irect(&area, fz_irect_from_rect(&scissor, &scissor_tmp));
 
+	tile_bbox.x0 = state[1].dest->x;
+	tile_bbox.y0 = state[1].dest->y;
+	tile_bbox.x1 = state[1].dest->w + tile_bbox.x0;
+	tile_bbox.y1 = state[1].dest->h + tile_bbox.y0;
+	fz_rect_from_irect(&tile_tmp, &tile_bbox);
+	fz_transform_rect(fz_expand_rect(&tile_tmp, 1), &ttm);
+
 	/* FIXME: area is a bbox, so FP not appropriate here */
 	/* In PDF files xstep/ystep can be smaller than view (the area of a
 	 * single tile) (see fts_15_1506.pdf for an example). This means that
 	 * we have to bias the left hand/bottom edge calculations by the
 	 * difference between the step and the width/height of the tile. */
 	/* scissor, xstep and area are all in pattern space. */
-	x0 = xstep - scissor.x1 + scissor.x0;
-	if (x0 > 0)
-		x0 = 0;
-	y0 = ystep - scissor.y1 + scissor.y0;
-	if (y0 > 0)
-		y0 = 0;
-	x0 = floorf((area.x0 + x0) / xstep);
-	y0 = floorf((area.y0 + y0) / ystep);
-	x1 = ceilf(area.x1 / xstep);
-	y1 = ceilf(area.y1 / ystep);
+	extra_x = tile_tmp.x1 - tile_tmp.x0 - xstep;
+	if (extra_x < 0)
+		extra_x = 0;
+	extra_y = tile_tmp.y1 - tile_tmp.y0 - ystep;
+	if (extra_y < 0)
+		extra_y = 0;
+	x0 = floorf((area.x0 - tile_tmp.x0 - extra_x) / xstep);
+	y0 = floorf((area.y0 - tile_tmp.y0 - extra_y) / ystep);
+	x1 = ceilf((area.x1 - tile_tmp.x0 + extra_x) / xstep);
+	y1 = ceilf((area.y1 - tile_tmp.y0 + extra_y) / ystep);
 
 	ctm.e = state[1].dest->x;
 	ctm.f = state[1].dest->y;
@@ -1931,6 +2170,7 @@ fz_draw_end_tile(fz_context *ctx, fz_device *devp)
 			fz_pre_translate(&ttm, x * xstep, y * ystep);
 			state[1].dest->x = ttm.e;
 			state[1].dest->y = ttm.f;
+			/* Check for overflow due to float -> int conversions */
 			if (state[1].dest->x > 0 && state[1].dest->x + state[1].dest->w < 0)
 				continue;
 			if (state[1].dest->y > 0 && state[1].dest->y + state[1].dest->h < 0)
@@ -2013,7 +2253,7 @@ fz_draw_end_tile(fz_context *ctx, fz_device *devp)
 }
 
 static void
-fz_draw_drop_imp(fz_context *ctx, fz_device *devp)
+fz_draw_drop_device(fz_context *ctx, fz_device *devp)
 {
 	fz_draw_device *dev = (fz_draw_device*)devp;
 	fz_gel *gel = dev->gel;
@@ -2052,11 +2292,11 @@ fz_draw_render_flags(fz_context *ctx, fz_device *devp, int set, int clear)
 }
 
 fz_device *
-fz_new_draw_device(fz_context *ctx, fz_pixmap *dest)
+fz_new_draw_device(fz_context *ctx, const fz_matrix *transform, fz_pixmap *dest)
 {
-	fz_draw_device *dev = fz_new_device(ctx, sizeof *dev);
+	fz_draw_device *dev = fz_new_derived_device(ctx, fz_draw_device);
 
-	dev->super.drop_imp = fz_draw_drop_imp;
+	dev->super.drop_device = fz_draw_drop_device;
 
 	dev->super.fill_path = fz_draw_fill_path;
 	dev->super.stroke_path = fz_draw_stroke_path;
@@ -2086,6 +2326,7 @@ fz_new_draw_device(fz_context *ctx, fz_pixmap *dest)
 
 	dev->super.render_flags = fz_draw_render_flags;
 
+	dev->transform = transform ? *transform : fz_identity;
 	dev->flags = 0;
 	dev->top = 0;
 	dev->stack = &dev->init_stack[0];
@@ -2115,9 +2356,9 @@ fz_new_draw_device(fz_context *ctx, fz_pixmap *dest)
 }
 
 fz_device *
-fz_new_draw_device_with_bbox(fz_context *ctx, fz_pixmap *dest, const fz_irect *clip)
+fz_new_draw_device_with_bbox(fz_context *ctx, const fz_matrix *transform, fz_pixmap *dest, const fz_irect *clip)
 {
-	fz_draw_device *dev = (fz_draw_device*)fz_new_draw_device(ctx, dest);
+	fz_draw_device *dev = (fz_draw_device*)fz_new_draw_device(ctx, transform, dest);
 
 	if (clip->x0 > dev->stack[0].scissor.x0)
 		dev->stack[0].scissor.x0 = clip->x0;
@@ -2132,9 +2373,9 @@ fz_new_draw_device_with_bbox(fz_context *ctx, fz_pixmap *dest, const fz_irect *c
 }
 
 fz_device *
-fz_new_draw_device_type3(fz_context *ctx, fz_pixmap *dest)
+fz_new_draw_device_type3(fz_context *ctx, const fz_matrix *transform, fz_pixmap *dest)
 {
-	fz_draw_device *dev = (fz_draw_device*)fz_new_draw_device(ctx, dest);
+	fz_draw_device *dev = (fz_draw_device*)fz_new_draw_device(ctx, transform, dest);
 	dev->flags |= FZ_DRAWDEV_FLAGS_TYPE3;
 	return (fz_device*)dev;
 }
@@ -2158,4 +2399,130 @@ fz_bound_path_accurate(fz_context *ctx, fz_irect *bbox, const fz_irect *scissor,
 	fz_drop_gel(ctx, gel);
 
 	return bbox;
+}
+
+const char *fz_draw_options_usage =
+	"Common raster format output options:\n"
+	"\trotate=N: rotate rendered pages N degrees counterclockwise\n"
+	"\tresolution=N: set both X and Y resolution in pixels per inch\n"
+	"\tx-resolution=N: X resolution of rendered pages in pixels per inch\n"
+	"\ty-resolution=N: Y resolution of rendered pages in pixels per inch\n"
+	"\twidth=N: render pages to fit N pixels wide (ignore resolution option)\n"
+	"\theight=N: render pages to fit N pixels tall (ignore resolution option)\n"
+	"\tcolorspace=(gray|rgb|cmyk): render using specified colorspace\n"
+	"\talpha: render pages with alpha channel and transparent background\n"
+	"\n";
+
+fz_draw_options *
+fz_parse_draw_options(fz_context *ctx, fz_draw_options *opts, const char *args)
+{
+	const char *val;
+
+	memset(opts, 0, sizeof *opts);
+
+	opts->x_resolution = 96;
+	opts->y_resolution = 96;
+	opts->rotate = 0;
+	opts->width = 0;
+	opts->height = 0;
+	opts->colorspace = fz_device_rgb(ctx);
+	opts->alpha = 0;
+
+	if (fz_has_option(ctx, args, "rotate", &val))
+		opts->rotate = fz_atoi(val);
+	if (fz_has_option(ctx, args, "resolution", &val))
+		opts->x_resolution = opts->y_resolution = fz_atoi(val);
+	if (fz_has_option(ctx, args, "x-resolution", &val))
+		opts->x_resolution = fz_atoi(val);
+	if (fz_has_option(ctx, args, "y-resolution", &val))
+		opts->y_resolution = fz_atoi(val);
+	if (fz_has_option(ctx, args, "width", &val))
+		opts->width = fz_atoi(val);
+	if (fz_has_option(ctx, args, "height", &val))
+		opts->height = fz_atoi(val);
+	if (fz_has_option(ctx, args, "colorspace", &val))
+	{
+		if (fz_option_eq(val, "gray") || fz_option_eq(val, "grey"))
+			opts->colorspace = fz_device_gray(ctx);
+		else if (fz_option_eq(val, "rgb"))
+			opts->colorspace = fz_device_rgb(ctx);
+		else if (fz_option_eq(val, "cmyk"))
+			opts->colorspace = fz_device_cmyk(ctx);
+		else
+			fz_throw(ctx, FZ_ERROR_GENERIC, "unknown colorspace in options");
+	}
+	if (fz_has_option(ctx, args, "alpha", &val))
+		opts->alpha = fz_option_eq(val, "yes");
+
+	/* Sanity check values */
+	if (opts->x_resolution <= 0) opts->x_resolution = 96;
+	if (opts->y_resolution <= 0) opts->y_resolution = 96;
+	if (opts->width < 0) opts->width = 0;
+	if (opts->height < 0) opts->height = 0;
+
+	return opts;
+}
+
+fz_device *
+fz_new_draw_device_with_options(fz_context *ctx, const fz_draw_options *opts, const fz_rect *mediabox, fz_pixmap **pixmap)
+{
+	float x_zoom = opts->x_resolution / 72.0f;
+	float y_zoom = opts->y_resolution / 72.0f;
+	int w = opts->width;
+	int h = opts->height;
+	fz_rect bounds;
+	fz_irect ibounds;
+	fz_matrix transform;
+	fz_device *dev;
+
+	fz_pre_rotate(fz_scale(&transform, x_zoom, y_zoom), opts->rotate);
+	bounds = *mediabox;
+	fz_round_rect(&ibounds, fz_transform_rect(&bounds, &transform));
+
+	/* If width or height are set, we may need to adjust the transform */
+	if (w || h)
+	{
+		float scalex = 1;
+		float scaley = 1;
+		if (w != 0)
+			scalex = w / (bounds.x1 - bounds.x0);
+		if (h != 0)
+			scaley = h / (bounds.y1 - bounds.y0);
+		if (scalex != scaley)
+		{
+			if (w == 0)
+				scalex = scaley;
+			else if (h == 0)
+				scaley = scalex;
+			else if (scalex > scaley)
+				scalex = scaley;
+			else
+				scaley = scalex;
+		}
+		if (scalex != 1 || scaley != 1)
+		{
+			fz_pre_scale(&transform, scalex, scaley);
+			bounds = *mediabox;
+			fz_round_rect(&ibounds, fz_transform_rect(&bounds, &transform));
+		}
+	}
+
+	*pixmap = fz_new_pixmap_with_bbox(ctx, opts->colorspace, &ibounds, opts->alpha);
+	fz_try(ctx)
+	{
+		fz_set_pixmap_resolution(ctx, *pixmap, opts->x_resolution, opts->y_resolution);
+		if (opts->alpha)
+			fz_clear_pixmap(ctx, *pixmap);
+		else
+			fz_clear_pixmap_with_value(ctx, *pixmap, 255);
+
+		dev = fz_new_draw_device(ctx, &transform, *pixmap);
+	}
+	fz_catch(ctx)
+	{
+		fz_drop_pixmap(ctx, *pixmap);
+		*pixmap = NULL;
+		fz_rethrow(ctx);
+	}
+	return dev;
 }

@@ -16,10 +16,8 @@ static void
 pdf_drop_pattern_imp(fz_context *ctx, fz_storable *pat_)
 {
 	pdf_pattern *pat = (pdf_pattern *)pat_;
-	if (pat->resources)
-		pdf_drop_obj(ctx, pat->resources);
-	if (pat->contents)
-		pdf_drop_obj(ctx, pat->contents);
+	pdf_drop_obj(ctx, pat->resources);
+	pdf_drop_obj(ctx, pat->contents);
 	fz_free(ctx, pat);
 }
 
@@ -76,7 +74,7 @@ pdf_load_pattern(fz_context *ctx, pdf_document *doc, pdf_obj *dict)
 	{
 		pdf_remove_item(ctx, pdf_drop_pattern_imp, dict);
 		pdf_drop_pattern(ctx, pat);
-		fz_rethrow_message(ctx, "cannot load pattern (%d %d R)", pdf_to_num(ctx, dict), pdf_to_gen(ctx, dict));
+		fz_rethrow(ctx);
 	}
 	return pat;
 }

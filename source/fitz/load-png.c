@@ -367,7 +367,7 @@ png_read_phys(fz_context *ctx, struct info *info, unsigned char *p, unsigned int
 }
 
 static void
-png_read_image(fz_context *ctx, struct info *info, unsigned char *p, unsigned int total, int only_metadata)
+png_read_image(fz_context *ctx, struct info *info, unsigned char *p, size_t total, int only_metadata)
 {
 	unsigned int passw[7], passh[7], passofs[8];
 	unsigned int code, size;
@@ -500,10 +500,12 @@ png_read_image(fz_context *ctx, struct info *info, unsigned char *p, unsigned in
 static fz_pixmap *
 png_expand_palette(fz_context *ctx, struct info *info, fz_pixmap *src)
 {
-	fz_pixmap *dst = fz_new_pixmap(ctx, fz_device_rgb(ctx), src->w, src->h);
+	fz_pixmap *dst = fz_new_pixmap(ctx, fz_device_rgb(ctx), src->w, src->h, 1);
 	unsigned char *sp = src->samples;
 	unsigned char *dp = dst->samples;
 	unsigned int x, y;
+	int dstride = dst->stride - dst->w * dst->n;
+	int sstride = src->stride - src->w * src->n;
 
 	dst->xres = src->xres;
 	dst->yres = src->yres;
@@ -519,6 +521,8 @@ png_expand_palette(fz_context *ctx, struct info *info, fz_pixmap *src)
 			*dp++ = info->palette[v + 3];
 			sp += 2;
 		}
+		sp += sstride;
+		dp += dstride;
 	}
 
 	fz_drop_pixmap(ctx, src);
@@ -536,7 +540,7 @@ png_mask_transparency(struct info *info, fz_pixmap *dst)
 	for (y = 0; y < info->height; y++)
 	{
 		unsigned char *sp = info->samples + (unsigned int)(y * stride);
-		unsigned char *dp = dst->samples + (unsigned int)(y * dst->w * dst->n);
+		unsigned char *dp = dst->samples + (unsigned int)(y * dst->stride);
 		for (x = 0; x < info->width; x++)
 		{
 			t = 1;
@@ -550,7 +554,7 @@ png_mask_transparency(struct info *info, fz_pixmap *dst)
 }
 
 fz_pixmap *
-fz_load_png(fz_context *ctx, unsigned char *p, int total)
+fz_load_png(fz_context *ctx, unsigned char *p, size_t total)
 {
 	fz_pixmap *image;
 	fz_colorspace *colorspace;
@@ -568,12 +572,12 @@ fz_load_png(fz_context *ctx, unsigned char *p, int total)
 
 	fz_try(ctx)
 	{
-		image = fz_new_pixmap(ctx, colorspace, png.width, png.height);
+		image = fz_new_pixmap(ctx, colorspace, png.width, png.height, 1);
 	}
 	fz_catch(ctx)
 	{
 		fz_free(ctx, png.samples);
-		fz_rethrow_message(ctx, "out of memory loading png");
+		fz_rethrow(ctx);
 	}
 
 	image->xres = png.xres;
@@ -606,7 +610,7 @@ fz_load_png(fz_context *ctx, unsigned char *p, int total)
 }
 
 void
-fz_load_png_info(fz_context *ctx, unsigned char *p, int total, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
+fz_load_png_info(fz_context *ctx, unsigned char *p, size_t total, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
 {
 	struct info png;
 

@@ -28,9 +28,10 @@ string_in_names_list(fz_context *ctx, pdf_obj *p, pdf_obj *names_list)
 static void retainpage(fz_context *ctx, pdf_document *doc, pdf_obj *parent, pdf_obj *kids, int page)
 {
 	pdf_obj *pageref = pdf_lookup_page_obj(ctx, doc, page-1);
-	pdf_obj *pageobj = pdf_resolve_indirect(ctx, pageref);
 
-	pdf_dict_put(ctx, pageobj, PDF_NAME_Parent, parent);
+	pdf_flatten_inheritable_page_items(ctx, pageref);
+
+	pdf_dict_put(ctx, pageref, PDF_NAME_Parent, parent);
 
 	/* Store page object in new kids array */
 	pdf_array_push(ctx, kids, pageref);
@@ -145,6 +146,9 @@ static int strip_outlines(fz_context *ctx, pdf_document *doc, pdf_obj *outlines,
 	pdf_obj *first;
 	pdf_obj *last;
 
+	if (outlines == NULL)
+		return 0;
+
 	first = pdf_dict_get(ctx, outlines, PDF_NAME_First);
 	if (first == NULL)
 		nc = 0;
@@ -170,11 +174,12 @@ static int strip_outlines(fz_context *ctx, pdf_document *doc, pdf_obj *outlines,
 
 static void retainpages(fz_context *ctx, globals *glo, int argc, char **argv)
 {
-	pdf_obj *oldroot, *root, *pages, *kids, *countobj, *parent, *olddests;
+	pdf_obj *oldroot, *root, *pages, *kids, *countobj, *olddests;
 	pdf_document *doc = glo->doc;
 	int argidx = 0;
 	pdf_obj *names_list = NULL;
 	pdf_obj *outlines;
+	pdf_obj *ocproperties;
 	int pagecount;
 	int i;
 	int *page_object_nums;
@@ -185,61 +190,41 @@ static void retainpages(fz_context *ctx, globals *glo, int argc, char **argv)
 	pages = pdf_dict_get(ctx, oldroot, PDF_NAME_Pages);
 	olddests = pdf_load_name_tree(ctx, doc, PDF_NAME_Dests);
 	outlines = pdf_dict_get(ctx, oldroot, PDF_NAME_Outlines);
+	ocproperties = pdf_dict_get(ctx, oldroot, PDF_NAME_OCProperties);
 
 	root = pdf_new_dict(ctx, doc, 3);
 	pdf_dict_put(ctx, root, PDF_NAME_Type, pdf_dict_get(ctx, oldroot, PDF_NAME_Type));
 	pdf_dict_put(ctx, root, PDF_NAME_Pages, pdf_dict_get(ctx, oldroot, PDF_NAME_Pages));
-	pdf_dict_put(ctx, root, PDF_NAME_Outlines, outlines);
+	if (outlines)
+		pdf_dict_put(ctx, root, PDF_NAME_Outlines, outlines);
+	if (ocproperties)
+		pdf_dict_put(ctx, root, PDF_NAME_OCProperties, ocproperties);
 
 	pdf_update_object(ctx, doc, pdf_to_num(ctx, oldroot), root);
 
 	/* Create a new kids array with only the pages we want to keep */
-	parent = pdf_new_indirect(ctx, doc, pdf_to_num(ctx, pages), pdf_to_gen(ctx, pages));
 	kids = pdf_new_array(ctx, doc, 1);
 
 	/* Retain pages specified */
 	while (argc - argidx)
 	{
 		int page, spage, epage;
-		char *spec, *dash;
-		char *pagelist = argv[argidx];
+		const char *pagelist = argv[argidx];
 
 		pagecount = pdf_count_pages(ctx, doc);
-		spec = fz_strsep(&pagelist, ",");
-		while (spec)
+
+		while ((pagelist = fz_parse_page_range(ctx, pagelist, &spage, &epage, pagecount)))
 		{
-			dash = strchr(spec, '-');
-
-			if (dash == spec)
-				spage = epage = pagecount;
-			else
-				spage = epage = atoi(spec);
-
-			if (dash)
-			{
-				if (strlen(dash) > 1)
-					epage = atoi(dash + 1);
-				else
-					epage = pagecount;
-			}
-
-			spage = fz_clampi(spage, 1, pagecount);
-			epage = fz_clampi(epage, 1, pagecount);
-
 			if (spage < epage)
 				for (page = spage; page <= epage; ++page)
-					retainpage(ctx, doc, parent, kids, page);
+					retainpage(ctx, doc, pages, kids, page);
 			else
 				for (page = spage; page >= epage; --page)
-					retainpage(ctx, doc, parent, kids, page);
-
-			spec = fz_strsep(&pagelist, ",");
+					retainpage(ctx, doc, pages, kids, page);
 		}
 
 		argidx++;
 	}
-
-	pdf_drop_obj(ctx, parent);
 
 	/* Update page count and kids array */
 	countobj = pdf_new_int(ctx, doc, pdf_array_len(ctx, kids));
@@ -281,9 +266,8 @@ static void retainpages(fz_context *ctx, globals *glo, int argc, char **argv)
 			if (dest_is_valid_page(ctx, dest, page_object_nums, pagecount))
 			{
 				pdf_obj *key_str = pdf_new_string(ctx, doc, pdf_to_name(ctx, key), strlen(pdf_to_name(ctx, key)));
-				pdf_array_push(ctx, names_list, key_str);
+				pdf_array_push_drop(ctx, names_list, key_str);
 				pdf_array_push(ctx, names_list, val);
-				pdf_drop_obj(ctx, key_str);
 			}
 		}
 
@@ -301,9 +285,8 @@ static void retainpages(fz_context *ctx, globals *glo, int argc, char **argv)
 	for (i = 0; i < pagecount; i++)
 	{
 		pdf_obj *pageref = pdf_lookup_page_obj(ctx, doc, i);
-		pdf_obj *pageobj = pdf_resolve_indirect(ctx, pageref);
 
-		pdf_obj *annots = pdf_dict_get(ctx, pageobj, PDF_NAME_Annots);
+		pdf_obj *annots = pdf_dict_get(ctx, pageref, PDF_NAME_Annots);
 
 		int len = pdf_array_len(ctx, annots);
 		int j;
@@ -319,6 +302,7 @@ static void retainpages(fz_context *ctx, globals *glo, int argc, char **argv)
 			{
 				/* Remove this annotation */
 				pdf_array_delete(ctx, annots, j);
+				len--;
 				j--;
 			}
 		}

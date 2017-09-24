@@ -3,7 +3,7 @@
 
 #include "mupdf/fitz/system.h"
 #include "mupdf/fitz/context.h"
-#include "mupdf/fitz/math.h"
+#include "mupdf/fitz/geometry.h"
 #include "mupdf/fitz/store.h"
 #include "mupdf/fitz/colorspace.h"
 
@@ -118,15 +118,13 @@ struct fz_glyph_s
 	fz_storable storable;
 	int x, y, w, h;
 	fz_pixmap *pixmap;
-	int size;
+	size_t size;
 	unsigned char data[1];
 };
 
-static unsigned int fz_glyph_size(fz_context *ctx, fz_glyph *glyph);
-
 fz_irect *fz_glyph_bbox_no_ctx(fz_glyph *src, fz_irect *bbox);
 
-static inline unsigned int
+static inline size_t
 fz_glyph_size(fz_context *ctx, fz_glyph *glyph)
 {
 	if (glyph == NULL)

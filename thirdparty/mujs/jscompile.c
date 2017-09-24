@@ -89,7 +89,7 @@ static int addfunction(JF, js_Function *value)
 
 static int addnumber(JF, double value)
 {
-	unsigned int i;
+	int i;
 	for (i = 0; i < F->numlen; ++i)
 		if (F->numtab[i] == value)
 			return i;
@@ -103,7 +103,7 @@ static int addnumber(JF, double value)
 
 static int addstring(JF, const char *value)
 {
-	unsigned int i;
+	int i;
 	for (i = 0; i < F->strlen; ++i)
 		if (!strcmp(F->strtab[i], value))
 			return i;
@@ -125,7 +125,7 @@ static void addlocal(JF, js_Ast *ident, int reuse)
 			jsC_error(J, ident, "redefining 'eval' is not allowed in strict mode");
 	}
 	if (reuse || J->strict) {
-		unsigned int i;
+		int i;
 		for (i = 0; i < F->varlen; ++i) {
 			if (!strcmp(F->vartab[i], name)) {
 				if (reuse)
@@ -144,7 +144,7 @@ static void addlocal(JF, js_Ast *ident, int reuse)
 
 static int findlocal(JF, const char *name)
 {
-	unsigned int i;
+	int i;
 	for (i = F->varlen; i > 0; --i)
 		if (!strcmp(F->vartab[i-1], name))
 			return i;
@@ -318,6 +318,7 @@ static void cobject(JF, js_Ast *list)
 			checkdup(J, F, head, kv);
 
 		switch (kv->type) {
+		default: /* impossible */ break;
 		case EXP_PROP_VAL:
 			cexp(J, F, kv->b);
 			emit(J, F, OP_INITPROP);
@@ -795,6 +796,7 @@ static void cexit(JF, enum js_AstType T, js_Ast *node, js_Ast *target)
 	do {
 		prev = node, node = node->parent;
 		switch (node->type) {
+		default: /* impossible */ break;
 		case STM_WITH:
 			emit(J, F, OP_ENDWITH);
 			break;
@@ -1100,11 +1102,11 @@ static void cstm(JF, js_Ast *stm)
 
 	case STM_BREAK:
 		if (stm->a) {
-			target = breaktarget(J, F, stm, stm->a->string);
+			target = breaktarget(J, F, stm->parent, stm->a->string);
 			if (!target)
 				jsC_error(J, stm, "break label '%s' not found", stm->a->string);
 		} else {
-			target = breaktarget(J, F, stm, NULL);
+			target = breaktarget(J, F, stm->parent, NULL);
 			if (!target)
 				jsC_error(J, stm, "unlabelled break must be inside loop or switch");
 		}
@@ -1114,11 +1116,11 @@ static void cstm(JF, js_Ast *stm)
 
 	case STM_CONTINUE:
 		if (stm->a) {
-			target = continuetarget(J, F, stm, stm->a->string);
+			target = continuetarget(J, F, stm->parent, stm->a->string);
 			if (!target)
 				jsC_error(J, stm, "continue label '%s' not found", stm->a->string);
 		} else {
-			target = continuetarget(J, F, stm, NULL);
+			target = continuetarget(J, F, stm->parent, NULL);
 			if (!target)
 				jsC_error(J, stm, "continue must be inside loop");
 		}
@@ -1131,7 +1133,7 @@ static void cstm(JF, js_Ast *stm)
 			cexp(J, F, stm->a);
 		else
 			emit(J, F, OP_UNDEF);
-		target = returntarget(J, F, stm);
+		target = returntarget(J, F, stm->parent);
 		if (!target)
 			jsC_error(J, stm, "return not in function");
 		cexit(J, F, STM_RETURN, stm, target);
