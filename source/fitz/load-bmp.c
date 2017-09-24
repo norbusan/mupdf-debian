@@ -84,15 +84,15 @@ struct info
 	int bitcount;
 	int compression;
 	int colors;
-	int rmask, gmask, bmask;
+	int rmask, gmask, bmask, amask;
 	unsigned char palette[256 * 3];
 
 	int extramasks;
 	int palettetype;
 	unsigned char *samples;
 
-	int rshift, gshift, bshift;
-	int rbits, gbits, bbits;
+	int rshift, gshift, bshift, ashift;
+	int rbits, gbits, bbits, abits;
 };
 
 #define read8(p) ((p)[0])
@@ -196,10 +196,6 @@ static void maskinfo(unsigned int mask, int *shift, int *bits)
 			*bits += 1;
 			mask >>= 1;
 		}
-		if (*bits > 8) {
-			*shift += *bits - 8;
-			*bits = 8;
-		}
 	}
 }
 
@@ -239,10 +235,12 @@ bmp_read_bitmap_info_header(fz_context *ctx, struct info *info, unsigned char *p
 			info->rmask = 0x00007c00;
 			info->gmask = 0x000003e0;
 			info->bmask = 0x0000001f;
+			info->amask = 0x00000000;
 		} else if (info->bitcount == 32) {
 			info->rmask = 0x00ff0000;
 			info->gmask = 0x0000ff00;
 			info->bmask = 0x000000ff;
+			info->amask = 0x00000000;
 		}
 	}
 	if (size >= 52)
@@ -254,6 +252,15 @@ bmp_read_bitmap_info_header(fz_context *ctx, struct info *info, unsigned char *p
 			info->rmask = read32(p + 40);
 			info->gmask = read32(p + 44);
 			info->bmask = read32(p + 48);
+		}
+	}
+	if (size >= 56)
+	{
+		if (end - p < 56)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "premature end in bitmap info header in bmp image");
+
+		if (info->compression == BI_BITFIELDS) {
+			info->amask = read32(p + 52);
 		}
 	}
 
@@ -479,7 +486,6 @@ bmp_decompress_rle24(fz_context *ctx, struct info *info, unsigned char *p, unsig
 	return decompressed;
 }
 
-
 static unsigned char *
 bmp_decompress_rle8(fz_context *ctx, struct info *info, unsigned char *p, unsigned char **end)
 {
@@ -656,12 +662,14 @@ bmp_decompress_rle4(fz_context *ctx, struct info *info, unsigned char *p, unsign
 static fz_pixmap *
 bmp_read_bitmap(fz_context *ctx, struct info *info, unsigned char *p, unsigned char *end)
 {
+	const int mults[] = { 0, 8191, 2730, 1170, 546, 264, 130, 64 };
 	fz_pixmap *pix;
 	unsigned char *decompressed = NULL;
 	unsigned char *ssp, *ddp;
 	int bitcount, width, height;
 	int sstride, dstride;
-	int rmult, gmult, bmult;
+	int rmult, gmult, bmult, amult;
+	int rtrunc, gtrunc, btrunc, atrunc;
 	int x, y;
 
 	if (info->compression == BI_RLE8)
@@ -686,7 +694,7 @@ bmp_read_bitmap(fz_context *ctx, struct info *info, unsigned char *p, unsigned c
 	}
 
 	fz_try(ctx)
-		pix = fz_new_pixmap(ctx, fz_device_rgb(ctx), width, height);
+		pix = fz_new_pixmap(ctx, fz_device_rgb(ctx), width, height, 1);
 	fz_catch(ctx)
 	{
 		fz_free(ctx, decompressed);
@@ -694,20 +702,30 @@ bmp_read_bitmap(fz_context *ctx, struct info *info, unsigned char *p, unsigned c
 	}
 
 	ddp = pix->samples;
-	dstride = width * 4;
+	dstride = pix->stride;
 	if (!info->topdown)
 	{
 		ddp = pix->samples + (height - 1) * dstride;
 		dstride = -dstride;
 	}
 
-	/* These only apply for components in 16-bit mode
+	/* These only apply for components in 16-bit and 32-bit mode
+	   1-bit (1 * 8191) / 32
+	   2-bit (3 * 2730) / 32
+	   3-bit (7 * 1170) / 32
 	   4-bit (15 * 546) / 32
 	   5-bit (31 * 264) / 32
-	   6-bit (63 * 130 ) / 32 */
-	rmult = info->rbits == 4 ? 546 : (info->rbits == 5 ? 264 : 130);
-	gmult = info->gbits == 4 ? 546 : (info->gbits == 5 ? 264 : 130);
-	bmult = info->bbits == 4 ? 546 : (info->bbits == 5 ? 264 : 130);
+	   6-bit (63 * 130) / 32
+	   7-bit (127 * 64) / 32
+	*/
+	rmult = info->rbits < 8 ? mults[info->rbits] : 1;
+	gmult = info->gbits < 8 ? mults[info->gbits] : 1;
+	bmult = info->bbits < 8 ? mults[info->bbits] : 1;
+	amult = info->abits < 8 ? mults[info->abits] : 1;
+	rtrunc = info->rbits < 8 ? 5 : (info->rbits - 8);
+	gtrunc = info->gbits < 8 ? 5 : (info->gbits - 8);
+	btrunc = info->bbits < 8 ? 5 : (info->bbits - 8);
+	atrunc = info->abits < 8 ? 5 : (info->abits - 8);
 
 	for (y = 0; y < height; y++)
 	{
@@ -719,11 +737,15 @@ bmp_read_bitmap(fz_context *ctx, struct info *info, unsigned char *p, unsigned c
 		case 32:
 			for (x = 0; x < width; x++)
 			{
-				int sample = (sp[3] << 24) | (sp[2] << 16) | (sp[1] << 8) | sp[0];
-				*dp++ = (sample & info->rmask) >> info->rshift;
-				*dp++ = (sample & info->gmask) >> info->gshift;
-				*dp++ = (sample & info->bmask) >> info->bshift;
-				*dp++ = 255;
+				unsigned int sample = (sp[3] << 24) | (sp[2] << 16) | (sp[1] << 8) | sp[0];
+				unsigned int r = (sample & info->rmask) >> info->rshift;
+				unsigned int g = (sample & info->gmask) >> info->gshift;
+				unsigned int b = (sample & info->bmask) >> info->bshift;
+				unsigned int a = info->abits == 0 ? 255 : (sample & info->amask) >> info->ashift;
+				*dp++ = (r * rmult) >> rtrunc;
+				*dp++ = (g * gmult) >> gtrunc;
+				*dp++ = (b * bmult) >> btrunc;
+				*dp++ = info->abits == 0 ? a : (a * amult) >> atrunc;
 				sp += 4;
 			}
 			break;
@@ -740,14 +762,15 @@ bmp_read_bitmap(fz_context *ctx, struct info *info, unsigned char *p, unsigned c
 		case 16:
 			for (x = 0; x < width; x++)
 			{
-				int sample = (sp[1] << 8) | sp[0];
-				int r = (sample & info->rmask) >> info->rshift;
-				int g = (sample & info->gmask) >> info->gshift;
-				int b = (sample & info->bmask) >> info->bshift;
-				*dp++ = (r * rmult) >> 5;
-				*dp++ = (g * gmult) >> 5;
-				*dp++ = (b * bmult) >> 5;
-				*dp++ = 255;
+				unsigned int sample = (sp[1] << 8) | sp[0];
+				unsigned int r = (sample & info->rmask) >> info->rshift;
+				unsigned int g = (sample & info->gmask) >> info->gshift;
+				unsigned int b = (sample & info->bmask) >> info->bshift;
+				unsigned int a = (sample & info->amask) >> info->ashift;
+				*dp++ = (r * rmult) >> rtrunc;
+				*dp++ = (g * gmult) >> gtrunc;
+				*dp++ = (b * bmult) >> btrunc;
+				*dp++ = info->abits == 0 ? 255 : (a * amult) >> atrunc;
 				sp += 2;
 			}
 			break;
@@ -818,11 +841,12 @@ bmp_read_bitmap(fz_context *ctx, struct info *info, unsigned char *p, unsigned c
 	}
 
 	fz_free(ctx, decompressed);
+	fz_premultiply_pixmap(ctx, pix);
 	return pix;
 }
 
 static fz_pixmap *
-bmp_read_image(fz_context *ctx, struct info *info, unsigned char *p, int total, int only_metadata)
+bmp_read_image(fz_context *ctx, struct info *info, unsigned char *p, size_t total, int only_metadata)
 {
 	unsigned char *begin = p;
 	unsigned char *end = p + total;
@@ -832,7 +856,7 @@ bmp_read_image(fz_context *ctx, struct info *info, unsigned char *p, int total, 
 
 	p = bmp_read_file_header(ctx, info, p, end);
 
-	info->filesize = fz_mini(info->filesize, total);
+	info->filesize = fz_mini(info->filesize, (int)total);
 
 	if (end - p < 4)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end in bitmap core header in bmp image");
@@ -854,6 +878,7 @@ bmp_read_image(fz_context *ctx, struct info *info, unsigned char *p, int total, 
 	maskinfo(info->rmask, &info->rshift, &info->rbits);
 	maskinfo(info->gmask, &info->gshift, &info->gbits);
 	maskinfo(info->bmask, &info->bshift, &info->bbits);
+	maskinfo(info->amask, &info->ashift, &info->abits);
 
 	if (info->width <= 0 || info->width > SHRT_MAX || info->height <= 0 || info->height > SHRT_MAX)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "dimensions (%d x %d) out of range in bmp image",
@@ -876,12 +901,14 @@ bmp_read_image(fz_context *ctx, struct info *info, unsigned char *p, int total, 
 			(info->compression == BI_RLE24 && info->bitcount != 24))
 		fz_throw(ctx, FZ_ERROR_GENERIC, "invalid bits per pixel (%d) for compression (%d) in bmp image",
 				info->bitcount, info->compression);
-	if (info->rbits > 0 && info->rbits != 4 && info->rbits != 5 && info->rbits != 8)
+	if (info->rbits < 0 || info->rbits > info->bitcount)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "unsupported %d bit red mask in bmp image", info->rbits);
-	if (info->gbits > 0 && info->gbits != 4 && info->gbits != 5 && info->gbits != 6 && info->gbits != 8)
+	if (info->gbits < 0 || info->gbits > info->bitcount)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "unsupported %d bit green mask in bmp image", info->gbits);
-	if (info->bbits > 0 && info->bbits != 4 && info->bbits != 5 && info->bbits != 8)
+	if (info->bbits < 0 || info->bbits > info->bitcount)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "unsupported %d bit blue mask in bmp image", info->bbits);
+	if (info->abits < 0 || info->abits > info->bitcount)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "unsupported %d bit alpha mask in bmp image", info->abits);
 
 	if (only_metadata)
 		return NULL;
@@ -908,7 +935,7 @@ bmp_read_image(fz_context *ctx, struct info *info, unsigned char *p, int total, 
 }
 
 fz_pixmap *
-fz_load_bmp(fz_context *ctx, unsigned char *p, int total)
+fz_load_bmp(fz_context *ctx, unsigned char *p, size_t total)
 {
 	struct info bmp;
 	fz_pixmap *image;
@@ -921,7 +948,7 @@ fz_load_bmp(fz_context *ctx, unsigned char *p, int total)
 }
 
 void
-fz_load_bmp_info(fz_context *ctx, unsigned char *p, int total, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
+fz_load_bmp_info(fz_context *ctx, unsigned char *p, size_t total, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
 {
 	struct info bmp;
 

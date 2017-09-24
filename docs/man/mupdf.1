@@ -173,9 +173,6 @@ Reload file.
 .B p
 Toggle presentation mode.
 .TP
-.B P
-Displays the current page number temporarily.
-.TP
 .B c
 Toggle between color and grayscale rendering.
 .TP
@@ -198,15 +195,8 @@ Quit.
 Sending a \fBSIGHUP\fR signal to the mupdf process will also cause the viewed
 file to be reloaded automatically, for use in e.g. build scripts.
 
-.SH ENVIRONMENT
-
-.TP
-.B BROWSER
-When \fBmupdf\fR opens a link it first uses BROWSER to browse the link
-and falls back to "xdg-open" if BROWSER is not defined.
-
 .SH SEE ALSO
 .BR mutool (1).
 
 .SH AUTHOR
-MuPDF is Copyright 2006-2016 Artifex Software, Inc.
+MuPDF is Copyright 2006-2017 Artifex Software, Inc.

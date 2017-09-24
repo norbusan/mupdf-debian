@@ -11,11 +11,12 @@
 #define next regnext
 #define accept regaccept
 
-#define nelem(a) (sizeof (a) / sizeof (a)[0])
+#define nelem(a) (int)(sizeof (a) / sizeof (a)[0])
 
 #define REPINF 255
 #define MAXTHREAD 1000
 #define MAXSUB REG_MAXSUB
+#define MAXPROG (32 << 10)
 
 typedef struct Reclass Reclass;
 typedef struct Renode Renode;
@@ -30,7 +31,7 @@ struct Reclass {
 struct Reprog {
 	Reinst *start, *end;
 	int flags;
-	unsigned int nsub;
+	int nsub;
 	Reclass cclass[16];
 };
 
@@ -39,8 +40,8 @@ struct cstate {
 	Renode *pstart, *pend;
 
 	const char *source;
-	unsigned int ncclass;
-	unsigned int nsub;
+	int ncclass;
+	int nsub;
 	Renode *sub[MAXSUB];
 
 	int lookahead;
@@ -157,7 +158,7 @@ static int lexcount(struct cstate *g)
 		g->yymin = g->yymin * 10 + dec(g, g->yychar);
 		g->yychar = *g->source++;
 	}
-	if (g->yymin >= REPINF)
+	if (g->yymin < 0 || g->yymin >= REPINF)
 		die(g, "numeric overflow");
 
 	if (g->yychar == ',') {
@@ -171,7 +172,7 @@ static int lexcount(struct cstate *g)
 				g->yymax = g->yymax * 10 + dec(g, g->yychar);
 				g->yychar = *g->source++;
 			}
-			if (g->yymax >= REPINF)
+			if (g->yymax < 0 || g->yymax >= REPINF)
 				die(g, "numeric overflow");
 		}
 	} else {
@@ -212,8 +213,7 @@ static void addranges_D(struct cstate *g)
 
 static void addranges_s(struct cstate *g)
 {
-	addrange(g, 0x9, 0x9);
-	addrange(g, 0xA, 0xD);
+	addrange(g, 0x9, 0xD);
 	addrange(g, 0x20, 0x20);
 	addrange(g, 0xA0, 0xA0);
 	addrange(g, 0x2028, 0x2029);
@@ -223,7 +223,6 @@ static void addranges_s(struct cstate *g)
 static void addranges_S(struct cstate *g)
 {
 	addrange(g, 0, 0x9-1);
-	addrange(g, 0x9+1, 0xA-1);
 	addrange(g, 0xD+1, 0x20-1);
 	addrange(g, 0x20+1, 0xA0-1);
 	addrange(g, 0xA0+1, 0x2028-1);
@@ -597,23 +596,25 @@ struct Reinst {
 	Reinst *y;
 };
 
-static unsigned int count(Renode *node)
+static int count(struct cstate *g, Renode *node)
 {
-	unsigned int min, max;
+	int min, max, n;
 	if (!node) return 0;
 	switch (node->type) {
 	default: return 1;
-	case P_CAT: return count(node->x) + count(node->y);
-	case P_ALT: return count(node->x) + count(node->y) + 2;
+	case P_CAT: return count(g, node->x) + count(g, node->y);
+	case P_ALT: return count(g, node->x) + count(g, node->y) + 2;
 	case P_REP:
 		min = node->m;
 		max = node->n;
-		if (min == max) return count(node->x) * min;
-		if (max < REPINF) return count(node->x) * max + (max - min);
-		return count(node->x) * (min + 1) + 2;
-	case P_PAR: return count(node->x) + 2;
-	case P_PLA: return count(node->x) + 2;
-	case P_NLA: return count(node->x) + 2;
+		if (min == max) n = count(g, node->x) * min;
+		else if (max < REPINF) n = count(g, node->x) * max + (max - min);
+		else n = count(g, node->x) * (min + 1) + 2;
+		if (n < 0 || n > MAXPROG) die(g, "program too large");
+		return n;
+	case P_PAR: return count(g, node->x) + 2;
+	case P_PLA: return count(g, node->x) + 2;
+	case P_NLA: return count(g, node->x) + 2;
 	}
 }
 
@@ -631,7 +632,7 @@ static Reinst *emit(Reprog *prog, int opcode)
 static void compile(Reprog *prog, Renode *node)
 {
 	Reinst *inst, *split, *jump;
-	unsigned int i;
+	int i;
 
 	if (!node)
 		return;
@@ -809,22 +810,30 @@ static void dumpprog(Reprog *prog)
 }
 #endif
 
-Reprog *regcomp(const char *pattern, int cflags, const char **errorp)
+Reprog *regcompx(void *(*alloc)(void *ctx, void *p, int n), void *ctx,
+	const char *pattern, int cflags, const char **errorp)
 {
 	struct cstate g;
 	Renode *node;
 	Reinst *split, *jump;
-	int i;
+	int i, n;
 
-	g.prog = malloc(sizeof (Reprog));
-	g.pstart = g.pend = malloc(sizeof (Renode) * strlen(pattern) * 2);
+	g.pstart = NULL;
+	g.prog = NULL;
 
 	if (setjmp(g.kaboom)) {
 		if (errorp) *errorp = g.error;
-		free(g.pstart);
-		free(g.prog);
+		alloc(ctx, g.pstart, 0);
+		alloc(ctx, g.prog, 0);
 		return NULL;
 	}
+
+	g.prog = alloc(ctx, NULL, sizeof (Reprog));
+	if (!g.prog)
+		die(&g, "cannot allocate regular expression");
+	g.pstart = g.pend = alloc(ctx, NULL, sizeof (Renode) * strlen(pattern) * 2);
+	if (!g.pstart)
+		die(&g, "cannot allocate regular expression parse list");
 
 	g.source = pattern;
 	g.ncclass = 0;
@@ -841,8 +850,19 @@ Reprog *regcomp(const char *pattern, int cflags, const char **errorp)
 	if (g.lookahead != 0)
 		die(&g, "syntax error");
 
+#ifdef TEST
+	dumpnode(node);
+	putchar('\n');
+#endif
+
+	n = 6 + count(&g, node);
+	if (n < 0 || n > MAXPROG)
+		die(&g, "program too large");
+
 	g.prog->nsub = g.nsub;
-	g.prog->start = g.prog->end = malloc((count(node) + 6) * sizeof (Reinst));
+	g.prog->start = g.prog->end = alloc(ctx, NULL, n * sizeof (Reinst));
+	if (!g.prog->start)
+		die(&g, "cannot allocate regular expression instruction list");
 
 	split = emit(g.prog, I_SPLIT);
 	split->x = split + 3;
@@ -856,23 +876,36 @@ Reprog *regcomp(const char *pattern, int cflags, const char **errorp)
 	emit(g.prog, I_END);
 
 #ifdef TEST
-	dumpnode(node);
-	putchar('\n');
 	dumpprog(g.prog);
 #endif
 
-	free(g.pstart);
+	alloc(ctx, g.pstart, 0);
 
 	if (errorp) *errorp = NULL;
 	return g.prog;
 }
 
-void regfree(Reprog *prog)
+void regfreex(void *(*alloc)(void *ctx, void *p, int n), void *ctx, Reprog *prog)
 {
 	if (prog) {
-		free(prog->start);
-		free(prog);
+		alloc(ctx, prog->start, 0);
+		alloc(ctx, prog, 0);
 	}
+}
+
+static void *default_alloc(void *ctx, void *p, int n)
+{
+	return realloc(p, (size_t)n);
+}
+
+Reprog *regcomp(const char *pattern, int cflags, const char **errorp)
+{
+	return regcompx(default_alloc, NULL, pattern, cflags, errorp);
+}
+
+void regfree(Reprog *prog)
+{
+	regfreex(default_alloc, NULL, prog);
 }
 
 /* Match */
@@ -909,7 +942,7 @@ static int incclasscanon(Reclass *cc, Rune c)
 	return 0;
 }
 
-static int strncmpcanon(const char *a, const char *b, unsigned int n)
+static int strncmpcanon(const char *a, const char *b, int n)
 {
 	Rune ra, rb;
 	int c;
@@ -944,7 +977,7 @@ static int match(Reinst *pc, const char *sp, const char *bol, int flags, Resub *
 	Resub scratch;
 	Resub sub;
 	Rune c;
-	unsigned int nready;
+	int nready;
 	int i;
 
 	/* queue initial thread */
@@ -1112,7 +1145,7 @@ int main(int argc, char **argv)
 	const char *s;
 	Reprog *p;
 	Resub m;
-	unsigned int i;
+	int i;
 
 	if (argc > 1) {
 		p = regcomp(argv[1], 0, &error);

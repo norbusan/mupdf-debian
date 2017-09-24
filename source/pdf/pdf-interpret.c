@@ -1,4 +1,7 @@
-#include "mupdf/pdf.h"
+#include "pdf-imp.h"
+
+/* Maximum number of errors before aborting */
+#define MAX_SYNTAX_ERRORS 100
 
 void *
 pdf_new_processor(fz_context *ctx, int size)
@@ -7,10 +10,25 @@ pdf_new_processor(fz_context *ctx, int size)
 }
 
 void
+pdf_close_processor(fz_context *ctx, pdf_processor *proc)
+{
+	if (proc && proc->close_processor)
+	{
+		proc->close_processor(ctx, proc);
+		proc->close_processor = NULL;
+	}
+}
+
+void
 pdf_drop_processor(fz_context *ctx, pdf_processor *proc)
 {
-	if (proc && proc->drop_imp)
-		proc->drop_imp(ctx, proc);
+	if (proc)
+	{
+		if (proc->close_processor)
+			fz_warn(ctx, "dropping unclosed PDF processor");
+		if (proc->drop_processor)
+			proc->drop_processor(ctx, proc);
+	}
 	fz_free(ctx, proc);
 }
 
@@ -66,221 +84,6 @@ load_font_or_hail_mary(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, pdf_obj
 	return desc;
 }
 
-static int
-ocg_intents_include(fz_context *ctx, pdf_ocg_descriptor *desc, char *name)
-{
-	int i, len;
-
-	if (strcmp(name, "All") == 0)
-		return 1;
-
-	/* In the absence of a specified intent, it's 'View' */
-	if (!desc->intent)
-		return (strcmp(name, "View") == 0);
-
-	if (pdf_is_name(ctx, desc->intent))
-	{
-		char *intent = pdf_to_name(ctx, desc->intent);
-		if (strcmp(intent, "All") == 0)
-			return 1;
-		return (strcmp(intent, name) == 0);
-	}
-	if (!pdf_is_array(ctx, desc->intent))
-		return 0;
-
-	len = pdf_array_len(ctx, desc->intent);
-	for (i=0; i < len; i++)
-	{
-		char *intent = pdf_to_name(ctx, pdf_array_get(ctx, desc->intent, i));
-		if (strcmp(intent, "All") == 0)
-			return 1;
-		if (strcmp(intent, name) == 0)
-			return 1;
-	}
-	return 0;
-}
-
-static int
-pdf_is_hidden_ocg(fz_context *ctx, pdf_ocg_descriptor *desc, pdf_obj *rdb, const char *event, pdf_obj *ocg)
-{
-	char event_state[16];
-	pdf_obj *obj, *obj2, *type;
-
-	/* Avoid infinite recursions */
-	if (pdf_obj_marked(ctx, ocg))
-		return 0;
-
-	/* If no event, everything is visible */
-	if (!event)
-		return 0;
-
-	/* If no ocg descriptor, everything is visible */
-	if (!desc)
-		return 0;
-
-	/* If we've been handed a name, look it up in the properties. */
-	if (pdf_is_name(ctx, ocg))
-	{
-		ocg = pdf_dict_get(ctx, pdf_dict_get(ctx, rdb, PDF_NAME_Properties), ocg);
-	}
-	/* If we haven't been given an ocg at all, then we're visible */
-	if (!ocg)
-		return 0;
-
-	fz_strlcpy(event_state, event, sizeof event_state);
-	fz_strlcat(event_state, "State", sizeof event_state);
-
-	type = pdf_dict_get(ctx, ocg, PDF_NAME_Type);
-
-	if (pdf_name_eq(ctx, type, PDF_NAME_OCG))
-	{
-		/* An Optional Content Group */
-		int default_value = 0;
-		int num = pdf_to_num(ctx, ocg);
-		int gen = pdf_to_gen(ctx, ocg);
-		int len = desc->len;
-		int i;
-		pdf_obj *es;
-
-		/* by default an OCG is visible, unless it's explicitly hidden */
-		for (i = 0; i < len; i++)
-		{
-			if (desc->ocgs[i].num == num && desc->ocgs[i].gen == gen)
-			{
-				default_value = desc->ocgs[i].state == 0;
-				break;
-			}
-		}
-
-		/* Check Intents; if our intent is not part of the set given
-		 * by the current config, we should ignore it. */
-		obj = pdf_dict_get(ctx, ocg, PDF_NAME_Intent);
-		if (pdf_is_name(ctx, obj))
-		{
-			/* If it doesn't match, it's hidden */
-			if (ocg_intents_include(ctx, desc, pdf_to_name(ctx, obj)) == 0)
-				return 1;
-		}
-		else if (pdf_is_array(ctx, obj))
-		{
-			int match = 0;
-			len = pdf_array_len(ctx, obj);
-			for (i=0; i<len; i++) {
-				match |= ocg_intents_include(ctx, desc, pdf_to_name(ctx, pdf_array_get(ctx, obj, i)));
-				if (match)
-					break;
-			}
-			/* If we don't match any, it's hidden */
-			if (match == 0)
-				return 1;
-		}
-		else
-		{
-			/* If it doesn't match, it's hidden */
-			if (ocg_intents_include(ctx, desc, "View") == 0)
-				return 1;
-		}
-
-		/* FIXME: Currently we do a very simple check whereby we look
-		 * at the Usage object (an Optional Content Usage Dictionary)
-		 * and check to see if the corresponding 'event' key is on
-		 * or off.
-		 *
-		 * Really we should only look at Usage dictionaries that
-		 * correspond to entries in the AS list in the OCG config.
-		 * Given that we don't handle Zoom or User, or Language
-		 * dicts, this is not really a problem. */
-		obj = pdf_dict_get(ctx, ocg, PDF_NAME_Usage);
-		if (!pdf_is_dict(ctx, obj))
-			return default_value;
-		/* FIXME: Should look at Zoom (and return hidden if out of
-		 * max/min range) */
-		/* FIXME: Could provide hooks to the caller to check if
-		 * User is appropriate - if not return hidden. */
-		obj2 = pdf_dict_gets(ctx, obj, event);
-		es = pdf_dict_gets(ctx, obj2, event_state);
-		if (pdf_name_eq(ctx, es, PDF_NAME_OFF))
-		{
-			return 1;
-		}
-		if (pdf_name_eq(ctx, es, PDF_NAME_ON))
-		{
-			return 0;
-		}
-		return default_value;
-	}
-	else if (pdf_name_eq(ctx, type, PDF_NAME_OCMD))
-	{
-		/* An Optional Content Membership Dictionary */
-		pdf_obj *name;
-		int combine, on;
-
-		obj = pdf_dict_get(ctx, ocg, PDF_NAME_VE);
-		if (pdf_is_array(ctx, obj)) {
-			/* FIXME: Calculate visibility from array */
-			return 0;
-		}
-		name = pdf_dict_get(ctx, ocg, PDF_NAME_P);
-		/* Set combine; Bit 0 set => AND, Bit 1 set => true means
-		 * Off, otherwise true means On */
-		if (pdf_name_eq(ctx, name, PDF_NAME_AllOn))
-		{
-			combine = 1;
-		}
-		else if (pdf_name_eq(ctx, name, PDF_NAME_AnyOff))
-		{
-			combine = 2;
-		}
-		else if (pdf_name_eq(ctx, name, PDF_NAME_AllOff))
-		{
-			combine = 3;
-		}
-		else /* Assume it's the default (AnyOn) */
-		{
-			combine = 0;
-		}
-
-		if (pdf_mark_obj(ctx, ocg))
-			return 0; /* Should never happen */
-		fz_try(ctx)
-		{
-			obj = pdf_dict_get(ctx, ocg, PDF_NAME_OCGs);
-			on = combine & 1;
-			if (pdf_is_array(ctx, obj)) {
-				int i, len;
-				len = pdf_array_len(ctx, obj);
-				for (i = 0; i < len; i++)
-				{
-					int hidden = pdf_is_hidden_ocg(ctx, desc, rdb, event, pdf_array_get(ctx, obj, i));
-					if ((combine & 1) == 0)
-						hidden = !hidden;
-					if (combine & 2)
-						on &= hidden;
-					else
-						on |= hidden;
-				}
-			}
-			else
-			{
-				on = pdf_is_hidden_ocg(ctx, desc, rdb, event, obj);
-				if ((combine & 1) == 0)
-					on = !on;
-			}
-		}
-		fz_always(ctx)
-		{
-			pdf_unmark_obj(ctx, ocg);
-		}
-		fz_catch(ctx)
-		{
-			fz_rethrow(ctx);
-		}
-		return !on;
-	}
-	/* No idea what sort of object this is - be visible */
-	return 0;
-}
-
 static fz_image *
 parse_inline_image(fz_context *ctx, pdf_csi *csi, fz_stream *stm)
 {
@@ -327,7 +130,7 @@ parse_inline_image(fz_context *ctx, pdf_csi *csi, fz_stream *stm)
 			}
 		} while (ch != EOF);
 		if (!found)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "syntax error after inline image");
+			fz_throw(ctx, FZ_ERROR_SYNTAX, "syntax error after inline image");
 	}
 	fz_always(ctx)
 	{
@@ -432,28 +235,38 @@ pdf_process_extgstate(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, pdf_ob
 			pdf_obj *group, *s, *bc, *tr;
 			float softmask_bc[FZ_MAX_COLORS];
 			fz_colorspace *colorspace;
+			int colorspace_n = 1;
 			int k, luminosity;
 
 			fz_var(xobj);
 
 			group = pdf_dict_get(ctx, obj, PDF_NAME_G);
 			if (!group)
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot load softmask xobject (%d %d R)", pdf_to_num(ctx, obj), pdf_to_gen(ctx, obj));
+				fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot load softmask xobject (%d 0 R)", pdf_to_num(ctx, obj));
 			xobj = pdf_load_xobject(ctx, csi->doc, group);
 
 			fz_try(ctx)
 			{
-				colorspace = xobj->colorspace;
-				if (!colorspace)
-					colorspace = fz_device_gray(ctx);
+				colorspace = pdf_xobject_colorspace(ctx, xobj);
+				if (colorspace)
+				{
+					colorspace_n = fz_colorspace_n(ctx, colorspace);
+					fz_drop_colorspace(ctx, colorspace);
+				}
 
-				for (k = 0; k < colorspace->n; k++)
+				/* Default background color is black. */
+				for (k = 0; k < colorspace_n; k++)
 					softmask_bc[k] = 0;
+				/* Which in CMYK means not all zeros! This should really be
+				 * a test for subtractive color spaces, but this will have
+				 * to do for now. */
+				if (colorspace == fz_device_cmyk(ctx))
+					softmask_bc[3] = 1.0;
 
 				bc = pdf_dict_get(ctx, obj, PDF_NAME_BC);
 				if (pdf_is_array(ctx, bc))
 				{
-					for (k = 0; k < colorspace->n; k++)
+					for (k = 0; k < colorspace_n; k++)
 						softmask_bc[k] = pdf_to_real(ctx, pdf_array_get(ctx, bc, k));
 				}
 
@@ -492,10 +305,10 @@ pdf_process_Do(fz_context *ctx, pdf_processor *proc, pdf_csi *csi)
 
 	xres = pdf_dict_get(ctx, csi->rdb, PDF_NAME_XObject);
 	if (!xres)
-		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find XObject dictionary");
+		fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot find XObject dictionary");
 	xobj = pdf_dict_gets(ctx, xres, csi->name);
 	if (!xobj)
-		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find XObject resource '%s'", csi->name);
+		fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot find XObject resource '%s'", csi->name);
 	subtype = pdf_dict_get(ctx, xobj, PDF_NAME_Subtype);
 	if (pdf_name_eq(ctx, subtype, PDF_NAME_Form))
 	{
@@ -504,9 +317,9 @@ pdf_process_Do(fz_context *ctx, pdf_processor *proc, pdf_csi *csi)
 			subtype = st;
 	}
 	if (!pdf_is_name(ctx, subtype))
-		fz_throw(ctx, FZ_ERROR_GENERIC, "no XObject subtype specified");
+		fz_throw(ctx, FZ_ERROR_SYNTAX, "no XObject subtype specified");
 
-	if (pdf_is_hidden_ocg(ctx, csi->doc->ocg, csi->rdb, proc->event, pdf_dict_get(ctx, xobj, PDF_NAME_OC)))
+	if (pdf_is_hidden_ocg(ctx, csi->doc->ocg, csi->rdb, proc->usage, pdf_dict_get(ctx, xobj, PDF_NAME_OC)))
 		return;
 
 	if (pdf_name_eq(ctx, subtype, PDF_NAME_Form))
@@ -572,10 +385,10 @@ pdf_process_CS(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, int stroke)
 			pdf_obj *csres, *csobj;
 			csres = pdf_dict_get(ctx, csi->rdb, PDF_NAME_ColorSpace);
 			if (!csres)
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find ColorSpace dictionary");
+				fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot find ColorSpace dictionary");
 			csobj = pdf_dict_gets(ctx, csres, csi->name);
 			if (!csobj)
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find ColorSpace resource '%s'", csi->name);
+				fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot find ColorSpace resource '%s'", csi->name);
 			cs = pdf_load_colorspace(ctx, csi->doc, csobj);
 		}
 
@@ -602,10 +415,10 @@ pdf_process_SC(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, int stroke)
 
 		patres = pdf_dict_get(ctx, csi->rdb, PDF_NAME_Pattern);
 		if (!patres)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find Pattern dictionary");
+			fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot find Pattern dictionary");
 		patobj = pdf_dict_gets(ctx, patres, csi->name);
 		if (!patobj)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find Pattern resource '%s'", csi->name);
+			fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot find Pattern resource '%s'", csi->name);
 
 		type = pdf_dict_get(ctx, patobj, PDF_NAME_PatternType);
 
@@ -649,7 +462,7 @@ pdf_process_SC(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, int stroke)
 
 		else
 		{
-			fz_throw(ctx, FZ_ERROR_GENERIC, "unknown pattern type: %d", pdf_to_int(ctx, type));
+			fz_throw(ctx, FZ_ERROR_SYNTAX, "unknown pattern type: %d", pdf_to_int(ctx, type));
 		}
 	}
 
@@ -702,7 +515,7 @@ pdf_process_BDC(fz_context *ctx, pdf_processor *proc, pdf_csi *csi)
 	if (!pdf_name_eq(ctx, pdf_dict_get(ctx, cooked, PDF_NAME_Type), PDF_NAME_OCG))
 		return;
 
-	if (pdf_is_hidden_ocg(ctx, csi->doc->ocg, csi->rdb, proc->event, cooked))
+	if (pdf_is_hidden_ocg(ctx, csi->doc->ocg, csi->rdb, proc->usage, cooked))
 		++proc->hidden;
 }
 
@@ -756,7 +569,7 @@ pdf_process_end(fz_context *ctx, pdf_processor *proc, pdf_csi *csi)
 #define B(a,b) (a | b << 8)
 #define C(a,b,c) (a | b << 8 | c << 16)
 
-static int
+static void
 pdf_process_keyword(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream *stm, char *word)
 {
 	float *s = csi->stack;
@@ -778,10 +591,7 @@ pdf_process_keyword(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_strea
 	{
 	default:
 		if (!csi->xbalance)
-		{
-			fz_warn(ctx, "unknown keyword: '%s'", word);
-			return 1;
-		}
+			fz_throw(ctx, FZ_ERROR_SYNTAX, "unknown keyword: '%s'", word);
 		break;
 
 	/* general graphics state */
@@ -798,10 +608,10 @@ pdf_process_keyword(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_strea
 			pdf_obj *gsres, *gsobj;
 			gsres = pdf_dict_get(ctx, csi->rdb, PDF_NAME_ExtGState);
 			if (!gsres)
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find ExtGState dictionary");
+				fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot find ExtGState dictionary");
 			gsobj = pdf_dict_gets(ctx, gsres, csi->name);
 			if (!gsobj)
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find ExtGState resource '%s'", csi->name);
+				fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot find ExtGState resource '%s'", csi->name);
 			if (proc->op_gs_begin)
 				proc->op_gs_begin(ctx, proc, csi->name, gsobj);
 			pdf_process_extgstate(ctx, proc, csi, gsobj);
@@ -859,10 +669,10 @@ pdf_process_keyword(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_strea
 			pdf_font_desc *font;
 			fontres = pdf_dict_get(ctx, csi->rdb, PDF_NAME_Font);
 			if (!fontres)
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find Font dictionary");
+				fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot find Font dictionary");
 			fontobj = pdf_dict_gets(ctx, fontres, csi->name);
 			if (!fontobj)
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find Font resource '%s'", csi->name);
+				fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot find Font resource '%s'", csi->name);
 			font = load_font_or_hail_mary(ctx, csi->doc, csi->rdb, fontobj, 0, csi->cookie);
 			fz_try(ctx)
 				proc->op_Tf(ctx, proc, csi->name, font, s[0]);
@@ -951,10 +761,10 @@ pdf_process_keyword(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_strea
 			fz_shade *shade;
 			shaderes = pdf_dict_get(ctx, csi->rdb, PDF_NAME_Shading);
 			if (!shaderes)
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find Shading dictionary");
+				fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot find Shading dictionary");
 			shadeobj = pdf_dict_gets(ctx, shaderes, csi->name);
 			if (!shadeobj)
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find Shading resource '%s'", csi->name);
+				fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot find Shading resource '%s'", csi->name);
 			shade = pdf_load_shading(ctx, csi->doc, shadeobj);
 			fz_try(ctx)
 				proc->op_sh(ctx, proc, csi->name, shade);
@@ -978,8 +788,6 @@ pdf_process_keyword(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_strea
 	case B('B','X'): ++csi->xbalance; if (proc->op_BX) proc->op_BX(ctx, proc); break;
 	case B('E','X'): --csi->xbalance; if (proc->op_EX) proc->op_EX(ctx, proc); break;
 	}
-
-	return 0;
 }
 
 static void
@@ -991,7 +799,7 @@ pdf_process_stream(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream
 
 	pdf_token tok = PDF_TOK_ERROR;
 	int in_text_array = 0;
-	int ignoring_errors = 0;
+	int syntax_errors = 0;
 
 	/* make sure we have a clean slate if we come here from flush_text */
 	pdf_clear_stack(ctx, csi);
@@ -1043,24 +851,23 @@ pdf_process_stream(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream
 					case PDF_TOK_EOF:
 						break;
 					case PDF_TOK_KEYWORD:
-						if (!strcmp(buf->scratch, "Tw") || !strcmp(buf->scratch, "Tc"))
+						if (buf->scratch[0] == 'T' && (buf->scratch[1] == 'w' || buf->scratch[1] == 'c') && buf->scratch[2] == 0)
 						{
-							int l = pdf_array_len(ctx, csi->obj);
-							if (l > 0)
+							int n = pdf_array_len(ctx, csi->obj);
+							if (n > 0)
 							{
-								pdf_obj *o = pdf_array_get(ctx, csi->obj, l-1);
+								pdf_obj *o = pdf_array_get(ctx, csi->obj, n-1);
 								if (pdf_is_number(ctx, o))
 								{
 									csi->stack[0] = pdf_to_real(ctx, o);
-									pdf_array_delete(ctx, csi->obj, l-1);
-									if (pdf_process_keyword(ctx, proc, csi, stm, buf->scratch) == 0)
-										break;
+									pdf_array_delete(ctx, csi->obj, n-1);
+									pdf_process_keyword(ctx, proc, csi, stm, buf->scratch);
 								}
 							}
 						}
 						/* Deliberate Fallthrough! */
 					default:
-						fz_throw(ctx, FZ_ERROR_GENERIC, "syntax error in array");
+						fz_throw(ctx, FZ_ERROR_SYNTAX, "syntax error in array");
 					}
 				}
 				else switch (tok)
@@ -1113,7 +920,7 @@ pdf_process_stream(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream
 						csi->top ++;
 					}
 					else
-						fz_throw(ctx, FZ_ERROR_GENERIC, "stack overflow");
+						fz_throw(ctx, FZ_ERROR_SYNTAX, "stack overflow");
 					break;
 
 				case PDF_TOK_REAL:
@@ -1122,7 +929,7 @@ pdf_process_stream(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream
 						csi->top ++;
 					}
 					else
-						fz_throw(ctx, FZ_ERROR_GENERIC, "stack overflow");
+						fz_throw(ctx, FZ_ERROR_SYNTAX, "stack overflow");
 					break;
 
 				case PDF_TOK_STRING:
@@ -1143,15 +950,12 @@ pdf_process_stream(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream
 					break;
 
 				case PDF_TOK_KEYWORD:
-					if (pdf_process_keyword(ctx, proc, csi, stm, buf->scratch))
-					{
-						tok = PDF_TOK_EOF;
-					}
+					pdf_process_keyword(ctx, proc, csi, stm, buf->scratch);
 					pdf_clear_stack(ctx, csi);
 					break;
 
 				default:
-					fz_throw(ctx, FZ_ERROR_GENERIC, "syntax error in content stream");
+					fz_throw(ctx, FZ_ERROR_SYNTAX, "syntax error in content stream");
 				}
 			}
 			while (tok != PDF_TOK_EOF);
@@ -1162,34 +966,59 @@ pdf_process_stream(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream
 		}
 		fz_catch(ctx)
 		{
-			int caught;
+			int caught = fz_caught(ctx);
 
-			if (!cookie)
+			if (cookie)
 			{
-				fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
-			}
-			else if ((caught = fz_caught(ctx)) == FZ_ERROR_TRYLATER)
-			{
-				if (cookie->incomplete_ok)
-					cookie->incomplete++;
-				else
+				if (caught == FZ_ERROR_TRYLATER)
+				{
+					if (cookie->incomplete_ok)
+						cookie->incomplete++;
+					else
+						fz_rethrow(ctx);
+				}
+				else if (caught == FZ_ERROR_ABORT)
+				{
 					fz_rethrow(ctx);
-			}
-			else if (caught == FZ_ERROR_ABORT)
-			{
-				fz_rethrow(ctx);
+				}
+				else if (caught == FZ_ERROR_SYNTAX)
+				{
+					cookie->errors++;
+					if (++syntax_errors >= MAX_SYNTAX_ERRORS)
+					{
+						fz_warn(ctx, "too many syntax errors; ignoring rest of page");
+						tok = PDF_TOK_EOF;
+					}
+				}
+				else
+				{
+					cookie->errors++;
+					fz_warn(ctx, "unrecoverable error; ignoring rest of page");
+					tok = PDF_TOK_EOF;
+				}
 			}
 			else
 			{
-				cookie->errors++;
+				if (caught == FZ_ERROR_TRYLATER)
+					fz_rethrow(ctx);
+				else if (caught == FZ_ERROR_ABORT)
+					fz_rethrow(ctx);
+				else if (caught == FZ_ERROR_SYNTAX)
+				{
+					if (++syntax_errors >= MAX_SYNTAX_ERRORS)
+					{
+						fz_warn(ctx, "too many syntax errors; ignoring rest of page");
+						tok = PDF_TOK_EOF;
+					}
+				}
+				else
+				{
+					fz_warn(ctx, "unrecoverable error; ignoring rest of page");
+					tok = PDF_TOK_EOF;
+				}
 			}
-			if (!ignoring_errors)
-			{
-				fz_warn(ctx, "Ignoring errors during rendering");
-				ignoring_errors = 1;
-			}
-			/* If we do catch an error, then reset ourselves to a
-			 * base lexing state */
+
+			/* If we do catch an error, then reset ourselves to a base lexing state */
 			in_text_array = 0;
 		}
 	}
@@ -1213,20 +1042,21 @@ pdf_process_contents(fz_context *ctx, pdf_processor *proc, pdf_document *doc, pd
 
 	fz_try(ctx)
 	{
+		fz_defer_reap_start(ctx);
 		stm = pdf_open_contents_stream(ctx, doc, stmobj);
 		pdf_process_stream(ctx, proc, &csi, stm);
 		pdf_process_end(ctx, proc, &csi);
 	}
 	fz_always(ctx)
 	{
+		fz_defer_reap_end(ctx);
 		fz_drop_stream(ctx, stm);
 		pdf_clear_stack(ctx, &csi);
 		pdf_lexbuf_fin(ctx, &buf);
 	}
 	fz_catch(ctx)
 	{
-		fz_rethrow_if(ctx, FZ_ERROR_ABORT);
-		fz_rethrow_message(ctx, "cannot parse content stream");
+		fz_rethrow(ctx);
 	}
 }
 
@@ -1235,30 +1065,33 @@ pdf_process_annot(fz_context *ctx, pdf_processor *proc, pdf_document *doc, pdf_p
 {
 	int flags = pdf_to_int(ctx, pdf_dict_get(ctx, annot->obj, PDF_NAME_F));
 
-	if (flags & (F_Invisible | F_Hidden))
+	if (flags & (PDF_ANNOT_IS_INVISIBLE | PDF_ANNOT_IS_HIDDEN))
 		return;
 
-	if (proc->event)
+	if (proc->usage)
 	{
-		if (!strcmp(proc->event, "Print") && !(flags & F_Print))
+		if (!strcmp(proc->usage, "Print") && !(flags & PDF_ANNOT_IS_PRINT))
 			return;
-		if (!strcmp(proc->event, "View") && (flags & F_NoView))
+		if (!strcmp(proc->usage, "View") && (flags & PDF_ANNOT_IS_NO_VIEW))
 			return;
 	}
 
 	/* TODO: NoZoom and NoRotate */
 
 	/* XXX what resources, if any, to use for this check? */
-	if (pdf_is_hidden_ocg(ctx, doc->ocg, NULL, proc->event, pdf_dict_get(ctx, annot->obj, PDF_NAME_OC)))
+	if (pdf_is_hidden_ocg(ctx, doc->ocg, NULL, proc->usage, pdf_dict_get(ctx, annot->obj, PDF_NAME_OC)))
 		return;
 
-	if (proc->op_q && proc->op_cm && proc->op_Do_form && proc->op_Q)
+	if (proc->op_q && proc->op_cm && proc->op_Do_form && proc->op_Q && annot->ap)
 	{
+		fz_matrix matrix;
+		pdf_annot_transform(ctx, annot, &matrix);
 		proc->op_q(ctx, proc);
 		proc->op_cm(ctx, proc,
-				annot->matrix.a, annot->matrix.b, annot->matrix.c,
-				annot->matrix.d, annot->matrix.e, annot->matrix.f);
-		proc->op_Do_form(ctx, proc, "Annot", annot->ap, page->resources);
+			matrix.a, matrix.b,
+			matrix.c, matrix.d,
+			matrix.e, matrix.f);
+		proc->op_Do_form(ctx, proc, NULL, annot->ap, pdf_page_resources(ctx, page));
 		proc->op_Q(ctx, proc);
 	}
 }
@@ -1292,7 +1125,6 @@ pdf_process_glyph(fz_context *ctx, pdf_processor *proc, pdf_document *doc, pdf_o
 	}
 	fz_catch(ctx)
 	{
-		fz_rethrow_if(ctx, FZ_ERROR_ABORT);
-		fz_rethrow_message(ctx, "cannot parse glyph content stream");
+		fz_rethrow(ctx);
 	}
 }

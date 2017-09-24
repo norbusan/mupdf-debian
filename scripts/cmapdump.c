@@ -14,8 +14,10 @@
 #include "../source/fitz/context.c"
 #include "../source/fitz/error.c"
 #include "../source/fitz/memory.c"
+#include "../source/fitz/output.c"
 #include "../source/fitz/string.c"
 #include "../source/fitz/buffer.c"
+#include "../source/fitz/crypt-md5.c"
 #include "../source/fitz/stream-open.c"
 #include "../source/fitz/stream-read.c"
 #include "../source/fitz/strtod.c"
@@ -244,7 +246,7 @@ void fz_drop_storable(fz_context *ctx, const fz_storable *sc)
 		s->drop(ctx, s);
 }
 
-void fz_new_store_context(fz_context *ctx, unsigned int max)
+void fz_new_store_context(fz_context *ctx, size_t max)
 {
 }
 
@@ -257,7 +259,7 @@ fz_store *fz_keep_store_context(fz_context *ctx)
 	return NULL;
 }
 
-int fz_store_scavenge(fz_context *ctx, unsigned int size, int *phase)
+int fz_store_scavenge(fz_context *ctx, size_t size, int *phase)
 {
 	return 0;
 }
@@ -286,4 +288,13 @@ void fz_drop_document_handler_context(fz_context *ctx)
 fz_document_handler_context *fz_keep_document_handler_context(fz_context *ctx)
 {
 	return NULL;
+}
+
+void fz_default_image_decode(void *arg, int w, int h, int l2factor, fz_irect *irect)
+{
+}
+
+int fz_default_image_scale(void *arg, int w, int h, int src_w, int src_h)
+{
+	return 0;
 }

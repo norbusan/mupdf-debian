@@ -9,22 +9,24 @@
 
 static const char *astname[] = {
 #include "astnames.h"
+NULL
 };
 
 static const char *opname[] = {
 #include "opnames.h"
+NULL
 };
 
 const char *jsP_aststring(enum js_AstType type)
 {
-	if (type < nelem(astname))
+	if (type < nelem(astname)-1)
 		return astname[type];
 	return "<unknown>";
 }
 
 const char *jsC_opcodestring(enum js_OpCode opcode)
 {
-	if (opcode < nelem(opname))
+	if (opcode < nelem(opname)-1)
 		return opname[opcode];
 	return "<unknown>";
 }
@@ -188,6 +190,7 @@ static void pobject(int d, js_Ast *list)
 		js_Ast *kv = list->a;
 		assert(list->type == AST_LIST);
 		switch (kv->type) {
+		default: break;
 		case EXP_PROP_VAL:
 			pexpi(d, COMMA, kv->a);
 			ps(": ");
@@ -649,6 +652,7 @@ static void snode(int d, js_Ast *node)
 	pc('(');
 	ps(astname[node->type]);
 	switch (node->type) {
+	default: break;
 	case AST_IDENTIFIER: pc(' '); ps(node->string); break;
 	case EXP_IDENTIFIER: pc(' '); ps(node->string); break;
 	case EXP_STRING: pc(' '); pstr(node->string); break;
@@ -713,7 +717,7 @@ void jsC_dumpfunction(js_State *J, js_Function *F)
 {
 	js_Instruction *p = F->code;
 	js_Instruction *end = F->code + F->codelen;
-	unsigned int i;
+	int i;
 
 	printf("%s(%d)\n", F->name, F->numparams);
 	if (F->lightweight) printf("\tlightweight\n");
@@ -748,6 +752,7 @@ void jsC_dumpfunction(js_State *J, js_Function *F)
 		case OP_INITVAR:
 		case OP_DEFVAR:
 		case OP_GETVAR:
+		case OP_HASVAR:
 		case OP_SETVAR:
 		case OP_DELVAR:
 		case OP_GETPROP_S:
@@ -807,26 +812,26 @@ void js_dumpvalue(js_State *J, js_Value v)
 			break;
 		}
 		switch (v.u.object->type) {
-		case JS_COBJECT: printf("[Object %p]", v.u.object); break;
-		case JS_CARRAY: printf("[Array %p]", v.u.object); break;
+		case JS_COBJECT: printf("[Object %p]", (void*)v.u.object); break;
+		case JS_CARRAY: printf("[Array %p]", (void*)v.u.object); break;
 		case JS_CFUNCTION:
 			printf("[Function %p, %s, %s:%d]",
-				v.u.object,
+				(void*)v.u.object,
 				v.u.object->u.f.function->name,
 				v.u.object->u.f.function->filename,
 				v.u.object->u.f.function->line);
 			break;
 		case JS_CSCRIPT: printf("[Script %s]", v.u.object->u.f.function->filename); break;
-		case JS_CCFUNCTION: printf("[CFunction %p]", v.u.object->u.c.function); break;
+		case JS_CCFUNCTION: printf("[CFunction %s]", v.u.object->u.c.name); break;
 		case JS_CBOOLEAN: printf("[Boolean %d]", v.u.object->u.boolean); break;
 		case JS_CNUMBER: printf("[Number %g]", v.u.object->u.number); break;
 		case JS_CSTRING: printf("[String'%s']", v.u.object->u.s.string); break;
 		case JS_CERROR: printf("[Error %s]", v.u.object->u.s.string); break;
-		case JS_CITERATOR: printf("[Iterator %p]", v.u.object); break;
+		case JS_CITERATOR: printf("[Iterator %p]", (void*)v.u.object); break;
 		case JS_CUSERDATA:
 			printf("[Userdata %s %p]", v.u.object->u.user.tag, v.u.object->u.user.data);
 			break;
-		default: printf("[Object %p]", v.u.object); break;
+		default: printf("[Object %p]", (void*)v.u.object); break;
 		}
 		break;
 	}

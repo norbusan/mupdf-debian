@@ -51,7 +51,7 @@ static void pdfapp_warn(pdfapp_t *app, const char *fmt, ...)
 	char buf[1024];
 	va_list ap;
 	va_start(ap, fmt);
-	vsnprintf(buf, sizeof(buf), fmt, ap);
+	fz_vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
 	buf[sizeof(buf)-1] = 0;
 	winwarn(app, buf);
@@ -66,7 +66,7 @@ char *pdfapp_version(pdfapp_t *app)
 {
 	return
 		"MuPDF " FZ_VERSION "\n"
-		"Copyright 2006-2014 Artifex Software, Inc.\n";
+		"Copyright 2006-2017 Artifex Software, Inc.\n";
 }
 
 char *pdfapp_usage(pdfapp_t *app)
@@ -119,6 +119,8 @@ void pdfapp_init(fz_context *ctx, pdfapp_t *app)
 	app->layout_w = 450;
 	app->layout_h = 600;
 	app->layout_em = 12;
+	app->layout_css = NULL;
+	app->layout_use_doc_css = 1;
 
 	app->transition.duration = 0.25;
 	app->transition.type = FZ_TRANSITION_FADE;
@@ -145,13 +147,10 @@ void pdfapp_invert(pdfapp_t *app, const fz_rect *rect)
 
 void pdfapp_reloadfile(pdfapp_t *app)
 {
-	fz_context *ctx = app->ctx;
-	char *filename = app->docpath;
-
-	app->docpath = NULL;
+	char filename[PATH_MAX];
+	fz_strlcpy(filename, app->docpath, PATH_MAX);
 	pdfapp_close(app);
 	pdfapp_open(app, filename, 1);
-	fz_free(ctx, filename);
 }
 
 static void event_cb(fz_context *ctx, pdf_document *doc, pdf_doc_event *event, void *data)
@@ -198,7 +197,7 @@ static void event_cb(fz_context *ctx, pdf_document *doc, pdf_doc_event *event, v
 		{
 			pdf_mail_doc_event *mail_doc = pdf_access_mail_doc_event(ctx, event);
 
-			pdfapp_warn(app, "The document attmepted to mail the document%s%s%s%s%s%s%s%s (Not supported)",
+			pdfapp_warn(app, "The document attempted to mail the document%s%s%s%s%s%s%s%s (Not supported)",
 				mail_doc->to[0]?", To: ":"", mail_doc->to,
 				mail_doc->cc[0]?", Cc: ":"", mail_doc->cc,
 				mail_doc->bcc[0]?", Bcc: ":"", mail_doc->bcc,
@@ -234,39 +233,44 @@ static int make_fake_doc(pdfapp_t *app)
 	fz_context *ctx = app->ctx;
 	pdf_document *pdf = NULL;
 	fz_buffer *contents = NULL;
+	pdf_obj *page_obj = NULL;
+
+	fz_var(contents);
+	fz_var(page_obj);
 
 	fz_try(ctx)
 	{
 		fz_rect mediabox = { 0, 0, app->winw, app->winh };
-		pdf_obj *page_obj;
 		int i;
 
-		contents = fz_new_buffer(ctx, 100);
 		pdf = pdf_create_document(ctx);
 
-		app->doc = (fz_document*)pdf;
 
-		fz_buffer_printf(ctx, contents, "1 0 0 rg %f w 0 0 m %f %f l 0 %f m %f 0 l\n",
-			fz_min(mediabox.x1, mediabox.y1) / 4,
+		contents = fz_new_buffer(ctx, 100);
+		fz_append_printf(ctx, contents, "1 0 0 RG %g w 0 0 m %g %g l 0 %g m %g 0 l s\n",
+			fz_min(mediabox.x1, mediabox.y1) / 20,
 			mediabox.x1, mediabox.y1,
 			mediabox.y1, mediabox.x1);
 
 		/* Create enough copies of our blank(ish) page so that the
 		 * page number is preserved if and when a subsequent load
 		 * works. */
-		page_obj = pdf_add_page(ctx, pdf, &mediabox, 0, contents, NULL);
+		page_obj = pdf_add_page(ctx, pdf, &mediabox, 0, NULL, contents);
 		for (i = 0; i < app->pagecount; i++)
 			pdf_insert_page(ctx, pdf, -1, page_obj);
-		pdf_drop_obj(ctx, page_obj);
 	}
 	fz_always(ctx)
 	{
+		pdf_drop_obj(ctx, page_obj);
 		fz_drop_buffer(ctx, contents);
 	}
 	fz_catch(ctx)
 	{
-		fz_rethrow(ctx);
+		fz_drop_document(ctx, (fz_document *) pdf);
+		return 1;
 	}
+
+	app->doc = (fz_document*)pdf;
 	return 0;
 }
 
@@ -282,13 +286,14 @@ void pdfapp_open_progressive(pdfapp_t *app, char *filename, int reload, int bps)
 		if (app->layout_css)
 		{
 			fz_buffer *buf = fz_read_file(ctx, app->layout_css);
-			fz_write_buffer_byte(ctx, buf, 0);
-			fz_set_user_css(ctx, (char*)buf->data);
+			fz_set_user_css(ctx, fz_string_from_buffer(ctx, buf));
 			fz_drop_buffer(ctx, buf);
 		}
 
+		fz_set_use_document_css(ctx, app->layout_use_doc_css);
+
 #ifdef HAVE_CURL
-		if (!strncmp(filename, "http://", 7))
+		if (!strncmp(filename, "http://", 7) || !strncmp(filename, "https://", 8))
 		{
 			app->stream = fz_stream_from_curl(ctx, filename, pdfapp_more_data, app);
 			while (1)
@@ -408,12 +413,9 @@ void pdfapp_open_progressive(pdfapp_t *app, char *filename, int reload, int bps)
 			}
 			fz_catch(ctx)
 			{
+				app->outline = NULL;
 				if (fz_caught(ctx) == FZ_ERROR_TRYLATER)
-				{
 					app->outline_deferred = PDFAPP_OUTLINE_DEFERRED;
-				}
-				else
-					fz_rethrow(ctx);
 			}
 			break;
 		}
@@ -529,7 +531,7 @@ static int pdfapp_save(pdfapp_t *app)
 	{
 		pdf_write_options opts = { 0 };
 
-		opts.do_incremental = 1;
+		opts.do_incremental = pdf_can_be_saved_incrementally(app->ctx, idoc);
 
 		if (strcmp(buf, app->docpath) != 0)
 		{
@@ -597,8 +599,14 @@ static void pdfapp_viewctm(fz_matrix *mat, pdfapp_t *app)
 
 static void pdfapp_panview(pdfapp_t *app, int newx, int newy)
 {
-	int image_w = fz_pixmap_width(app->ctx, app->image);
-	int image_h = fz_pixmap_height(app->ctx, app->image);
+	int image_w = 0;
+	int image_h = 0;
+
+	if (app->image)
+	{
+		image_w = fz_pixmap_width(app->ctx, app->image);
+		image_h = fz_pixmap_height(app->ctx, app->image);
+	}
 
 	if (newx > 0)
 		newx = 0;
@@ -669,15 +677,16 @@ static void pdfapp_loadpage(pdfapp_t *app, int no_cache)
 	{
 		fz_annot *annot;
 		/* Create display lists */
-		app->page_list = fz_new_display_list(app->ctx);
+		app->page_list = fz_new_display_list(app->ctx, NULL);
 		mdev = fz_new_list_device(app->ctx, app->page_list);
 		if (no_cache)
 			fz_enable_device_hints(app->ctx, mdev, FZ_NO_CACHE);
 		cookie.incomplete_ok = 1;
 		fz_run_page_contents(app->ctx, app->page, mdev, &fz_identity, &cookie);
+		fz_close_device(app->ctx, mdev);
 		fz_drop_device(app->ctx, mdev);
 		mdev = NULL;
-		app->annotations_list = fz_new_display_list(app->ctx);
+		app->annotations_list = fz_new_display_list(app->ctx, NULL);
 		mdev = fz_new_list_device(app->ctx, app->annotations_list);
 		for (annot = fz_first_annot(app->ctx, app->page); annot; annot = fz_next_annot(app->ctx, annot))
 			fz_run_annot(app->ctx, annot, mdev, &fz_identity, &cookie);
@@ -691,6 +700,7 @@ static void pdfapp_loadpage(pdfapp_t *app, int no_cache)
 			pdfapp_warn(app, "Errors found on page");
 			errored = 1;
 		}
+		fz_close_device(app->ctx, mdev);
 	}
 	fz_always(app->ctx)
 	{
@@ -737,7 +747,7 @@ static void pdfapp_recreate_annotationslist(pdfapp_t *app)
 	{
 		fz_annot *annot;
 		/* Create display list */
-		app->annotations_list = fz_new_display_list(app->ctx);
+		app->annotations_list = fz_new_display_list(app->ctx, NULL);
 		mdev = fz_new_list_device(app->ctx, app->annotations_list);
 		for (annot = fz_first_annot(app->ctx, app->page); annot; annot = fz_next_annot(app->ctx, annot))
 			fz_run_annot(app->ctx, annot, mdev, &fz_identity, &cookie);
@@ -751,6 +761,7 @@ static void pdfapp_recreate_annotationslist(pdfapp_t *app)
 			pdfapp_warn(app, "Errors found on page");
 			errored = 1;
 		}
+		fz_close_device(app->ctx, mdev);
 	}
 	fz_always(app->ctx)
 	{
@@ -777,25 +788,29 @@ static void pdfapp_runpage(pdfapp_t *app, fz_device *dev, const fz_matrix *ctm, 
 
 static void pdfapp_updatepage(pdfapp_t *app)
 {
-	pdf_document *idoc = pdf_specifics(app->ctx, app->doc);
 	fz_device *idev;
 	fz_matrix ctm;
-	fz_annot *annot;
+	pdf_annot *pannot;
 
 	pdfapp_viewctm(&ctm, app);
-	pdf_update_page(app->ctx, idoc, (pdf_page *)app->page);
+	pdf_update_page(app->ctx, (pdf_page *)app->page);
 	pdfapp_recreate_annotationslist(app);
 
-	while ((annot = (fz_annot *)pdf_poll_changed_annot(app->ctx, idoc, (pdf_page *)app->page)) != NULL)
+	for (pannot = pdf_first_annot(app->ctx, (pdf_page*)app->page); pannot; pannot = pdf_next_annot(app->ctx, pannot))
 	{
-		fz_rect bounds;
-		fz_irect ibounds;
-		fz_transform_rect(fz_bound_annot(app->ctx, annot, &bounds), &ctm);
-		fz_rect_from_irect(&bounds, fz_round_rect(&ibounds, &bounds));
-		fz_clear_pixmap_rect_with_value(app->ctx, app->image, 255, &ibounds);
-		idev = fz_new_draw_device_with_bbox(app->ctx, app->image, &ibounds);
-		pdfapp_runpage(app, idev, &ctm, &bounds, NULL);
-		fz_drop_device(app->ctx, idev);
+		if (pannot->changed)
+		{
+			fz_annot *annot = (fz_annot*)pannot;
+			fz_rect bounds;
+			fz_irect ibounds;
+			fz_transform_rect(fz_bound_annot(app->ctx, annot, &bounds), &ctm);
+			fz_rect_from_irect(&bounds, fz_round_rect(&ibounds, &bounds));
+			fz_clear_pixmap_rect_with_value(app->ctx, app->image, 255, &ibounds);
+			idev = fz_new_draw_device_with_bbox(app->ctx, NULL, app->image, &ibounds);
+			pdfapp_runpage(app, idev, &ctm, &bounds, NULL);
+			fz_close_device(app->ctx, idev);
+			fz_drop_device(app->ctx, idev);
+		}
 	}
 
 	pdfapp_showpage(app, 0, 0, 1, 0, 0);
@@ -806,13 +821,9 @@ void pdfapp_reloadpage(pdfapp_t *app)
 	if (app->outline_deferred == PDFAPP_OUTLINE_LOAD_NOW)
 	{
 		fz_try(app->ctx)
-		{
 			app->outline = fz_load_outline(app->ctx, app->doc);
-		}
 		fz_catch(app->ctx)
-		{
-			/* Ignore any error now */
-		}
+			app->outline = NULL;
 		app->outline_deferred = 0;
 	}
 	pdfapp_showpage(app, 1, 1, 1, 0, 0);
@@ -843,6 +854,7 @@ static void pdfapp_showpage(pdfapp_t *app, int loadpage, int drawpage, int repai
 
 	if (loadpage)
 	{
+		fz_rect mediabox;
 		pdfapp_loadpage(app, searching);
 
 		/* Zero search hit position */
@@ -850,12 +862,13 @@ static void pdfapp_showpage(pdfapp_t *app, int loadpage, int drawpage, int repai
 
 		/* Extract text */
 		app->page_sheet = fz_new_stext_sheet(app->ctx);
-		app->page_text = fz_new_stext_page(app->ctx);
+		app->page_text = fz_new_stext_page(app->ctx, fz_bound_page(app->ctx, app->page, &mediabox));
 
 		if (app->page_list || app->annotations_list)
 		{
-			tdev = fz_new_stext_device(app->ctx, app->page_sheet, app->page_text);
+			tdev = fz_new_stext_device(app->ctx, app->page_sheet, app->page_text, NULL);
 			pdfapp_runpage(app, tdev, &fz_identity, &fz_infinite_rect, &cookie);
+			fz_close_device(app->ctx, tdev);
 			fz_drop_device(app->ctx, tdev);
 		}
 	}
@@ -863,12 +876,12 @@ static void pdfapp_showpage(pdfapp_t *app, int loadpage, int drawpage, int repai
 	if (drawpage)
 	{
 		char buf2[64];
-		int len;
+		size_t len;
 
 		sprintf(buf2, " - %d/%d (%d dpi)",
 				app->pageno, app->pagecount, app->resolution);
 		len = MAX_TITLE-strlen(buf2);
-		if ((int)strlen(app->doctitle) > len)
+		if (strlen(app->doctitle) > len)
 		{
 			snprintf(buf, len-3, "%s", app->doctitle);
 			strcat(buf, "...");
@@ -884,41 +897,48 @@ static void pdfapp_showpage(pdfapp_t *app, int loadpage, int drawpage, int repai
 		fz_rect_from_irect(&bounds, &ibounds);
 
 		/* Draw */
-		if (app->image)
-			fz_drop_pixmap(app->ctx, app->image);
+		fz_drop_pixmap(app->ctx, app->image);
 		if (app->grayscale)
 			colorspace = fz_device_gray(app->ctx);
 		else
 			colorspace = app->colorspace;
+
 		app->image = NULL;
-		app->image = fz_new_pixmap_with_bbox(app->ctx, colorspace, &ibounds);
-		fz_clear_pixmap_with_value(app->ctx, app->image, 255);
-		if (app->page_list || app->annotations_list)
+		fz_var(app->image);
+
+		fz_try(app->ctx)
 		{
-			idev = fz_new_draw_device(app->ctx, app->image);
-			pdfapp_runpage(app, idev, &ctm, &bounds, &cookie);
-			fz_drop_device(app->ctx, idev);
+			app->image = fz_new_pixmap_with_bbox(app->ctx, colorspace, &ibounds, 1);
+			fz_clear_pixmap_with_value(app->ctx, app->image, 255);
+			if (app->page_list || app->annotations_list)
+			{
+				idev = fz_new_draw_device(app->ctx, NULL, app->image);
+				pdfapp_runpage(app, idev, &ctm, &bounds, &cookie);
+				fz_close_device(app->ctx, idev);
+				fz_drop_device(app->ctx, idev);
+			}
+			if (app->invert)
+				fz_invert_pixmap(app->ctx, app->image);
+			if (app->tint)
+				fz_tint_pixmap(app->ctx, app->image, app->tint_r, app->tint_g, app->tint_b);
 		}
-		if (app->invert)
-			fz_invert_pixmap(app->ctx, app->image);
-		if (app->tint)
-			fz_tint_pixmap(app->ctx, app->image, app->tint_r, app->tint_g, app->tint_b);
+		fz_catch(app->ctx)
+		{
+			cookie.errors++;
+		}
 	}
 
 	if (transition)
 	{
-		fz_transition *new_trans;
 		app->new_image = app->image;
 		app->image = NULL;
 		if (app->grayscale)
 			colorspace = fz_device_gray(app->ctx);
 		else
 			colorspace = app->colorspace;
-		app->image = fz_new_pixmap_with_bbox(app->ctx, colorspace, &ibounds);
+		app->image = fz_new_pixmap_with_bbox(app->ctx, colorspace, &ibounds, 1);
 		app->duration = 0;
-		new_trans = fz_page_presentation(app->ctx, app->page, &app->duration);
-		if (new_trans)
-			app->transition = *new_trans;
+		fz_page_presentation(app->ctx, app->page, &app->transition, &app->duration);
 		if (app->duration == 0)
 			app->duration = 5;
 		app->in_transit = fz_generate_transition(app->ctx, app->image, app->old_image, app->new_image, 0, &app->transition);
@@ -934,10 +954,16 @@ static void pdfapp_showpage(pdfapp_t *app, int loadpage, int drawpage, int repai
 	{
 		pdfapp_panview(app, app->panx, app->pany);
 
-		if (app->shrinkwrap)
+		if (!app->image)
+		{
+			/* there is no image to blit, but there might be an error message */
+			winresize(app, app->layout_w, app->layout_h);
+		}
+		else if (app->shrinkwrap)
 		{
 			int w = fz_pixmap_width(app->ctx, app->image);
 			int h = fz_pixmap_height(app->ctx, app->image);
+
 			if (app->winw == w)
 				app->panx = 0;
 			if (app->winh == h)
@@ -1010,6 +1036,13 @@ void pdfapp_inverthit(pdfapp_t *app)
 static void pdfapp_search_in_direction(pdfapp_t *app, enum panning *panto, int dir)
 {
 	int firstpage, page;
+
+	/* abort if no search string */
+	if (app->search[0] == 0)
+	{
+		winrepaint(app);
+		return;
+	}
 
 	wincursor(app, WAIT);
 
@@ -1102,7 +1135,7 @@ void pdfapp_onkey(pdfapp_t *app, int c, int modifiers)
 
 	if (app->issearching)
 	{
-		int n = strlen(app->search);
+		size_t n = strlen(app->search);
 		if (c < ' ')
 		{
 			if (c == '\b' && n > 0)
@@ -1161,7 +1194,6 @@ void pdfapp_onkey(pdfapp_t *app, int c, int modifiers)
 
 	switch (c)
 	{
-
 	case 'q':
 		winclose(app);
 		break;
@@ -1473,7 +1505,6 @@ void pdfapp_onkey(pdfapp_t *app, int c, int modifiers)
 			pdfapp_search_in_direction(app, &panto, 1);
 		loadpage = 0;
 		break;
-
 	}
 
 	if (c < '0' || c > '9')
@@ -1564,13 +1595,14 @@ static void handlescroll(pdfapp_t *app, int modifiers, int dir)
 void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int state)
 {
 	fz_context *ctx = app->ctx;
-	fz_irect irect;
+	fz_irect irect = { 0, 0, app->layout_w, app->layout_h };
 	fz_link *link;
 	fz_matrix ctm;
 	fz_point p;
 	int processed = 0;
 
-	fz_pixmap_bbox(app->ctx, app->image, &irect);
+	if (app->image)
+		fz_pixmap_bbox(app->ctx, app->image, &irect);
 	p.x = x - app->panx + irect.x0;
 	p.y = y - app->pany + irect.y0;
 
@@ -1602,7 +1634,7 @@ void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int sta
 
 			if (widget)
 			{
-				switch (pdf_widget_get_type(ctx, widget))
+				switch (pdf_widget_type(ctx, widget))
 				{
 				case PDF_WIDGET_TYPE_TEXT:
 					{
@@ -1621,7 +1653,6 @@ void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int sta
 						pdfapp_updatepage(app);
 					}
 					break;
-
 				case PDF_WIDGET_TYPE_LISTBOX:
 				case PDF_WIDGET_TYPE_COMBOBOX:
 					{
@@ -1662,6 +1693,7 @@ void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int sta
 					break;
 
 				case PDF_WIDGET_TYPE_SIGNATURE:
+					if (state == -1)
 					{
 						char ebuf[256];
 
@@ -1699,10 +1731,10 @@ void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int sta
 		wincursor(app, HAND);
 		if (btn == 1 && state == 1 && !processed)
 		{
-			if (link->dest.kind == FZ_LINK_URI)
-				pdfapp_gotouri(app, link->dest.ld.uri.uri);
-			else if (link->dest.kind == FZ_LINK_GOTO)
-				pdfapp_gotopage(app, link->dest.ld.gotor.page + 1);
+			if (fz_is_external_link(ctx, link->uri))
+				pdfapp_gotouri(app, link->uri);
+			else
+				pdfapp_gotopage(app, fz_resolve_link(ctx, app->doc, link->uri, NULL, NULL) + 1);
 			return;
 		}
 	}
@@ -1786,9 +1818,13 @@ void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int sta
 	{
 		int newx = app->panx + x - app->selx;
 		int newy = app->pany + y - app->sely;
+		int imgh = app->winh;
+		if (app->image)
+			imgh = fz_pixmap_height(app->ctx, app->image);
+
 		/* Scrolling beyond limits implies flipping pages */
 		/* Are we requested to scroll beyond limits? */
-		if (newy + fz_pixmap_height(app->ctx, app->image) < app->winh || newy > 0)
+		if (newy + imgh < app->winh || newy > 0)
 		{
 			/* Yes. We can assume that deltay != 0 */
 			int deltay = y - app->sely;
@@ -1810,7 +1846,8 @@ void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int sta
 					{
 						app->pageno--;
 						pdfapp_showpage(app, 1, 1, 1, 0, 0);
-						newy = -fz_pixmap_height(app->ctx, app->image);
+						if (app->image)
+							newy = -fz_pixmap_height(app->ctx, app->image);
 					}
 					app->beyondy = 0;
 				}
@@ -1847,7 +1884,6 @@ void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int sta
 		app->selr.y1 = fz_maxi(app->sely, y) - app->pany + irect.y0;
 		winrepaint(app);
 	}
-
 }
 
 void pdfapp_oncopy(pdfapp_t *app, unsigned short *ucsbuf, int ucslen)

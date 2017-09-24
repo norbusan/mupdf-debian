@@ -8,8 +8,10 @@
 #define main main_utf8
 #endif
 
+int muconvert_main(int argc, char *argv[]);
 int mudraw_main(int argc, char *argv[]);
 int murun_main(int argc, char *argv[]);
+
 int pdfclean_main(int argc, char *argv[]);
 int pdfextract_main(int argc, char *argv[]);
 int pdfinfo_main(int argc, char *argv[]);
@@ -18,14 +20,19 @@ int pdfshow_main(int argc, char *argv[]);
 int pdfpages_main(int argc, char *argv[]);
 int pdfcreate_main(int argc, char *argv[]);
 int pdfmerge_main(int argc, char *argv[]);
+int pdfportfolio_main(int argc, char *argv[]);
 
 static struct {
 	int (*func)(int argc, char *argv[]);
 	char *name;
 	char *desc;
 } tools[] = {
+	{ muconvert_main, "convert", "convert document" },
 	{ mudraw_main, "draw", "convert document" },
+#if FZ_ENABLE_JS
 	{ murun_main, "run", "run javascript" },
+#endif
+#if FZ_ENABLE_PDF
 	{ pdfclean_main, "clean", "rewrite pdf file" },
 	{ pdfextract_main, "extract", "extract font and image resources" },
 	{ pdfinfo_main, "info", "show information about pdf resources" },
@@ -34,12 +41,14 @@ static struct {
 	{ pdfshow_main, "show", "show internal pdf objects" },
 	{ pdfcreate_main, "create", "create pdf document" },
 	{ pdfmerge_main, "merge", "merge pages from multiple pdf sources into a new pdf" },
+	{ pdfportfolio_main, "portfolio", "manipulate PDF portfolios" },
+#endif
 };
 
 static int
 namematch(const char *end, const char *start, const char *match)
 {
-	int len = strlen(match);
+	size_t len = strlen(match);
 	return ((end-len >= start) && (strncmp(end-len, match, len) == 0));
 }
 
@@ -66,7 +75,6 @@ int main(int argc, char **argv)
 	char buf[32];
 	int i;
 
-	
 	if (argc == 0)
 	{
 		fprintf(stderr, "No command name found!\n");

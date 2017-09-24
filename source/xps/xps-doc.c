@@ -1,4 +1,5 @@
-#include "mupdf/xps.h"
+#include "mupdf/fitz.h"
+#include "xps-imp.h"
 
 #define REL_START_PART \
 	"http://schemas.microsoft.com/xps/2005/06/fixedrepresentation"
@@ -123,7 +124,7 @@ xps_add_link_target(fz_context *ctx, xps_document *doc, char *name)
 }
 
 int
-xps_lookup_link_target(fz_context *ctx, xps_document *doc, char *target_uri)
+xps_lookup_link_target(fz_context *ctx, xps_document *doc, char *target_uri, float *xp, float *yp)
 {
 	xps_target *target;
 	char *needle = strrchr(target_uri, '#');
@@ -275,7 +276,7 @@ xps_parse_metadata(fz_context *ctx, xps_document *doc, xps_part *part, xps_fixdo
 	doc->base_uri = buf;
 	doc->part_uri = part->name;
 
-	root = fz_parse_xml(ctx, part->data, part->size, 0);
+	root = fz_parse_xml(ctx, part->data, 0);
 	xps_parse_metadata_imp(ctx, doc, root, fixdoc);
 	fz_drop_xml(ctx, root);
 
@@ -352,7 +353,7 @@ xps_load_fixed_page(fz_context *ctx, xps_document *doc, xps_fixpage *page)
 	part = xps_read_part(ctx, doc, page->name);
 	fz_try(ctx)
 	{
-		root = fz_parse_xml(ctx, part->data, part->size, 0);
+		root = fz_parse_xml(ctx, part->data, 0);
 	}
 	fz_always(ctx)
 	{
@@ -405,7 +406,7 @@ xps_load_fixed_page(fz_context *ctx, xps_document *doc, xps_fixpage *page)
 	return root;
 }
 
-fz_rect *
+static fz_rect *
 xps_bound_page(fz_context *ctx, xps_page *page, fz_rect *bounds)
 {
 	bounds->x0 = bounds->y0 = 0;
@@ -414,11 +415,9 @@ xps_bound_page(fz_context *ctx, xps_page *page, fz_rect *bounds)
 	return bounds;
 }
 
-void
+static void
 xps_drop_page_imp(fz_context *ctx, xps_page *page)
 {
-	if (page == NULL)
-		return;
 	fz_drop_document(ctx, &page->doc->super);
 	fz_drop_xml(ctx, page->root);
 }
@@ -440,11 +439,11 @@ xps_load_page(fz_context *ctx, xps_document *doc, int number)
 			root = xps_load_fixed_page(ctx, doc, fix);
 			fz_try(ctx)
 			{
-				page = fz_new_page(ctx, sizeof *page);
+				page = fz_new_derived_page(ctx, xps_page);
 				page->super.load_links = (fz_page_load_links_fn *)xps_load_links;
 				page->super.bound_page = (fz_page_bound_page_fn *)xps_bound_page;
 				page->super.run_page_contents = (fz_page_run_page_contents_fn *)xps_run_page;
-				page->super.drop_page_imp = (fz_page_drop_page_imp_fn *)xps_drop_page_imp;
+				page->super.drop_page = (fz_page_drop_page_fn *)xps_drop_page_imp;
 
 				page->doc = (xps_document*) fz_keep_document(ctx, &doc->super);
 				page->fix = fix;
@@ -470,21 +469,22 @@ xps_recognize(fz_context *ctx, const char *magic)
 
 	if (ext)
 	{
-		if (!fz_strcasecmp(ext, ".xps") || !fz_strcasecmp(ext, ".rels") || !fz_strcasecmp(ext, ".oxps"))
+		if (!fz_strcasecmp(ext, ".xps") || !fz_strcasecmp(ext, ".oxps"))
 			return 100;
 	}
+	if (strstr(magic, "/_rels/.rels") || strstr(magic, "\\_rels\\.rels"))
+		return 100;
 	if (!strcmp(magic, "xps") || !strcmp(magic, "oxps") ||
 		!strcmp(magic, "application/vnd.ms-xpsdocument") ||
 		!strcmp(magic, "application/xps") ||
 		!strcmp(magic, "application/oxps"))
 		return 100;
-
 	return 0;
 }
 
 fz_document_handler xps_document_handler =
 {
-	(fz_document_recognize_fn *)&xps_recognize,
-	(fz_document_open_fn *)&xps_open_document,
-	(fz_document_open_with_stream_fn *)&xps_open_document_with_stream
+	xps_recognize,
+	(fz_document_open_fn *) xps_open_document,
+	(fz_document_open_with_stream_fn *) xps_open_document_with_stream
 };

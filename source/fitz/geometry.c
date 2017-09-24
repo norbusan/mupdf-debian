@@ -59,6 +59,18 @@ fz_pre_scale(fz_matrix *mat, float sx, float sy)
 }
 
 fz_matrix *
+fz_post_scale(fz_matrix *mat, float sx, float sy)
+{
+	mat->a *= sx;
+	mat->b *= sy;
+	mat->c *= sx;
+	mat->d *= sy;
+	mat->e *= sx;
+	mat->f *= sy;
+	return mat;
+}
+
+fz_matrix *
 fz_shear(fz_matrix *mat, float h, float v)
 {
 	mat->a = 1; mat->b = v;
@@ -525,4 +537,18 @@ fz_rect *fz_include_point_in_rect(fz_rect *r, const fz_point *p)
 	if (p->y > r->y1) r->y1 = p->y;
 
 	return r;
+}
+
+int fz_contains_rect(const fz_rect *a, const fz_rect *b)
+{
+	if (a == NULL || b == NULL)
+		return 0;
+	if (fz_is_empty_rect(b))
+		return 1;
+	if (fz_is_empty_rect(a))
+		return 0;
+	return ((a->x0 <= b->x0) &&
+		(a->y0 <= b->y0) &&
+		(a->x1 >= b->x1) &&
+		(a->y1 >= b->y1));
 }

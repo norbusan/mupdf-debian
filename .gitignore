@@ -1,3 +1,7 @@
+# Optional thirdparty libraryes
+thirdparty/luratech
+thirdparty/jpegxr
+
 # Generated files:
 build
 generated
@@ -10,6 +14,7 @@ cscope.*
 *~
 .*.swp
 .DS_Store
+\#*\#
 
 # Editor settings:
 .vimrc
@@ -21,17 +26,32 @@ cscope.*
 *.pdf
 *.xps
 *.epub
-*.html
+*.fb2
 *.xhtml
 *.css
 *.svg
+*.pam
+*.pbm
+*.pgm
+*.ppm
+*.png
+*.jpg
+*.jpeg
+*.pcl
+*.ps
 
 # Temporary and build files:
 *.class
 *.jar
 *.o
 *.so
+*.zip
+*.dll
 DerivedData
+
+platform/java/obj
+platform/java/libs
+platform/java/local.properties
 
 platform/win32/*.user
 platform/win32/*.ncb
@@ -43,13 +63,3 @@ platform/win32/Release
 platform/win32/ReleaseOpenssl
 platform/win32/Memento
 platform/win32/x64
-
-platform/android/*/obj
-platform/android/*/bin
-platform/android/*/libs
-platform/android/*/gen
-platform/android/*/jni/andprof
-platform/android/*/local.properties
-platform/android/*/.classpath
-platform/android/*/.project
-platform/android/*/.settings

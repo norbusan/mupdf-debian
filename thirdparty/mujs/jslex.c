@@ -172,10 +172,10 @@ static void jsY_unescape(js_State *J)
 	if (jsY_accept(J, '\\')) {
 		if (jsY_accept(J, 'u')) {
 			int x = 0;
-			if (!jsY_ishex(J->lexchar)) goto error; x |= jsY_tohex(J->lexchar) << 12; jsY_next(J);
-			if (!jsY_ishex(J->lexchar)) goto error; x |= jsY_tohex(J->lexchar) << 8; jsY_next(J);
-			if (!jsY_ishex(J->lexchar)) goto error; x |= jsY_tohex(J->lexchar) << 4; jsY_next(J);
-			if (!jsY_ishex(J->lexchar)) goto error; x |= jsY_tohex(J->lexchar);
+			if (!jsY_ishex(J->lexchar)) { goto error; } x |= jsY_tohex(J->lexchar) << 12; jsY_next(J);
+			if (!jsY_ishex(J->lexchar)) { goto error; } x |= jsY_tohex(J->lexchar) << 8; jsY_next(J);
+			if (!jsY_ishex(J->lexchar)) { goto error; } x |= jsY_tohex(J->lexchar) << 4; jsY_next(J);
+			if (!jsY_ishex(J->lexchar)) { goto error; } x |= jsY_tohex(J->lexchar);
 			J->lexchar = x;
 			return;
 		}
@@ -225,7 +225,8 @@ static int lexcomment(js_State *J)
 			if (jsY_accept(J, '/'))
 				return 0;
 		}
-		jsY_next(J);
+		else
+			jsY_next(J);
 	}
 	return -1;
 }
@@ -376,6 +377,7 @@ static int lexescape(js_State *J)
 		return 0;
 
 	switch (J->lexchar) {
+	case 0: jsY_error(J, "unterminated escape sequence");
 	case 'u':
 		jsY_next(J);
 		if (!jsY_ishex(J->lexchar)) return 1; else { x |= jsY_tohex(J->lexchar) << 12; jsY_next(J); }

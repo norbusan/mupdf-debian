@@ -159,7 +159,7 @@ static struct glyph *lookup_glyph(fz_font *font, int gid, float *xp, float *yp)
 
 	glEnd();
 
-	pixmap = fz_render_glyph_pixmap(ctx, font, gid, &subpix_trm, NULL, NULL);
+	pixmap = fz_render_glyph_pixmap(ctx, font, gid, &subpix_trm, NULL);
 	w = pixmap->w;
 	h = pixmap->h;
 
@@ -247,14 +247,14 @@ static float ui_draw_glyph(fz_font *font, int gid, float x, float y)
 float ui_measure_character(fz_context *ctx, int ucs)
 {
 	fz_font *font;
-	int gid = fz_encode_character_with_fallback(ctx, g_font, ucs, 0, &font);
+	int gid = fz_encode_character_with_fallback(ctx, g_font, ucs, 0, 0, &font);
 	return fz_advance_glyph(ctx, font, gid, 0) * g_font_size;
 }
 
 float ui_draw_character(fz_context *ctx, int ucs, float x, float y)
 {
 	fz_font *font;
-	int gid = fz_encode_character_with_fallback(ctx, g_font, ucs, 0, &font);
+	int gid = fz_encode_character_with_fallback(ctx, g_font, ucs, 0, 0, &font);
 	return ui_draw_glyph(font, gid, x, y);
 }
 

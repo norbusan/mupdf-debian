@@ -217,29 +217,34 @@ selector_specificity(fz_css_selector *sel, int important)
  */
 
 static int
-match_id_condition(fz_xml *node, const char *p)
+match_att_exists_condition(fz_xml *node, const char *key)
 {
-	const char *s = fz_xml_att(node, "id");
-	if (s && !strcmp(s, p))
-		return 1;
-	return 0;
+	const char *s = fz_xml_att(node, key);
+	return s != NULL;
 }
 
 static int
-match_class_condition(fz_xml *node, const char *p)
+match_att_is_condition(fz_xml *node, const char *key, const char *val)
 {
-	const char *s = fz_xml_att(node, "class");
+	const char *att = fz_xml_att(node, key);
+	return att && !strcmp(val, att);
+}
+
+static int
+match_att_has_condition(fz_xml *node, const char *att, const char *needle)
+{
+	const char *haystack = fz_xml_att(node, att);
 	const char *ss;
-	int n;
-	if (s) {
+	size_t n;
+	if (haystack) {
 		/* Try matching whole property first. */
-		if (!strcmp(s, p))
+		if (!strcmp(haystack, needle))
 			return 1;
 
 		/* Look for matching words. */
-		n = strlen(p);
-		ss = strstr(s, p);
-		if (ss && (ss[n] == ' ' || ss[n] == 0) && (ss == s || ss[-1] == ' '))
+		n = strlen(needle);
+		ss = strstr(haystack, needle);
+		if (ss && (ss[n] == ' ' || ss[n] == 0) && (ss == haystack || ss[-1] == ' '))
 			return 1;
 	}
 	return 0;
@@ -254,8 +259,12 @@ match_condition(fz_css_condition *cond, fz_xml *node)
 	switch (cond->type) {
 	default: return 0;
 	case ':': return 0; /* don't support pseudo-classes */
-	case '#': if (!match_id_condition(node, cond->val)) return 0; break;
-	case '.': if (!match_class_condition(node, cond->val)) return 0; break;
+	case '#': if (!match_att_is_condition(node, "id", cond->val)) return 0; break;
+	case '.': if (!match_att_has_condition(node, "class", cond->val)) return 0; break;
+	case '[': if (!match_att_exists_condition(node, cond->key)) return 0; break;
+	case '=': if (!match_att_is_condition(node, cond->key, cond->val)) return 0; break;
+	case '~': if (!match_att_has_condition(node, cond->key, cond->val)) return 0; break;
+	case '|': if (!match_att_is_condition(node, cond->key, cond->val)) return 0; break;
 	}
 
 	return match_condition(cond->next, node);
@@ -613,14 +622,14 @@ sort_properties(fz_css_match *match)
 }
 
 void
-fz_match_css(fz_context *ctx, fz_css_match *match, fz_css_rule *css, fz_xml *node)
+fz_match_css(fz_context *ctx, fz_css_match *match, fz_css *css, fz_xml *node)
 {
 	fz_css_rule *rule;
 	fz_css_selector *sel;
-	fz_css_property *prop, *head, *tail;
+	fz_css_property *prop;
 	const char *s;
 
-	for (rule = css; rule; rule = rule->next)
+	for (rule = css->rule; rule; rule = rule->next)
 	{
 		sel = rule->selector;
 		while (sel)
@@ -635,25 +644,25 @@ fz_match_css(fz_context *ctx, fz_css_match *match, fz_css_rule *css, fz_xml *nod
 		}
 	}
 
-	s = fz_xml_att(node, "style");
-	if (s)
+	if (fz_use_document_css(ctx))
 	{
-		fz_try(ctx)
+		s = fz_xml_att(node, "style");
+		if (s)
 		{
-			head = tail = prop = fz_parse_css_properties(ctx, s);
-			while (prop)
+			fz_try(ctx)
 			{
-				add_property(match, prop->name, prop->value, INLINE_SPECIFICITY);
-				tail = prop;
-				prop = prop->next;
+				prop = fz_parse_css_properties(ctx, css->pool, s);
+				while (prop)
+				{
+					add_property(match, prop->name, prop->value, INLINE_SPECIFICITY);
+					prop = prop->next;
+				}
+				/* We can "leak" the property here, since it is freed along with the pool allocator. */
 			}
-			if (tail)
-				tail->next = css->garbage;
-			css->garbage = head;
-		}
-		fz_catch(ctx)
-		{
-			fz_warn(ctx, "ignoring style attribute");
+			fz_catch(ctx)
+			{
+				fz_warn(ctx, "ignoring style attribute");
+			}
 		}
 	}
 
@@ -661,13 +670,13 @@ fz_match_css(fz_context *ctx, fz_css_match *match, fz_css_rule *css, fz_xml *nod
 }
 
 void
-fz_match_css_at_page(fz_context *ctx, fz_css_match *match, fz_css_rule *css)
+fz_match_css_at_page(fz_context *ctx, fz_css_match *match, fz_css *css)
 {
 	fz_css_rule *rule;
 	fz_css_selector *sel;
 	fz_css_property *prop;
 
-	for (rule = css; rule; rule = rule->next)
+	for (rule = css->rule; rule; rule = rule->next)
 	{
 		sel = rule->selector;
 		while (sel)
@@ -752,12 +761,12 @@ fz_add_css_font_face(fz_context *ctx, fz_html_font_set *set, fz_archive *zip, co
 }
 
 void
-fz_add_css_font_faces(fz_context *ctx, fz_html_font_set *set, fz_archive *zip, const char *base_uri, fz_css_rule *css)
+fz_add_css_font_faces(fz_context *ctx, fz_html_font_set *set, fz_archive *zip, const char *base_uri, fz_css *css)
 {
 	fz_css_rule *rule;
 	fz_css_selector *sel;
 
-	for (rule = css; rule; rule = rule->next)
+	for (rule = css->rule; rule; rule = rule->next)
 	{
 		sel = rule->selector;
 		while (sel)
@@ -885,24 +894,32 @@ number_from_value(fz_css_value *value, float initial, int initial_unit)
 	{
 		float x = fz_css_strtof(value->data, &p);
 
-		if (p[0] == 'e' && p[1] == 'm')
+		if (p[0] == 'e' && p[1] == 'm' && p[2] == 0)
 			return make_number(x, N_SCALE);
-		if (p[0] == 'e' && p[1] == 'x')
+		if (p[0] == 'e' && p[1] == 'x' && p[2] == 0)
 			return make_number(x / 2, N_SCALE);
 
-		if (p[0] == 'i' && p[1] == 'n')
+		if (p[0] == 'i' && p[1] == 'n' && p[2] == 0)
 			return make_number(x * 72, N_LENGTH);
-		if (p[0] == 'c' && p[1] == 'm')
+		if (p[0] == 'c' && p[1] == 'm' && p[2] == 0)
 			return make_number(x * 7200 / 254, N_LENGTH);
-		if (p[0] == 'm' && p[1] == 'm')
+		if (p[0] == 'm' && p[1] == 'm' && p[2] == 0)
 			return make_number(x * 720 / 254, N_LENGTH);
-		if (p[0] == 'p' && p[1] == 'c')
+		if (p[0] == 'p' && p[1] == 'c' && p[2] == 0)
 			return make_number(x * 12, N_LENGTH);
 
-		if (p[0] == 'p' && p[1] == 't')
+		if (p[0] == 'p' && p[1] == 't' && p[2] == 0)
 			return make_number(x, N_LENGTH);
-		if (p[0] == 'p' && p[1] == 'x')
+		if (p[0] == 'p' && p[1] == 'x' && p[2] == 0)
 			return make_number(x, N_LENGTH);
+
+		/* FIXME: 'rem' should be 'em' of root element. This is a bad approximation. */
+		if (p[0] == 'r' && p[1] == 'e' && p[2] == 'm' && p[3] == 0)
+			return make_number(x * 16, N_LENGTH);
+
+		/* FIXME: 'ch' should be width of '0' character. This is an approximation. */
+		if (p[0] == 'c' && p[1] == 'h' && p[2] == 0)
+			return make_number(x / 2, N_LENGTH);
 
 		return make_number(x, N_LENGTH);
 	}
@@ -1004,7 +1021,9 @@ color_from_value(fz_css_value *value, fz_css_color initial)
 
 	if (value->type == CSS_HASH)
 	{
-		int r, g, b, n;
+		int r, g, b;
+		size_t n;
+hex_color:
 		n = strlen(value->data);
 		if (n == 3)
 		{
@@ -1076,7 +1095,7 @@ color_from_value(fz_css_value *value, fz_css_color initial)
 			return make_color(0xC0, 0xC0, 0xC0, 255);
 		if (!strcmp(value->data, "gray"))
 			return make_color(0x80, 0x80, 0x80, 255);
-		return make_color(0, 0, 0, 255);
+		goto hex_color; /* last ditch attempt: maybe it's a #XXXXXX color without the # */
 	}
 	return initial;
 }
@@ -1135,6 +1154,21 @@ visibility_from_property(fz_css_match *match)
 	return V_VISIBLE;
 }
 
+static int
+page_break_from_property(fz_css_match *match, char *prop)
+{
+	fz_css_value *value = value_from_property(match, prop);
+	if (value)
+	{
+		if (!strcmp(value->data, "auto")) return PB_AUTO;
+		else if (!strcmp(value->data, "always")) return PB_ALWAYS;
+		else if (!strcmp(value->data, "avoid")) return PB_AVOID;
+		else if (!strcmp(value->data, "left")) return PB_LEFT;
+		else if (!strcmp(value->data, "right")) return PB_RIGHT;
+	}
+	return PB_AUTO;
+}
+
 void
 fz_default_css_style(fz_context *ctx, fz_css_style *style)
 {
@@ -1161,6 +1195,8 @@ fz_apply_css_style(fz_context *ctx, fz_html_font_set *set, fz_css_style *style, 
 
 	style->visibility = visibility_from_property(match);
 	style->white_space = white_space_from_property(match);
+	style->page_break_before = page_break_from_property(match, "page-break-before");
+	style->page_break_after = page_break_from_property(match, "page-break-after");
 
 	value = value_from_property(match, "text-align");
 	if (value)
@@ -1243,10 +1279,10 @@ fz_apply_css_style(fz_context *ctx, fz_html_font_set *set, fz_css_style *style, 
 	style->color = color_from_property(match, "color", black);
 	style->background_color = color_from_property(match, "background-color", transparent);
 
-	style->border_style[0] = border_style_from_property(match, "border-top-style");
-	style->border_style[1] = border_style_from_property(match, "border-right-style");
-	style->border_style[2] = border_style_from_property(match, "border-bottom-style");
-	style->border_style[3] = border_style_from_property(match, "border-left-style");
+	style->border_style_0 = border_style_from_property(match, "border-top-style");
+	style->border_style_1 = border_style_from_property(match, "border-right-style");
+	style->border_style_2 = border_style_from_property(match, "border-bottom-style");
+	style->border_style_3 = border_style_from_property(match, "border-left-style");
 
 	style->border_color[0] = color_from_property(match, "border-top-color", style->color);
 	style->border_color[1] = color_from_property(match, "border-right-color", style->color);

@@ -1,6 +1,6 @@
 #include "mupdf/pdf.h" // TODO: move this file to pdf module
 
-#ifdef HAVE_OPENSSL
+#ifdef HAVE_LIBCRYPTO
 
 #include "openssl/err.h"
 #include "openssl/bio.h"
@@ -256,10 +256,7 @@ exit:
 	return res;
 }
 
-static unsigned char adobe_ca[] =
-{
 #include "gen_adobe_ca.h"
-};
 
 static int verify_sig(char *sig, int sig_len, char *file, int (*byte_range)[2], int byte_range_len, char *ebuf, int ebufsize)
 {
@@ -292,7 +289,7 @@ static int verify_sig(char *sig, int sig_len, char *file, int (*byte_range)[2], 
 	BIO_set_segments(bsegs, byte_range, byte_range_len);
 
 	/* Find the certificates in the pk7 file */
-	bcert = BIO_new_mem_buf(adobe_ca, sizeof(adobe_ca));
+	bcert = BIO_new_mem_buf((void*)fz_resources_certs_AdobeCA_p7c, fz_resources_certs_AdobeCA_p7c_size);
 	pk7cert = d2i_PKCS7_bio(bcert, NULL);
 	if (pk7cert == NULL)
 		goto exit;
@@ -357,8 +354,7 @@ struct pdf_signer_s
 
 void pdf_drop_designated_name(fz_context *ctx, pdf_designated_name *dn)
 {
-	if (dn)
-		fz_free(ctx, dn);
+	fz_free(ctx, dn);
 }
 
 static void add_from_bags(X509 **pX509, EVP_PKEY **pPkey, STACK_OF(PKCS12_SAFEBAG) *bags, const char *pw);
@@ -507,21 +503,16 @@ pdf_signer *pdf_read_pfx(fz_context *ctx, const char *pfile, const char *pw)
 
 pdf_signer *pdf_keep_signer(fz_context *ctx, pdf_signer *signer)
 {
-	if (signer)
-		signer->refs++;
-	return signer;
+	return fz_keep_imp(ctx, signer, &signer->refs);
 }
 
 void pdf_drop_signer(fz_context *ctx, pdf_signer *signer)
 {
-	if (signer)
+	if (fz_drop_imp(ctx, signer, &signer->refs))
 	{
-		if (--signer->refs == 0)
-		{
-			X509_free(signer->x509);
-			EVP_PKEY_free(signer->pkey);
-			fz_free(ctx, signer);
-		}
+		X509_free(signer->x509);
+		EVP_PKEY_free(signer->pkey);
+		fz_free(ctx, signer);
 	}
 }
 
@@ -700,7 +691,6 @@ int pdf_check_signature(fz_context *ctx, pdf_document *doc, pdf_widget *widget, 
 			res = 0;
 			fz_strlcpy(ebuf, "Not signed", ebufsize);
 		}
-
 	}
 	fz_always(ctx)
 	{
@@ -726,7 +716,7 @@ void pdf_sign_signature(fz_context *ctx, pdf_document *doc, pdf_widget *widget, 
 
 	fz_try(ctx)
 	{
-		char *dn_str;
+		const char *dn_str;
 		pdf_obj *wobj = ((pdf_annot *)widget)->obj;
 		fz_rect rect = fz_empty_rect;
 
@@ -741,21 +731,21 @@ void pdf_sign_signature(fz_context *ctx, pdf_document *doc, pdf_widget *widget, 
 			if (!dn->cn)
 				fz_throw(ctx, FZ_ERROR_GENERIC, "Certificate has no common name");
 
-			fz_buffer_printf(ctx, fzbuf, "cn=%s", dn->cn);
+			fz_append_printf(ctx, fzbuf, "cn=%s", dn->cn);
 
 			if (dn->o)
-				fz_buffer_printf(ctx, fzbuf, ", o=%s", dn->o);
+				fz_append_printf(ctx, fzbuf, ", o=%s", dn->o);
 
 			if (dn->ou)
-				fz_buffer_printf(ctx, fzbuf, ", ou=%s", dn->ou);
+				fz_append_printf(ctx, fzbuf, ", ou=%s", dn->ou);
 
 			if (dn->email)
-				fz_buffer_printf(ctx, fzbuf, ", email=%s", dn->email);
+				fz_append_printf(ctx, fzbuf, ", email=%s", dn->email);
 
 			if (dn->c)
-				fz_buffer_printf(ctx, fzbuf, ", c=%s", dn->c);
+				fz_append_printf(ctx, fzbuf, ", c=%s", dn->c);
 
-			(void)fz_buffer_storage(ctx, fzbuf, (unsigned char **) &dn_str);
+			dn_str = fz_string_from_buffer(ctx, fzbuf);
 			pdf_set_signature_appearance(ctx, doc, (pdf_annot *)widget, dn->cn, dn_str, NULL);
 		}
 	}
@@ -776,7 +766,7 @@ int pdf_signatures_supported(fz_context *ctx)
 	return 1;
 }
 
-#else /* HAVE_OPENSSL */
+#else /* HAVE_LIBCRYPTO */
 
 int pdf_check_signature(fz_context *ctx, pdf_document *doc, pdf_widget *widget, char *file, char *ebuf, int ebufsize)
 {
@@ -806,4 +796,4 @@ int pdf_signatures_supported(fz_context *ctx)
 	return 0;
 }
 
-#endif /* HAVE_OPENSSL */
+#endif /* HAVE_LIBCRYPTO */

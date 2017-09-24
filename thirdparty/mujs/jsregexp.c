@@ -16,12 +16,12 @@ void js_newregexp(js_State *J, const char *pattern, int flags)
 	if (flags & JS_REGEXP_I) opts |= REG_ICASE;
 	if (flags & JS_REGEXP_M) opts |= REG_NEWLINE;
 
-	prog = js_regcomp(pattern, opts, &error);
+	prog = js_regcompx(J->alloc, J->actx, pattern, opts, &error);
 	if (!prog)
 		js_syntaxerror(J, "regular expression: %s", error);
 
 	obj->u.r.prog = prog;
-	obj->u.r.source = pattern;
+	obj->u.r.source = js_strdup(J, pattern);
 	obj->u.r.flags = flags;
 	obj->u.r.last = 0;
 	js_pushobject(J, obj);
@@ -29,7 +29,7 @@ void js_newregexp(js_State *J, const char *pattern, int flags)
 
 void js_RegExp_prototype_exec(js_State *J, js_Regexp *re, const char *text)
 {
-	unsigned int i;
+	int i;
 	int opts;
 	Resub m;
 
@@ -185,9 +185,9 @@ void jsB_initregexp(js_State *J)
 {
 	js_pushobject(J, J->RegExp_prototype);
 	{
-		jsB_propf(J, "toString", Rp_toString, 0);
-		jsB_propf(J, "test", Rp_test, 0);
-		jsB_propf(J, "exec", Rp_exec, 0);
+		jsB_propf(J, "RegExp.prototype.toString", Rp_toString, 0);
+		jsB_propf(J, "RegExp.prototype.test", Rp_test, 0);
+		jsB_propf(J, "RegExp.prototype.exec", Rp_exec, 0);
 	}
 	js_newcconstructor(J, jsB_RegExp, jsB_new_RegExp, "RegExp", 1);
 	js_defglobal(J, "RegExp", JS_DONTENUM);

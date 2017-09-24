@@ -64,7 +64,7 @@ fz_jpg_mem_term(struct jpeg_decompress_struct *cinfo)
 static void error_exit(j_common_ptr cinfo)
 {
 	char msg[JMSG_LENGTH_MAX];
-	fz_context *ctx = (fz_context *)cinfo->client_data;
+	fz_context *ctx = JZ_CTX_FROM_CINFO(cinfo);
 
 	cinfo->err->format_message(cinfo, msg);
 	fz_throw(ctx, FZ_ERROR_GENERIC, "jpeg error: %s", msg);
@@ -215,7 +215,7 @@ static int extract_app13_resolution(jpeg_saved_marker_ptr marker, int *xres, int
 }
 
 fz_pixmap *
-fz_load_jpeg(fz_context *ctx, unsigned char *rbuf, int rlen)
+fz_load_jpeg(fz_context *ctx, unsigned char *rbuf, size_t rlen)
 {
 	struct jpeg_decompress_struct cinfo;
 	struct jpeg_error_mgr err;
@@ -223,7 +223,7 @@ fz_load_jpeg(fz_context *ctx, unsigned char *rbuf, int rlen)
 	unsigned char *row[1], *sp, *dp;
 	fz_colorspace *colorspace;
 	unsigned int x;
-	int k;
+	int k, stride;
 	fz_pixmap *image = NULL;
 
 	fz_var(image);
@@ -266,7 +266,7 @@ fz_load_jpeg(fz_context *ctx, unsigned char *rbuf, int rlen)
 		else
 			fz_throw(ctx, FZ_ERROR_GENERIC, "bad number of components in jpeg: %d", cinfo.num_components);
 
-		image = fz_new_pixmap(ctx, colorspace, cinfo.output_width, cinfo.output_height);
+		image = fz_new_pixmap(ctx, colorspace, cinfo.output_width, cinfo.output_height, 0);
 
 		if (extract_exif_resolution(cinfo.marker_list, &image->xres, &image->yres))
 			/* XPS prefers EXIF resolution to JFIF density */;
@@ -290,6 +290,7 @@ fz_load_jpeg(fz_context *ctx, unsigned char *rbuf, int rlen)
 
 		row[0] = fz_malloc(ctx, cinfo.output_components * cinfo.output_width);
 		dp = image->samples;
+		stride = image->stride - image->w * image->n;
 		while (cinfo.output_scanline < cinfo.output_height)
 		{
 			jpeg_read_scanlines(&cinfo, row, 1);
@@ -298,8 +299,8 @@ fz_load_jpeg(fz_context *ctx, unsigned char *rbuf, int rlen)
 			{
 				for (k = 0; k < cinfo.output_components; k++)
 					*dp++ = *sp++;
-				*dp++ = 255;
 			}
+			dp += stride;
 		}
 	}
 	fz_always(ctx)
@@ -328,7 +329,7 @@ fz_load_jpeg(fz_context *ctx, unsigned char *rbuf, int rlen)
 }
 
 void
-fz_load_jpeg_info(fz_context *ctx, unsigned char *rbuf, int rlen, int *xp, int *yp, int *xresp, int *yresp, fz_colorspace **cspacep)
+fz_load_jpeg_info(fz_context *ctx, unsigned char *rbuf, size_t rlen, int *xp, int *yp, int *xresp, int *yresp, fz_colorspace **cspacep)
 {
 	struct jpeg_decompress_struct cinfo;
 	struct jpeg_error_mgr err;
