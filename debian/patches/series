@@ -1,10 +1,2 @@
-0001-fix_libjpeg_header_mismatch.patch
-0002-mupdf_manpage.patch
-0003-Fix-build-with-libopenjp2.patch
-0004-Fix-build-with-system-gl-and-glfw.patch
-0005-Don-t-communicate-via-tty.patch
-0006-CVE-2016-6265.patch
-0007-CVE-2016-6525.patch
-0008-CVE-2016-8674.patch
-0009-CVE-2017-5896.patch
-0010-CVE-2017-5991.patch
+0001-mupdf_manpage.patch
+0002-Fix-build-with-system-libopjnjp2.patch

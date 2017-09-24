@@ -8,7 +8,7 @@ Subject: mupdf_manpage
  1 file changed, 10 insertions(+)
 
 diff --git a/docs/man/mupdf.1 b/docs/man/mupdf.1
-index 38a9cd0..a91c9ea 100644
+index d87e54e..892215e 100644
 --- a/docs/man/mupdf.1
 +++ b/docs/man/mupdf.1
 @@ -173,6 +173,9 @@ Reload file.
