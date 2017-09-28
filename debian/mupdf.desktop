@@ -1,16 +1,11 @@
 [Desktop Entry]
-Encoding=UTF-8
 Name=MuPDF
 GenericName=PDF file viewer
-Comment=PDF file viewer
 Exec=mupdf %f
 TryExec=mupdf
 Icon=mupdf
 Terminal=false
 Type=Application
-MimeType=application/pdf;application/x-pdf;
+MimeType=application/pdf;
 Categories=Viewer;Graphics;
 NoDisplay=true
-
-[Desktop Action View]
-Exec=mupdf %f
