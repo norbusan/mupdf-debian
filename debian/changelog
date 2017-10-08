@@ -1,3 +1,14 @@
+mupdf (1.11+ds1-1.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Don't use xps font if it could not be loaded (CVE-2017-14685)
+    (Closes: #877379)
+  * Check name, comment and meta size field signs (CVE-2017-14686)
+    (Closes: #877379)
+  * Handle non-tags in tag name comparisons (CVE-2017-14687) (Closes: #877379)
+
+ -- Salvatore Bonaccorso <carnil@debian.org>  Sun, 08 Oct 2017 10:37:23 +0200
+
 mupdf (1.11+ds1-1) unstable; urgency=medium
 
   * New upstream version 1.11+ds1

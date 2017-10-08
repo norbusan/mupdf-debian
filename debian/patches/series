@@ -1,3 +1,6 @@
 0001-mupdf_manpage.patch
 0002-Fix-build-with-system-libopjnjp2.patch
 0003-Sort-files-in-static-library-to-make-the-build-repro.patch
+0003-Fix-698539-Don-t-use-xps-font-if-it-could-not-be-loa.patch
+0004-Fix-698540-Check-name-comment-and-meta-size-field-si.patch
+0005-Fix-698558-Handle-non-tags-in-tag-name-comparisons.patch
