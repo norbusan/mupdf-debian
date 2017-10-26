@@ -4,3 +4,4 @@
 0004-Fix-698539-Don-t-use-xps-font-if-it-could-not-be-loa.patch
 0005-Fix-698540-Check-name-comment-and-meta-size-field-si.patch
 0006-Fix-698558-Handle-non-tags-in-tag-name-comparisons.patch
+0007-Check-for-integer-overflow-when-validating-new-style.patch
