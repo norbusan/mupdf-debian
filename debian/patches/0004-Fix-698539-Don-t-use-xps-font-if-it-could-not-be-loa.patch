@@ -1,10 +1,6 @@
 From: Tor Andersson <tor.andersson@artifex.com>
 Date: Tue, 19 Sep 2017 15:23:04 +0200
 Subject: Fix 698539: Don't use xps font if it could not be loaded.
-Origin: http://git.ghostscript.com/?p=mupdf.git;a=commit;h=ab1a420613dec93c686acbee2c165274e922f82a
-Bug-Debian-Security: https://security-tracker.debian.org/tracker/CVE-2017-14685
-Bug-Debian: https://bugs.debian.org/877379
-Bug: https://bugs.ghostscript.com/show_bug.cgi?id=698539
 
 xps_load_links_in_glyphs did not cope with font loading failures.
 ---
@@ -12,10 +8,10 @@ xps_load_links_in_glyphs did not cope with font loading failures.
  1 file changed, 2 insertions(+)
 
 diff --git a/source/xps/xps-link.c b/source/xps/xps-link.c
-index c07e0d76..c26a8d99 100644
+index 1b2423a..0acd32e 100644
 --- a/source/xps/xps-link.c
 +++ b/source/xps/xps-link.c
-@@ -91,6 +91,8 @@ xps_load_links_in_glyphs(fz_context *ctx, xps_document *doc, const fz_matrix *ct
+@@ -88,6 +88,8 @@ xps_load_links_in_glyphs(fz_context *ctx, xps_document *doc, const fz_matrix *ct
  			bidi_level = atoi(bidi_level_att);
  
  		font = xps_lookup_font(ctx, doc, base_uri, font_uri_att, style_att);
@@ -24,6 +20,3 @@ index c07e0d76..c26a8d99 100644
  		text = xps_parse_glyphs_imp(ctx, doc, &local_ctm, font, fz_atof(font_size_att),
  				fz_atof(origin_x_att), fz_atof(origin_y_att),
  				is_sideways, bidi_level, indices_att, unicode_att);
--- 
-2.11.0
-

@@ -1,10 +1,6 @@
 From: Tor Andersson <tor.andersson@artifex.com>
 Date: Tue, 19 Sep 2017 17:17:12 +0200
 Subject: Fix 698558: Handle non-tags in tag name comparisons.
-Origin: http://git.ghostscript.com/?p=mupdf.git;a=commit;h=2b16dbd8f73269cb15ca61ece75cf8d2d196ed28
-Bug-Debian-Security: https://security-tracker.debian.org/tracker/CVE-2017-14687
-Bug-Debian: https://bugs.debian.org/877379
-Bug: https://bugs.ghostscript.com/show_bug.cgi?id=698558
 
 Use fz_xml_is_tag instead of fz_xml_tag && !strcmp idiom.
 ---
@@ -17,10 +13,10 @@ Use fz_xml_is_tag instead of fz_xml_tag && !strcmp idiom.
  6 files changed, 9 insertions(+), 9 deletions(-)
 
 diff --git a/source/html/css-apply.c b/source/html/css-apply.c
-index de554908..6a91df0d 100644
+index f3e28dd..c542689 100644
 --- a/source/html/css-apply.c
 +++ b/source/html/css-apply.c
-@@ -328,7 +328,7 @@ match_selector(fz_css_selector *sel, fz_xml *node)
+@@ -323,7 +323,7 @@ match_selector(fz_css_selector *sel, fz_xml *node)
  
  	if (sel->name)
  	{
@@ -30,10 +26,10 @@ index de554908..6a91df0d 100644
  	}
  
 diff --git a/source/svg/svg-run.c b/source/svg/svg-run.c
-index f974c675..5302c640 100644
+index 1f3c44e..c912ffe 100644
 --- a/source/svg/svg-run.c
 +++ b/source/svg/svg-run.c
-@@ -1044,7 +1044,7 @@ svg_run_use(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *root, co
+@@ -1040,7 +1040,7 @@ svg_run_use(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *root, co
  		fz_xml *linked = fz_tree_lookup(ctx, doc->idmap, xlink_href_att + 1);
  		if (linked)
  		{
@@ -43,10 +39,10 @@ index f974c675..5302c640 100644
  			else
  				svg_run_element(ctx, dev, doc, linked, &local_state);
 diff --git a/source/xps/xps-common.c b/source/xps/xps-common.c
-index cc7fed94..f2f9b93c 100644
+index 1843a41..3e4e672 100644
 --- a/source/xps/xps-common.c
 +++ b/source/xps/xps-common.c
-@@ -47,7 +47,7 @@ xps_parse_brush(fz_context *ctx, xps_document *doc, const fz_matrix *ctm, const
+@@ -44,7 +44,7 @@ xps_parse_brush(fz_context *ctx, xps_document *doc, const fz_matrix *ctm, const
  	else if (fz_xml_is_tag(node, "RadialGradientBrush"))
  		xps_parse_radial_gradient_brush(ctx, doc, ctm, area, base_uri, dict, node);
  	else
@@ -55,7 +51,7 @@ index cc7fed94..f2f9b93c 100644
  }
  
  void
-@@ -85,7 +85,7 @@ xps_begin_opacity(fz_context *ctx, xps_document *doc, const fz_matrix *ctm, cons
+@@ -82,7 +82,7 @@ xps_begin_opacity(fz_context *ctx, xps_document *doc, const fz_matrix *ctm, cons
  	if (opacity_att)
  		opacity = fz_atof(opacity_att);
  
@@ -64,7 +60,7 @@ index cc7fed94..f2f9b93c 100644
  	{
  		char *scb_opacity_att = fz_xml_att(opacity_mask_tag, "Opacity");
  		char *scb_color_att = fz_xml_att(opacity_mask_tag, "Color");
-@@ -129,7 +129,7 @@ xps_end_opacity(fz_context *ctx, xps_document *doc, char *base_uri, xps_resource
+@@ -126,7 +126,7 @@ xps_end_opacity(fz_context *ctx, xps_document *doc, char *base_uri, xps_resource
  
  	if (opacity_mask_tag)
  	{
@@ -74,7 +70,7 @@ index cc7fed94..f2f9b93c 100644
  	}
  }
 diff --git a/source/xps/xps-glyphs.c b/source/xps/xps-glyphs.c
-index 29dc5b39..5b26d780 100644
+index 98a4421..47e19eb 100644
 --- a/source/xps/xps-glyphs.c
 +++ b/source/xps/xps-glyphs.c
 @@ -592,7 +592,7 @@ xps_parse_glyphs(fz_context *ctx, xps_document *doc, const fz_matrix *ctm,
@@ -87,10 +83,10 @@ index 29dc5b39..5b26d780 100644
  		fill_opacity_att = fz_xml_att(fill_tag, "Opacity");
  		fill_att = fz_xml_att(fill_tag, "Color");
 diff --git a/source/xps/xps-path.c b/source/xps/xps-path.c
-index 6faeb0ca..021d2021 100644
+index 750a830..126b5a3 100644
 --- a/source/xps/xps-path.c
 +++ b/source/xps/xps-path.c
-@@ -879,14 +879,14 @@ xps_parse_path(fz_context *ctx, xps_document *doc, const fz_matrix *ctm, char *b
+@@ -875,14 +875,14 @@ xps_parse_path(fz_context *ctx, xps_document *doc, const fz_matrix *ctm, char *b
  	if (!data_att && !data_tag)
  		return;
  
@@ -108,10 +104,10 @@ index 6faeb0ca..021d2021 100644
  		stroke_opacity_att = fz_xml_att(stroke_tag, "Opacity");
  		stroke_att = fz_xml_att(stroke_tag, "Color");
 diff --git a/source/xps/xps-resource.c b/source/xps/xps-resource.c
-index c2292e60..8e81ab83 100644
+index 139d5b5..0be86ac 100644
 --- a/source/xps/xps-resource.c
 +++ b/source/xps/xps-resource.c
-@@ -84,7 +84,7 @@ xps_parse_remote_resource_dictionary(fz_context *ctx, xps_document *doc, char *b
+@@ -82,7 +82,7 @@ xps_parse_remote_resource_dictionary(fz_context *ctx, xps_document *doc, char *b
  	if (!xml)
  		return NULL;
  
@@ -120,6 +116,3 @@ index c2292e60..8e81ab83 100644
  	{
  		fz_drop_xml(ctx, xml);
  		fz_throw(ctx, FZ_ERROR_GENERIC, "expected ResourceDictionary element");
--- 
-2.11.0
-
