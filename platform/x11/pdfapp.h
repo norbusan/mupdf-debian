@@ -4,6 +4,8 @@
 #include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
 
+#include <time.h>
+
 /*
  * Utility object for handling a pdf application / view
  * Takes care of PDF loading and displaying and navigation,
@@ -32,6 +34,7 @@ extern int winchoiceinput(pdfapp_t*, int nopts, char *opts[], int *nvals, char *
 extern void winopenuri(pdfapp_t*, char *s);
 extern void wincursor(pdfapp_t*, int curs);
 extern void windocopy(pdfapp_t*);
+extern void windrawrect(pdfapp_t*, int x0, int y0, int x1, int y1);
 extern void windrawstring(pdfapp_t*, int x, int y, char *s);
 extern void winclose(pdfapp_t*);
 extern void winhelp(pdfapp_t*);
@@ -88,7 +91,6 @@ struct pdfapp_s
 	fz_display_list *page_list;
 	fz_display_list *annotations_list;
 	fz_stext_page *page_text;
-	fz_stext_sheet *page_sheet;
 	fz_link *page_links;
 	int errored;
 	int incomplete;

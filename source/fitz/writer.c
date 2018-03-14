@@ -1,5 +1,7 @@
 #include "mupdf/fitz.h"
 
+#include <string.h>
+
 /* Return non-null terminated pointers to key/value entries in comma separated
  * option string. A plain key has the default value 'yes'. Use strncmp to compare
  * key/value strings. */
@@ -63,42 +65,42 @@ fz_document_writer *fz_new_document_writer_of_size(fz_context *ctx, size_t size,
 
 fz_document_writer *fz_new_png_pixmap_writer(fz_context *ctx, const char *path, const char *options)
 {
-	return fz_new_pixmap_writer(ctx, path, options, "out-%04.png", 0, fz_save_pixmap_as_png);
+	return fz_new_pixmap_writer(ctx, path, options, "out-%04d.png", 0, fz_save_pixmap_as_png);
 }
 
 fz_document_writer *fz_new_tga_pixmap_writer(fz_context *ctx, const char *path, const char *options)
 {
-	return fz_new_pixmap_writer(ctx, path, options, "out-%04.tga", 0, fz_save_pixmap_as_tga);
+	return fz_new_pixmap_writer(ctx, path, options, "out-%04d.tga", 0, fz_save_pixmap_as_tga);
 }
 
 fz_document_writer *fz_new_pam_pixmap_writer(fz_context *ctx, const char *path, const char *options)
 {
-	return fz_new_pixmap_writer(ctx, path, options, "out-%04.pam", 0, fz_save_pixmap_as_pam);
+	return fz_new_pixmap_writer(ctx, path, options, "out-%04d.pam", 0, fz_save_pixmap_as_pam);
 }
 
 fz_document_writer *fz_new_pnm_pixmap_writer(fz_context *ctx, const char *path, const char *options)
 {
-	return fz_new_pixmap_writer(ctx, path, options, "out-%04.pnm", 0, fz_save_pixmap_as_pnm);
+	return fz_new_pixmap_writer(ctx, path, options, "out-%04d.pnm", 0, fz_save_pixmap_as_pnm);
 }
 
 fz_document_writer *fz_new_pgm_pixmap_writer(fz_context *ctx, const char *path, const char *options)
 {
-	return fz_new_pixmap_writer(ctx, path, options, "out-%04.pgm", 1, fz_save_pixmap_as_pnm);
+	return fz_new_pixmap_writer(ctx, path, options, "out-%04d.pgm", 1, fz_save_pixmap_as_pnm);
 }
 
 fz_document_writer *fz_new_ppm_pixmap_writer(fz_context *ctx, const char *path, const char *options)
 {
-	return fz_new_pixmap_writer(ctx, path, options, "out-%04.ppm", 3, fz_save_pixmap_as_pnm);
+	return fz_new_pixmap_writer(ctx, path, options, "out-%04d.ppm", 3, fz_save_pixmap_as_pnm);
 }
 
 fz_document_writer *fz_new_pbm_pixmap_writer(fz_context *ctx, const char *path, const char *options)
 {
-	return fz_new_pixmap_writer(ctx, path, options, "out-%04.pbm", 1, fz_save_pixmap_as_pbm);
+	return fz_new_pixmap_writer(ctx, path, options, "out-%04d.pbm", 1, fz_save_pixmap_as_pbm);
 }
 
 fz_document_writer *fz_new_pkm_pixmap_writer(fz_context *ctx, const char *path, const char *options)
 {
-	return fz_new_pixmap_writer(ctx, path, options, "out-%04.pkm", 4, fz_save_pixmap_as_pkm);
+	return fz_new_pixmap_writer(ctx, path, options, "out-%04d.pkm", 4, fz_save_pixmap_as_pkm);
 }
 
 fz_document_writer *
@@ -138,6 +140,24 @@ fz_new_document_writer(fz_context *ctx, const char *path, const char *format, co
 	if (!fz_strcasecmp(format, "pkm"))
 		return fz_new_pkm_pixmap_writer(ctx, path, options);
 
+	if (!fz_strcasecmp(format, "pcl"))
+		return fz_new_pcl_writer(ctx, path, options);
+	if (!fz_strcasecmp(format, "pclm"))
+		return fz_new_pclm_writer(ctx, path, options);
+	if (!fz_strcasecmp(format, "ps"))
+		return fz_new_ps_writer(ctx, path, options);
+	if (!fz_strcasecmp(format, "pwg"))
+		return fz_new_pwg_writer(ctx, path, options);
+
+	if (!fz_strcasecmp(format, "txt") || !fz_strcasecmp(format, "text"))
+		return fz_new_text_writer(ctx, "text", path, options);
+	if (!fz_strcasecmp(format, "html"))
+		return fz_new_text_writer(ctx, format, path, options);
+	if (!fz_strcasecmp(format, "xhtml"))
+		return fz_new_text_writer(ctx, format, path, options);
+	if (!fz_strcasecmp(format, "stext"))
+		return fz_new_text_writer(ctx, format, path, options);
+
 	fz_throw(ctx, FZ_ERROR_GENERIC, "unknown output document format: %s", format);
 }
 
@@ -159,6 +179,8 @@ fz_drop_document_writer(fz_context *ctx, fz_document_writer *wri)
 		fz_warn(ctx, "dropping unclosed document writer");
 	if (wri->drop_writer)
 		wri->drop_writer(ctx, wri);
+	if (wri->dev)
+		fz_drop_device(ctx, wri->dev);
 	fz_free(ctx, wri);
 }
 

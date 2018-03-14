@@ -1,3 +1,4 @@
+#include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
 
 size_t
@@ -28,9 +29,6 @@ pdf_load_embedded_cmap(fz_context *ctx, pdf_document *doc, pdf_obj *stmobj)
 	fz_var(file);
 	fz_var(cmap);
 	fz_var(usecmap);
-
-	if (pdf_obj_marked(ctx, stmobj))
-		fz_throw(ctx, FZ_ERROR_GENERIC, "Recursion in embedded cmap");
 
 	if ((cmap = pdf_find_item(ctx, pdf_drop_cmap_imp, stmobj)) != NULL)
 		return cmap;
@@ -89,7 +87,10 @@ pdf_new_identity_cmap(fz_context *ctx, int wmode, int bytes)
 	fz_try(ctx)
 	{
 		unsigned int high = (1 << (bytes * 8)) - 1;
-		sprintf(cmap->cmap_name, "Identity-%c", wmode ? 'V' : 'H');
+		if (wmode)
+			fz_strlcpy(cmap->cmap_name, "Identity-V", sizeof cmap->cmap_name);
+		else
+			fz_strlcpy(cmap->cmap_name, "Identity-H", sizeof cmap->cmap_name);
 		pdf_add_codespace(ctx, cmap, 0, high, bytes);
 		pdf_map_range_to_range(ctx, cmap, 0, high, 0);
 		pdf_sort_cmap(ctx, cmap);

@@ -1,5 +1,9 @@
 #include "fitz-imp.h"
 
+#include <assert.h>
+#include <string.h>
+#include <stdio.h>
+
 struct fz_id_context_s
 {
 	int refs;
@@ -80,7 +84,7 @@ int fz_use_document_css(fz_context *ctx)
 void fz_set_user_css(fz_context *ctx, const char *user_css)
 {
 	fz_free(ctx, ctx->style->user_css);
-	ctx->style->user_css = fz_strdup(ctx, user_css);
+	ctx->style->user_css = user_css ? fz_strdup(ctx, user_css) : NULL;
 }
 
 const char *fz_user_css(fz_context *ctx)
@@ -94,8 +98,8 @@ static void fz_new_tuning_context(fz_context *ctx)
 	{
 		ctx->tuning = fz_malloc_struct(ctx, fz_tuning_context);
 		ctx->tuning->refs = 1;
-		ctx->tuning->image_decode = &fz_default_image_decode;
-		ctx->tuning->image_scale = &fz_default_image_scale;
+		ctx->tuning->image_decode = fz_default_image_decode;
+		ctx->tuning->image_scale = fz_default_image_scale;
 	}
 }
 
@@ -142,6 +146,7 @@ fz_drop_context(fz_context *ctx)
 	fz_drop_style_context(ctx);
 	fz_drop_tuning_context(ctx);
 	fz_drop_colorspace_context(ctx);
+	fz_drop_cmm_context(ctx);
 	fz_drop_font_context(ctx);
 	fz_drop_id_context(ctx);
 	fz_drop_output_context(ctx);
@@ -176,7 +181,7 @@ new_context_phase1(const fz_alloc_context *alloc, const fz_locks_context *locks)
 	memset(ctx, 0, sizeof *ctx);
 	ctx->user = NULL;
 	ctx->alloc = alloc;
-	ctx->locks = locks;
+	ctx->locks = *locks;
 
 	ctx->glyph_cache = NULL;
 
@@ -238,6 +243,7 @@ fz_new_context_imp(const fz_alloc_context *alloc, const fz_locks_context *locks,
 		fz_new_output_context(ctx);
 		fz_new_store_context(ctx, max_store);
 		fz_new_glyph_cache_context(ctx);
+		fz_new_cmm_context(ctx);
 		fz_new_colorspace_context(ctx);
 		fz_new_font_context(ctx);
 		fz_new_id_context(ctx);
@@ -259,7 +265,7 @@ fz_clone_context(fz_context *ctx)
 {
 	/* We cannot safely clone the context without having locking/
 	 * unlocking functions. */
-	if (ctx == NULL || ctx->locks == &fz_locks_default)
+	if (ctx == NULL || (ctx->locks.lock == fz_locks_default.lock && ctx->locks.unlock == fz_locks_default.unlock))
 		return NULL;
 	return fz_clone_context_internal(ctx);
 }
@@ -272,7 +278,7 @@ fz_clone_context_internal(fz_context *ctx)
 	if (ctx == NULL || ctx->alloc == NULL)
 		return NULL;
 
-	new_ctx = new_context_phase1(ctx->alloc, ctx->locks);
+	new_ctx = new_context_phase1(ctx->alloc, &ctx->locks);
 	if (!new_ctx)
 		return NULL;
 
@@ -289,6 +295,7 @@ fz_clone_context_internal(fz_context *ctx)
 	new_ctx->glyph_cache = fz_keep_glyph_cache(new_ctx);
 	new_ctx->colorspace = ctx->colorspace;
 	new_ctx->colorspace = fz_keep_colorspace_context(new_ctx);
+	fz_new_cmm_context(new_ctx);
 	new_ctx->font = ctx->font;
 	new_ctx->font = fz_keep_font_context(new_ctx);
 	new_ctx->style = ctx->style;

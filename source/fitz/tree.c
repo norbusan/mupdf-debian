@@ -1,5 +1,7 @@
 #include "mupdf/fitz.h"
 
+#include <string.h>
+
 /* AA-tree */
 
 struct fz_tree_s
@@ -102,24 +104,4 @@ void fz_drop_tree(fz_context *ctx, fz_tree *node, void (*dropfunc)(fz_context *c
 			dropfunc(ctx, node->value);
 		fz_free(ctx, node);
 	}
-}
-
-static void print_tree_imp(fz_context *ctx, fz_tree *node, int level)
-{
-	int i;
-	if (node->left != &tree_sentinel)
-		print_tree_imp(ctx, node->left, level + 1);
-	for (i = 0; i < level; i++)
-		putchar(' ');
-	printf("%s = %p (%d)\n", node->key, node->value, node->level);
-	if (node->right != &tree_sentinel)
-		print_tree_imp(ctx, node->right, level + 1);
-}
-
-void fz_debug_tree(fz_context *ctx, fz_tree *root)
-{
-	printf("--- tree dump ---\n");
-	if (root && root != &tree_sentinel)
-		print_tree_imp(ctx, root, 0);
-	printf("---\n");
 }

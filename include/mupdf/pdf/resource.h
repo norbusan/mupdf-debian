@@ -27,9 +27,16 @@ void pdf_drop_resource_tables(fz_context *ctx, pdf_document *doc);
  * Functions, Colorspaces, Shadings and Images
  */
 
-fz_function *pdf_load_function(fz_context *ctx, pdf_document *doc, pdf_obj *ref, int in, int out);
+typedef struct pdf_function_s pdf_function;
 
-fz_colorspace *pdf_load_colorspace(fz_context *ctx, pdf_document *doc, pdf_obj *obj);
+void pdf_eval_function(fz_context *ctx, pdf_function *func, const float *in, int inlen, float *out, int outlen);
+pdf_function *pdf_keep_function(fz_context *ctx, pdf_function *func);
+void pdf_drop_function(fz_context *ctx, pdf_function *func);
+size_t pdf_function_size(fz_context *ctx, pdf_function *func);
+pdf_function *pdf_load_function(fz_context *ctx, pdf_obj *ref, int in, int out);
+
+fz_colorspace *pdf_document_output_intent(fz_context *ctx, pdf_document *doc);
+fz_colorspace *pdf_load_colorspace(fz_context *ctx, pdf_obj *obj);
 int pdf_is_tint_colorspace(fz_context *ctx, fz_colorspace *cs);
 
 fz_shade *pdf_load_shading(fz_context *ctx, pdf_document *doc, pdf_obj *obj);
@@ -58,6 +65,7 @@ struct pdf_pattern_s
 	pdf_document *document;
 	pdf_obj *resources;
 	pdf_obj *contents;
+	int id; /* unique ID for caching rendered tiles */
 };
 
 pdf_pattern *pdf_load_pattern(fz_context *ctx, pdf_document *doc, pdf_obj *obj);

@@ -1,5 +1,8 @@
 #include "mupdf/fitz.h"
 
+#include <assert.h>
+#include <string.h>
+
 typedef struct {
 	fz_band_writer super;
 	fz_pwg_options pwg;
@@ -99,7 +102,7 @@ fz_write_pixmap_as_pwg_page(fz_context *ctx, fz_output *out, const fz_pixmap *pi
 
 	fz_try(ctx)
 	{
-		fz_write_header(ctx, writer, pixmap->w, pixmap->h, pixmap->n, pixmap->alpha, pixmap->xres, pixmap->yres, 0);
+		fz_write_header(ctx, writer, pixmap->w, pixmap->h, pixmap->n, pixmap->alpha, pixmap->xres, pixmap->yres, 0, pixmap->colorspace, pixmap->seps);
 		fz_write_band(ctx, writer, pixmap->stride, pixmap->h, pixmap->samples);
 	}
 	fz_always(ctx)
@@ -115,7 +118,7 @@ fz_write_bitmap_as_pwg_page(fz_context *ctx, fz_output *out, const fz_bitmap *bi
 
 	fz_try(ctx)
 	{
-		fz_write_header(ctx, writer, bitmap->w, bitmap->h, bitmap->n, 0, bitmap->xres, bitmap->yres, 0);
+		fz_write_header(ctx, writer, bitmap->w, bitmap->h, bitmap->n, 0, bitmap->xres, bitmap->yres, 0, NULL, NULL);
 		fz_write_band(ctx, writer, bitmap->stride, bitmap->h, bitmap->samples);
 	}
 	fz_always(ctx)
@@ -147,6 +150,7 @@ fz_save_pixmap_as_pwg(fz_context *ctx, fz_pixmap *pixmap, char *filename, int ap
 		if (!append)
 			fz_write_pwg_file_header(ctx, out);
 		fz_write_pixmap_as_pwg_page(ctx, out, pixmap, pwg);
+		fz_close_output(ctx, out);
 	}
 	fz_always(ctx)
 		fz_drop_output(ctx, out);
@@ -163,6 +167,7 @@ fz_save_bitmap_as_pwg(fz_context *ctx, fz_bitmap *bitmap, char *filename, int ap
 		if (!append)
 			fz_write_pwg_file_header(ctx, out);
 		fz_write_bitmap_as_pwg_page(ctx, out, bitmap, pwg);
+		fz_close_output(ctx, out);
 	}
 	fz_always(ctx)
 		fz_drop_output(ctx, out);
@@ -171,7 +176,7 @@ fz_save_bitmap_as_pwg(fz_context *ctx, fz_bitmap *bitmap, char *filename, int ap
 }
 
 static void
-pwg_write_mono_header(fz_context *ctx, fz_band_writer *writer_)
+pwg_write_mono_header(fz_context *ctx, fz_band_writer *writer_, const fz_colorspace *cs)
 {
 	pwg_band_writer *writer = (pwg_band_writer *)writer_;
 
@@ -269,11 +274,13 @@ fz_band_writer *fz_new_mono_pwg_band_writer(fz_context *ctx, fz_output *out, con
 }
 
 static void
-pwg_write_header(fz_context *ctx, fz_band_writer *writer_)
+pwg_write_header(fz_context *ctx, fz_band_writer *writer_, const fz_colorspace *cs)
 {
 	pwg_band_writer *writer = (pwg_band_writer *)writer_;
 	int n = writer->super.n;
 
+	if (writer->super.s != 0)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "PWG band writer cannot cope with spot colors");
 	if (writer->super.alpha != 0)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "PWG band writer cannot cope with alpha");
 	if (n != 1 && n != 3 && n != 4)
@@ -373,4 +380,110 @@ fz_band_writer *fz_new_pwg_band_writer(fz_context *ctx, fz_output *out, const fz
 		memset(&writer->pwg, 0, sizeof(writer->pwg));
 
 	return &writer->super;
+}
+
+/* High-level document writer interface */
+
+const char *fz_pwg_write_options_usage =
+	"PWG output options:\n"
+	"\tcolorspace=mono: render 1-bit black and white bitmap\n"
+	"\n";
+
+fz_pwg_options *
+fz_parse_pwg_options(fz_context *ctx, fz_pwg_options *opts, const char *args)
+{
+	memset(opts, 0, sizeof *opts);
+
+	return opts;
+}
+
+typedef struct fz_pwg_writer_s fz_pwg_writer;
+
+struct fz_pwg_writer_s
+{
+	fz_document_writer super;
+	fz_draw_options draw;
+	fz_pwg_options pwg;
+	int mono;
+	fz_pixmap *pixmap;
+	fz_output *out;
+};
+
+static fz_device *
+pwg_begin_page(fz_context *ctx, fz_document_writer *wri_, const fz_rect *mediabox)
+{
+	fz_pwg_writer *wri = (fz_pwg_writer*)wri_;
+	return fz_new_draw_device_with_options(ctx, &wri->draw, mediabox, &wri->pixmap);
+}
+
+static void
+pwg_end_page(fz_context *ctx, fz_document_writer *wri_, fz_device *dev)
+{
+	fz_pwg_writer *wri = (fz_pwg_writer*)wri_;
+
+	fz_try(ctx)
+		fz_close_device(ctx, dev);
+	fz_always(ctx)
+		fz_drop_device(ctx, dev);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+
+	if (wri->mono)
+	{
+		fz_bitmap *bitmap = fz_new_bitmap_from_pixmap(ctx, wri->pixmap, NULL);
+		fz_try(ctx)
+			fz_write_bitmap_as_pwg_page(ctx, wri->out, bitmap, &wri->pwg);
+		fz_always(ctx)
+			fz_drop_bitmap(ctx, bitmap);
+		fz_catch(ctx)
+			fz_rethrow(ctx);
+	}
+	else
+	{
+		fz_write_pixmap_as_pwg_page(ctx, wri->out, wri->pixmap, &wri->pwg);
+	}
+
+	fz_drop_pixmap(ctx, wri->pixmap);
+	wri->pixmap = NULL;
+}
+
+static void
+pwg_close_writer(fz_context *ctx, fz_document_writer *wri_)
+{
+	fz_pwg_writer *wri = (fz_pwg_writer*)wri_;
+	fz_close_output(ctx, wri->out);
+}
+
+static void
+pwg_drop_writer(fz_context *ctx, fz_document_writer *wri_)
+{
+	fz_pwg_writer *wri = (fz_pwg_writer*)wri_;
+	fz_drop_pixmap(ctx, wri->pixmap);
+	fz_drop_output(ctx, wri->out);
+}
+
+fz_document_writer *
+fz_new_pwg_writer(fz_context *ctx, const char *path, const char *options)
+{
+	fz_pwg_writer *wri = fz_new_derived_document_writer(ctx, fz_pwg_writer, pwg_begin_page, pwg_end_page, pwg_close_writer, pwg_drop_writer);
+	const char *val;
+
+	fz_try(ctx)
+	{
+		fz_parse_draw_options(ctx, &wri->draw, options);
+		fz_parse_pwg_options(ctx, &wri->pwg, options);
+		if (fz_has_option(ctx, options, "colorspace", &val))
+			if (fz_option_eq(val, "mono"))
+				wri->mono = 1;
+		wri->out = fz_new_output_with_path(ctx, path ? path : "out.pwg", 0);
+		fz_write_pwg_file_header(ctx, wri->out);
+	}
+	fz_catch(ctx)
+	{
+		fz_drop_output(ctx, wri->out);
+		fz_free(ctx, wri);
+		fz_rethrow(ctx);
+	}
+
+	return (fz_document_writer*)wri;
 }

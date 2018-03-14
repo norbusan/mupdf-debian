@@ -3,6 +3,9 @@
 
 #include "mupdf/fitz/system.h"
 
+/* The Unicode character used to incoming character whose value is unknown or unrepresentable. */
+#define FZ_REPLACEMENT_CHARACTER 0xFFFD
+
 /*
 	Safe string functions
 */
@@ -80,6 +83,11 @@ void fz_format_output_path(fz_context *ctx, char *path, size_t size, const char 
 char *fz_cleanname(char *name);
 
 /*
+	Case insensitive (ASCII only) string comparison.
+*/
+int fz_strcasecmp(const char *a, const char *b);
+
+/*
 	FZ_UTFMAX: Maximum number of bytes in a decoded rune (maximum length returned by fz_chartorune).
 */
 enum { FZ_UTFMAX = 4 };
@@ -91,7 +99,7 @@ enum { FZ_UTFMAX = 4 };
 
 	str: Pointer to a UTF8 encoded string.
 
-	Returns the number of bytes consumed. Does not throw exceptions.
+	Returns the number of bytes consumed.
 */
 int fz_chartorune(int *rune, const char *str);
 
@@ -102,8 +110,7 @@ int fz_chartorune(int *rune, const char *str);
 
 	rune: Pointer to a 'rune'.
 
-	Returns the number of bytes the rune took to output. Does not throw
-	exceptions.
+	Returns the number of bytes the rune took to output.
 */
 int fz_runetochar(char *str, int rune);
 
@@ -127,12 +134,11 @@ int fz_runelen(int rune);
 int fz_utflen(const char *s);
 
 /*
-	fz_strtod/fz_strtof: Locale-independent decimal to binary
+	fz_strtof: Locale-independent decimal to binary
 	conversion. On overflow return (-)INFINITY and set errno to ERANGE. On
 	underflow return 0 and set errno to ERANGE. Special inputs (case
 	insensitive): "NAN", "INF" or "INFINITY".
 */
-double fz_strtod(const char *s, char **es);
 float fz_strtof(const char *s, char **es);
 
 /*

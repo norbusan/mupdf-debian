@@ -66,7 +66,13 @@ fz_buffer *fz_new_buffer_from_data(fz_context *ctx, unsigned char *data, size_t 
 /*
 	fz_new_buffer_from_shared_data: Like fz_new_buffer, but does not take ownership.
 */
-fz_buffer *fz_new_buffer_from_shared_data(fz_context *ctx, const char *data, size_t size);
+fz_buffer *fz_new_buffer_from_shared_data(fz_context *ctx, const unsigned char *data, size_t size);
+
+/*
+	fz_new_buffer_from_copied_data: Create a new buffer containing a copy of the passed data.
+*/
+fz_buffer *
+fz_new_buffer_from_copied_data(fz_context *ctx, const unsigned char *data, size_t size);
 
 /*
 	fz_new_buffer_from_base64: Create a new buffer with data decoded from a base64 input string.
@@ -110,6 +116,8 @@ void fz_append_byte(fz_context *ctx, fz_buffer *buf, int c);
 void fz_append_rune(fz_context *ctx, fz_buffer *buf, int c);
 void fz_append_int32_le(fz_context *ctx, fz_buffer *buf, int x);
 void fz_append_int16_le(fz_context *ctx, fz_buffer *buf, int x);
+void fz_append_int32_be(fz_context *ctx, fz_buffer *buf, int x);
+void fz_append_int16_be(fz_context *ctx, fz_buffer *buf, int x);
 void fz_append_bits(fz_context *ctx, fz_buffer *buf, int value, int count);
 void fz_append_bits_pad(fz_context *ctx, fz_buffer *buf);
 void fz_append_printf(fz_context *ctx, fz_buffer *buffer, const char *fmt, ...);

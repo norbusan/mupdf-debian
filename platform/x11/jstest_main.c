@@ -1,6 +1,9 @@
 #include "pdfapp.h"
 
+#include <string.h>
 #include <ctype.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 /*
 	A useful bit of bash script to call this is:
@@ -346,7 +349,7 @@ main(int argc, char *argv[])
 				}
 				else if (match(&line, "OPEN"))
 				{
-					char path[1024];
+					char path[LONGLINE];
 					if (file_open)
 						pdfapp_close(&gapp);
 					if (prefix)
@@ -368,7 +371,7 @@ main(int argc, char *argv[])
 				{
 					char text[1024];
 
-					sprintf(text, output, ++shotcount);
+					fz_snprintf(text, sizeof(text), output, ++shotcount);
 					if (strstr(text, ".pgm") || strstr(text, ".ppm") || strstr(text, ".pnm"))
 						fz_save_pixmap_as_pnm(ctx, gapp.image, text);
 					else
@@ -402,7 +405,7 @@ main(int argc, char *argv[])
 				}
 				else
 				{
-					fprintf(stderr, "Unmatched: %s\n", line);
+					fprintf(stderr, "Ignoring line without script statement.\n");
 				}
 			}
 			while (!feof(script));

@@ -1,6 +1,9 @@
 #include "mupdf/fitz.h"
 #include "xps-imp.h"
 
+#include <string.h>
+#include <stdlib.h>
+
 /* Quick parsing of document to find links. */
 
 static void
@@ -88,6 +91,8 @@ xps_load_links_in_glyphs(fz_context *ctx, xps_document *doc, const fz_matrix *ct
 			bidi_level = atoi(bidi_level_att);
 
 		font = xps_lookup_font(ctx, doc, base_uri, font_uri_att, style_att);
+		if (!font)
+			return;
 		text = xps_parse_glyphs_imp(ctx, doc, &local_ctm, font, fz_atof(font_size_att),
 				fz_atof(origin_x_att), fz_atof(origin_y_att),
 				is_sideways, bidi_level, indices_att, unicode_att);
@@ -181,8 +186,9 @@ xps_load_links_in_fixed_page(fz_context *ctx, xps_document *doc, const fz_matrix
 }
 
 fz_link *
-xps_load_links(fz_context *ctx, xps_page *page)
+xps_load_links(fz_context *ctx, fz_page *page_)
 {
+	xps_page *page = (xps_page*)page_;
 	fz_matrix ctm;
 	fz_link *link = NULL;
 	fz_scale(&ctm, 72.0f / 96.0f, 72.0f / 96.0f);

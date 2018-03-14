@@ -1,5 +1,7 @@
 #include "mupdf/fitz.h"
 
+#include <string.h>
+
 /*
  * Write pixmap to TGA file (with or without alpha channel)
  */
@@ -11,19 +13,22 @@ typedef struct {
 
 static inline void tga_put_pixel(fz_context *ctx, fz_output *out, const unsigned char *data, int n, int is_bgr)
 {
+	int a, inva;
 	switch(n)
 	{
 	case 4: /* RGBA or BGRA */
+		a = data[3];
+		inva = a ? 256 * 255 / a : 0;
 		if (!is_bgr) {
-			fz_write_byte(ctx, out, data[2]);
-			fz_write_byte(ctx, out, data[1]);
-			fz_write_byte(ctx, out, data[0]);
+			fz_write_byte(ctx, out, (data[2] * inva + 128)>>8);
+			fz_write_byte(ctx, out, (data[1] * inva + 128)>>8);
+			fz_write_byte(ctx, out, (data[0] * inva + 128)>>8);
 		} else {
-			fz_write_byte(ctx, out, data[0]);
-			fz_write_byte(ctx, out, data[1]);
-			fz_write_byte(ctx, out, data[2]);
+			fz_write_byte(ctx, out, (data[0] * inva + 128)>>8);
+			fz_write_byte(ctx, out, (data[1] * inva + 128)>>8);
+			fz_write_byte(ctx, out, (data[2] * inva + 128)>>8);
 		}
-		fz_write_byte(ctx, out, data[3]);
+		fz_write_byte(ctx, out, a);
 		break;
 	case 3: /* RGB or BGR */
 		if (!is_bgr) {
@@ -37,10 +42,13 @@ static inline void tga_put_pixel(fz_context *ctx, fz_output *out, const unsigned
 		}
 		break;
 	case 2: /* GA */
-		fz_write_byte(ctx, out, data[0]);
-		fz_write_byte(ctx, out, data[0]);
-		fz_write_byte(ctx, out, data[0]);
-		fz_write_byte(ctx, out, data[1]);
+		a = data[1];
+		inva = a ? 256 * 255 / a : 0;
+		inva = (data[0] * inva + 128)>>8;
+		fz_write_byte(ctx, out, inva);
+		fz_write_byte(ctx, out, inva);
+		fz_write_byte(ctx, out, inva);
+		fz_write_byte(ctx, out, a);
 		break;
 	case 1: /* G */
 		fz_write_byte(ctx, out, data[0]);
@@ -53,7 +61,10 @@ fz_save_pixmap_as_tga(fz_context *ctx, fz_pixmap *pixmap, const char *filename)
 {
 	fz_output *out = fz_new_output_with_path(ctx, filename, 0);
 	fz_try(ctx)
+	{
 		fz_write_pixmap_as_tga(ctx, out, pixmap);
+		fz_close_output(ctx, out);
+	}
 	fz_always(ctx)
 		fz_drop_output(ctx, out);
 	fz_catch(ctx)
@@ -67,7 +78,7 @@ fz_write_pixmap_as_tga(fz_context *ctx, fz_output *out, fz_pixmap *pixmap)
 
 	fz_try(ctx)
 	{
-		fz_write_header(ctx, writer, pixmap->w, pixmap->h, pixmap->n, pixmap->alpha, pixmap->xres, pixmap->yres, 0);
+		fz_write_header(ctx, writer, pixmap->w, pixmap->h, pixmap->n, pixmap->alpha, pixmap->xres, pixmap->yres, 0, pixmap->colorspace, pixmap->seps);
 		fz_write_band(ctx, writer, -pixmap->stride, pixmap->h, pixmap->samples + pixmap->stride * (pixmap->h-1));
 	}
 	fz_always(ctx)
@@ -77,7 +88,7 @@ fz_write_pixmap_as_tga(fz_context *ctx, fz_output *out, fz_pixmap *pixmap)
 }
 
 static void
-tga_write_header(fz_context *ctx, fz_band_writer *writer_)
+tga_write_header(fz_context *ctx, fz_band_writer *writer_, const fz_colorspace *cs)
 {
 	tga_band_writer *writer = (tga_band_writer *)writer_;
 	fz_output *out = writer->super.out;
@@ -88,6 +99,8 @@ tga_write_header(fz_context *ctx, fz_band_writer *writer_)
 	unsigned char head[18];
 	int d = (alpha && n > 1) ? 4 : (n == 1 ? 1 : 3);
 
+	if (writer->super.s != 0)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "TGA writer cannot cope with spot colors");
 	if (n-alpha > 1 && n != 3+alpha)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "pixmap must be grayscale/rgb/rgba (with or without alpha) to write as tga");
 	memset(head, 0, sizeof(head));
@@ -106,13 +119,12 @@ tga_write_band(fz_context *ctx, fz_band_writer *writer_, int stride, int band_st
 	tga_band_writer *writer = (tga_band_writer *)writer_;
 	fz_output *out = writer->super.out;
 	int w = writer->super.w;
-	int h = writer->super.h;
 	int n = writer->super.n;
 	int d = (writer->super.alpha && n > 1) ? 4 : (n == 1 ? 1 : 3);
 	int is_bgr = writer->is_bgr;
 	int k;
 
-	for (k = 0; k < h; k++)
+	for (k = 0; k < band_height; k++)
 	{
 		int i, j;
 		const unsigned char *line = samples + stride * k;

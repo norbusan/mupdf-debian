@@ -1,6 +1,8 @@
 #ifndef MUPDF_PDF_PAGE_H
 #define MUPDF_PDF_PAGE_H
 
+#include "mupdf/pdf/interpret.h"
+
 int pdf_lookup_page_number(fz_context *ctx, pdf_document *doc, pdf_obj *pageobj);
 int pdf_count_pages(fz_context *ctx, pdf_document *doc);
 pdf_obj *pdf_lookup_page_obj(fz_context *ctx, pdf_document *doc, int needle);
@@ -39,6 +41,12 @@ void pdf_page_obj_transform(fz_context *ctx, pdf_obj *pageobj, fz_rect *page_med
 void pdf_page_transform(fz_context *ctx, pdf_page *page, fz_rect *mediabox, fz_matrix *ctm);
 pdf_obj *pdf_page_resources(fz_context *ctx, pdf_page *page);
 pdf_obj *pdf_page_contents(fz_context *ctx, pdf_page *page);
+pdf_obj *pdf_page_group(fz_context *ctx, pdf_page *page);
+
+/*
+	pdf_page_separations: Get the separation details for a page.
+*/
+fz_separations *pdf_page_separations(fz_context *ctx, pdf_page *page);
 
 fz_link *pdf_load_links(fz_context *ctx, pdf_page *page);
 
@@ -49,8 +57,6 @@ fz_link *pdf_load_links(fz_context *ctx, pdf_page *page);
 	into account. The page size is taken to be the crop box if it
 	exists (visible area after cropping), otherwise the media box will
 	be used (possibly including printing marks).
-
-	Does not throw exceptions.
 */
 fz_rect *pdf_bound_page(fz_context *ctx, pdf_page *page, fz_rect *);
 
@@ -165,9 +171,51 @@ void pdf_clean_annot_contents(fz_context *ctx, pdf_document *doc, pdf_annot *ann
 	pdf_page_contents_process_fn *proc, void *proc_arg, int ascii);
 
 /*
+	pdf_filter_page_contents: Performs the same task as
+	pdf_clean_page_contents, but with an optional text filter
+	function.
+
+	text_filter: Function to assess whether a given character
+	should be kept (return 0) or removed (return 1).
+
+	after_text: Function called after each text object is closed
+	to allow other output to be sent.
+
+	arg: Opaque value to be passed to callback functions.
+*/
+void pdf_filter_page_contents(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_cookie *cookie,
+	pdf_page_contents_process_fn *proc_fn, pdf_text_filter_fn *text_filter, pdf_after_text_object_fn *after_text, void *arg, int ascii);
+
+/*
+	pdf_filter_annot_contents: Performs the same task as
+	pdf_clean_annot_contents, but with an optional text filter
+	function.
+
+	text_filter: Function to assess whether a given character
+	should be kept (return 0) or removed (return 1).
+
+	after_text: Function called after each text object is closed
+	to allow other output to be sent.
+
+	arg: Opaque value to be passed to callback functions.
+*/
+void pdf_filter_annot_contents(fz_context *ctx, pdf_document *doc, pdf_annot *annot, fz_cookie *cookie,
+	pdf_page_contents_process_fn *proc, pdf_text_filter_fn *text_filter, pdf_after_text_object_fn *after_text, void *arg, int ascii);
+
+/*
 	Presentation interface.
 */
 fz_transition *pdf_page_presentation(fz_context *ctx, pdf_page *page, fz_transition *transition, float *duration);
+
+/*
+	Load default colorspaces for a page.
+*/
+fz_default_colorspaces *pdf_load_default_colorspaces(fz_context *ctx, pdf_document *doc, pdf_page *page);
+
+/*
+	Update default colorspaces for an xobject.
+*/
+fz_default_colorspaces *pdf_update_default_colorspaces(fz_context *ctx, fz_default_colorspaces *old_cs, pdf_obj *res);
 
 /*
  * Page tree, pages and related objects
@@ -180,6 +228,7 @@ struct pdf_page_s
 	pdf_obj *obj;
 
 	int transparency;
+	int overprint;
 	int incomplete;
 
 	fz_link *links;

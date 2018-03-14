@@ -1,4 +1,7 @@
+#include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
+
+#include <string.h>
 
 fz_rect *
 pdf_to_rect(fz_context *ctx, pdf_obj *array, fz_rect *r)
@@ -37,7 +40,7 @@ pdf_to_matrix(fz_context *ctx, pdf_obj *array, fz_matrix *m)
 }
 
 static int
-rune_from_utf16be(int *out, unsigned char *s, unsigned char *end)
+rune_from_utf16be(int *out, const unsigned char *s, const unsigned char *end)
 {
 	if (s + 2 <= end)
 	{
@@ -51,12 +54,12 @@ rune_from_utf16be(int *out, unsigned char *s, unsigned char *end)
 		*out = a;
 		return 2;
 	}
-	*out = 0xFFFD;
+	*out = FZ_REPLACEMENT_CHARACTER;
 	return 1;
 }
 
 static size_t
-skip_language_code_utf16be(unsigned char *s, size_t n, size_t i)
+skip_language_code_utf16be(const unsigned char *s, size_t n, size_t i)
 {
 	/* skip language escape codes */
 	if (i + 6 <= n && s[i+0] == 0 && s[i+1] == 27 && s[i+4] == 0 && s[i+5] == 27)
@@ -67,7 +70,7 @@ skip_language_code_utf16be(unsigned char *s, size_t n, size_t i)
 }
 
 static size_t
-skip_language_code_utf8(unsigned char *s, size_t n, size_t i)
+skip_language_code_utf8(const unsigned char *s, size_t n, size_t i)
 {
 	/* skip language escape codes */
 	if (i + 3 <= n && s[i] == 27 && s[i+3])
@@ -78,7 +81,7 @@ skip_language_code_utf8(unsigned char *s, size_t n, size_t i)
 }
 
 char *
-pdf_to_utf8_imp(fz_context *ctx, unsigned char *srcptr, size_t srclen)
+pdf_to_utf8_imp(fz_context *ctx, const unsigned char *srcptr, size_t srclen)
 {
 	char *dstptr, *dst;
 	size_t dstlen = 0;
@@ -183,7 +186,7 @@ pdf_load_stream_as_utf8(fz_context *ctx, pdf_obj *src)
 	fz_buffer *stmbuf;
 	unsigned char *srcptr;
 	size_t srclen;
-	char *dst;
+	char *dst = NULL;
 
 	stmbuf = pdf_load_stream(ctx, src);
 	srclen = fz_buffer_storage(ctx, stmbuf, &srcptr);
@@ -314,12 +317,52 @@ pdf_to_utf8_name(fz_context *ctx, pdf_document *doc, pdf_obj *src)
 	return dst;
 }
 
+static pdf_obj *
+pdf_new_text_string_utf16be(fz_context *ctx, pdf_document *doc, const char *s)
+{
+	int c, i = 0, n = fz_utflen(s);
+	unsigned char *p = fz_malloc(ctx, n * 2 + 2);
+	pdf_obj *obj;
+	p[i++] = 254;
+	p[i++] = 255;
+	while (*s)
+	{
+		s += fz_chartorune(&c, s);
+		p[i++] = (c>>8) & 0xff;
+		p[i++] = (c) & 0xff;
+	}
+	fz_try(ctx)
+		obj = pdf_new_string(ctx, doc, (char*)p, i);
+	fz_always(ctx)
+		fz_free(ctx, p);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+	return obj;
+}
+
+/*
+ * Create a PDF 'text string' by encoding input string as either ASCII or UTF-16BE.
+ * In theory, we could also use PDFDocEncoding.
+ */
+pdf_obj *
+pdf_new_text_string(fz_context *ctx, pdf_document *doc, const char *s)
+{
+	int i = 0;
+	while (s[i] != 0)
+	{
+		if (((unsigned char)s[i]) >= 128)
+			return pdf_new_text_string_utf16be(ctx, doc, s);
+		++i;
+	}
+	return pdf_new_string(ctx, doc, s, i);
+}
+
 pdf_obj *
 pdf_parse_array(fz_context *ctx, pdf_document *doc, fz_stream *file, pdf_lexbuf *buf)
 {
 	pdf_obj *ary = NULL;
 	pdf_obj *obj = NULL;
-	fz_off_t a = 0, b = 0, n = 0;
+	int64_t a = 0, b = 0, n = 0;
 	pdf_token tok;
 	pdf_obj *op = NULL;
 
@@ -337,27 +380,21 @@ pdf_parse_array(fz_context *ctx, pdf_document *doc, fz_stream *file, pdf_lexbuf 
 			{
 				if (n > 0)
 				{
-					obj = pdf_new_int_offset(ctx, doc, a);
-					pdf_array_push(ctx, ary, obj);
-					pdf_drop_obj(ctx, obj);
-					obj = NULL;
+					obj = pdf_new_int(ctx, doc, a);
+					pdf_array_push_drop(ctx, ary, obj);
 				}
 				if (n > 1)
 				{
-					obj = pdf_new_int_offset(ctx, doc, b);
-					pdf_array_push(ctx, ary, obj);
-					pdf_drop_obj(ctx, obj);
-					obj = NULL;
+					obj = pdf_new_int(ctx, doc, b);
+					pdf_array_push_drop(ctx, ary, obj);
 				}
 				n = 0;
 			}
 
 			if (tok == PDF_TOK_INT && n == 2)
 			{
-				obj = pdf_new_int_offset(ctx, doc, a);
-				pdf_array_push(ctx, ary, obj);
-				pdf_drop_obj(ctx, obj);
-				obj = NULL;
+				obj = pdf_new_int(ctx, doc, a);
+				pdf_array_push_drop(ctx, ary, obj);
 				a = b;
 				n --;
 			}
@@ -380,61 +417,43 @@ pdf_parse_array(fz_context *ctx, pdf_document *doc, fz_stream *file, pdf_lexbuf 
 				if (n != 2)
 					fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot parse indirect reference in array");
 				obj = pdf_new_indirect(ctx, doc, a, b);
-				pdf_array_push(ctx, ary, obj);
-				pdf_drop_obj(ctx, obj);
-				obj = NULL;
+				pdf_array_push_drop(ctx, ary, obj);
 				n = 0;
 				break;
 
 			case PDF_TOK_OPEN_ARRAY:
 				obj = pdf_parse_array(ctx, doc, file, buf);
-				pdf_array_push(ctx, ary, obj);
-				pdf_drop_obj(ctx, obj);
-				obj = NULL;
+				pdf_array_push_drop(ctx, ary, obj);
 				break;
 
 			case PDF_TOK_OPEN_DICT:
 				obj = pdf_parse_dict(ctx, doc, file, buf);
-				pdf_array_push(ctx, ary, obj);
-				pdf_drop_obj(ctx, obj);
-				obj = NULL;
+				pdf_array_push_drop(ctx, ary, obj);
 				break;
 
 			case PDF_TOK_NAME:
 				obj = pdf_new_name(ctx, doc, buf->scratch);
-				pdf_array_push(ctx, ary, obj);
-				pdf_drop_obj(ctx, obj);
-				obj = NULL;
+				pdf_array_push_drop(ctx, ary, obj);
 				break;
 			case PDF_TOK_REAL:
 				obj = pdf_new_real(ctx, doc, buf->f);
-				pdf_array_push(ctx, ary, obj);
-				pdf_drop_obj(ctx, obj);
-				obj = NULL;
+				pdf_array_push_drop(ctx, ary, obj);
 				break;
 			case PDF_TOK_STRING:
 				obj = pdf_new_string(ctx, doc, buf->scratch, buf->len);
-				pdf_array_push(ctx, ary, obj);
-				pdf_drop_obj(ctx, obj);
-				obj = NULL;
+				pdf_array_push_drop(ctx, ary, obj);
 				break;
 			case PDF_TOK_TRUE:
 				obj = pdf_new_bool(ctx, doc, 1);
-				pdf_array_push(ctx, ary, obj);
-				pdf_drop_obj(ctx, obj);
-				obj = NULL;
+				pdf_array_push_drop(ctx, ary, obj);
 				break;
 			case PDF_TOK_FALSE:
 				obj = pdf_new_bool(ctx, doc, 0);
-				pdf_array_push(ctx, ary, obj);
-				pdf_drop_obj(ctx, obj);
-				obj = NULL;
+				pdf_array_push_drop(ctx, ary, obj);
 				break;
 			case PDF_TOK_NULL:
 				obj = pdf_new_null(ctx, doc);
-				pdf_array_push(ctx, ary, obj);
-				pdf_drop_obj(ctx, obj);
-				obj = NULL;
+				pdf_array_push_drop(ctx, ary, obj);
 				break;
 
 			default:
@@ -446,7 +465,6 @@ end:
 	}
 	fz_catch(ctx)
 	{
-		pdf_drop_obj(ctx, obj);
 		pdf_drop_obj(ctx, ary);
 		fz_rethrow(ctx);
 	}
@@ -460,7 +478,7 @@ pdf_parse_dict(fz_context *ctx, pdf_document *doc, fz_stream *file, pdf_lexbuf *
 	pdf_obj *key = NULL;
 	pdf_obj *val = NULL;
 	pdf_token tok;
-	fz_off_t a, b;
+	int64_t a, b;
 
 	dict = pdf_new_dict(ctx, doc, 8);
 
@@ -511,7 +529,7 @@ pdf_parse_dict(fz_context *ctx, pdf_document *doc, fz_stream *file, pdf_lexbuf *
 				if (tok == PDF_TOK_CLOSE_DICT || tok == PDF_TOK_NAME ||
 					(tok == PDF_TOK_KEYWORD && !strcmp(buf->scratch, "ID")))
 				{
-					val = pdf_new_int_offset(ctx, doc, a);
+					val = pdf_new_int(ctx, doc, a);
 					pdf_dict_put(ctx, dict, key, val);
 					pdf_drop_obj(ctx, val);
 					val = NULL;
@@ -571,7 +589,7 @@ pdf_parse_stm_obj(fz_context *ctx, pdf_document *doc, fz_stream *file, pdf_lexbu
 	case PDF_TOK_TRUE: return pdf_new_bool(ctx, doc, 1); break;
 	case PDF_TOK_FALSE: return pdf_new_bool(ctx, doc, 0); break;
 	case PDF_TOK_NULL: return pdf_new_null(ctx, doc); break;
-	case PDF_TOK_INT: return pdf_new_int_offset(ctx, doc, buf->i); break;
+	case PDF_TOK_INT: return pdf_new_int(ctx, doc, buf->i); break;
 	default: fz_throw(ctx, FZ_ERROR_SYNTAX, "unknown token in object stream");
 	}
 }
@@ -579,13 +597,14 @@ pdf_parse_stm_obj(fz_context *ctx, pdf_document *doc, fz_stream *file, pdf_lexbu
 pdf_obj *
 pdf_parse_ind_obj(fz_context *ctx, pdf_document *doc,
 	fz_stream *file, pdf_lexbuf *buf,
-	int *onum, int *ogen, fz_off_t *ostmofs, int *try_repair)
+	int *onum, int *ogen, int64_t *ostmofs, int *try_repair)
 {
 	pdf_obj *obj = NULL;
 	int num = 0, gen = 0;
-	fz_off_t stm_ofs;
+	int64_t stm_ofs;
 	pdf_token tok;
-	fz_off_t a, b;
+	int64_t a, b;
+	int read_next_token = 1;
 
 	fz_var(obj);
 
@@ -640,10 +659,11 @@ pdf_parse_ind_obj(fz_context *ctx, pdf_document *doc,
 
 		if (tok == PDF_TOK_STREAM || tok == PDF_TOK_ENDOBJ)
 		{
-			obj = pdf_new_int_offset(ctx, doc, a);
-			goto skip;
+			obj = pdf_new_int(ctx, doc, a);
+			read_next_token = 0;
+			break;
 		}
-		if (tok == PDF_TOK_INT)
+		else if (tok == PDF_TOK_INT)
 		{
 			b = buf->i;
 			tok = pdf_lex(ctx, file, buf);
@@ -657,7 +677,8 @@ pdf_parse_ind_obj(fz_context *ctx, pdf_document *doc,
 
 	case PDF_TOK_ENDOBJ:
 		obj = pdf_new_null(ctx, doc);
-		goto skip;
+		read_next_token = 0;
+		break;
 
 	default:
 		fz_throw(ctx, FZ_ERROR_SYNTAX, "syntax error in object (%d %d R)", num, gen);
@@ -665,7 +686,33 @@ pdf_parse_ind_obj(fz_context *ctx, pdf_document *doc,
 
 	fz_try(ctx)
 	{
-		tok = pdf_lex(ctx, file, buf);
+		if (read_next_token)
+			tok = pdf_lex(ctx, file, buf);
+
+		if (tok == PDF_TOK_STREAM)
+		{
+			int c = fz_read_byte(ctx, file);
+			while (c == ' ')
+				c = fz_read_byte(ctx, file);
+			if (c == '\r')
+			{
+				c = fz_peek_byte(ctx, file);
+				if (c != '\n')
+					fz_warn(ctx, "line feed missing after stream begin marker (%d %d R)", num, gen);
+				else
+					fz_read_byte(ctx, file);
+			}
+			stm_ofs = fz_tell(ctx, file);
+		}
+		else if (tok == PDF_TOK_ENDOBJ)
+		{
+			stm_ofs = 0;
+		}
+		else
+		{
+			fz_warn(ctx, "expected 'endobj' or 'stream' keyword (%d %d R)", num, gen);
+			stm_ofs = 0;
+		}
 	}
 	fz_catch(ctx)
 	{
@@ -673,34 +720,9 @@ pdf_parse_ind_obj(fz_context *ctx, pdf_document *doc,
 		fz_rethrow(ctx);
 	}
 
-skip:
-	if (tok == PDF_TOK_STREAM)
-	{
-		int c = fz_read_byte(ctx, file);
-		while (c == ' ')
-			c = fz_read_byte(ctx, file);
-		if (c == '\r')
-		{
-			c = fz_peek_byte(ctx, file);
-			if (c != '\n')
-				fz_warn(ctx, "line feed missing after stream begin marker (%d %d R)", num, gen);
-			else
-				fz_read_byte(ctx, file);
-		}
-		stm_ofs = fz_tell(ctx, file);
-	}
-	else if (tok == PDF_TOK_ENDOBJ)
-	{
-		stm_ofs = 0;
-	}
-	else
-	{
-		fz_warn(ctx, "expected 'endobj' or 'stream' keyword (%d %d R)", num, gen);
-		stm_ofs = 0;
-	}
-
 	if (onum) *onum = num;
 	if (ogen) *ogen = gen;
 	if (ostmofs) *ostmofs = stm_ofs;
+
 	return obj;
 }

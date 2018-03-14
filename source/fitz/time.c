@@ -2,6 +2,8 @@
 
 #include "mupdf/fitz.h"
 
+#include <stdio.h>
+#include <errno.h>
 #include <time.h>
 #include <windows.h>
 
@@ -79,7 +81,7 @@ fz_wchar_from_utf8(const char *s)
 	return r;
 }
 
-FILE *
+void *
 fz_fopen_utf8(const char *name, const char *mode)
 {
 	wchar_t *wname, *wmode;
@@ -158,5 +160,9 @@ fz_free_argv(int argc, char **argv)
 		free(argv[i]);
 	free(argv);
 }
+
+#else
+
+int fz_time_dummy;
 
 #endif /* _WIN32 */

@@ -1,5 +1,9 @@
 #include "mupdf/fitz.h"
 
+#include <limits.h>
+#include <assert.h>
+#include <string.h>
+
 /*
  * TIFF image loader. Should be enough to support TIFF files in XPS.
  * Baseline TIFF 6.0 plus CMYK, LZW, Flate and JPEG support.
@@ -11,7 +15,7 @@
 struct tiff
 {
 	/* "file" */
-	unsigned char *bp, *rp, *ep;
+	const unsigned char *bp, *rp, *ep;
 
 	/* byte order */
 	unsigned order;
@@ -58,7 +62,7 @@ struct tiff
 
 	unsigned ycbcrsubsamp[2];
 
-	unsigned char *jpegtables; /* point into "file" buffer */
+	const unsigned char *jpegtables; /* point into "file" buffer */
 	unsigned jpegtableslen;
 
 	unsigned char *profile;
@@ -284,10 +288,11 @@ tiff_expand_colormap(fz_context *ctx, struct tiff *tiff)
 }
 
 static unsigned
-tiff_decode_data(fz_context *ctx, struct tiff *tiff, unsigned char *rp, unsigned int rlen, unsigned char *wp, unsigned int wlen)
+tiff_decode_data(fz_context *ctx, struct tiff *tiff, const unsigned char *rp, unsigned int rlen, unsigned char *wp, unsigned int wlen)
 {
-	fz_stream *stm;
-	unsigned i, size;
+	fz_stream *encstm = NULL;
+	fz_stream *stm = NULL;
+	unsigned i, size = 0;
 	unsigned char *reversed = NULL;
 	fz_stream *jpegtables = NULL;
 	int old_tiff;
@@ -304,10 +309,13 @@ tiff_decode_data(fz_context *ctx, struct tiff *tiff, unsigned char *rp, unsigned
 		rp = reversed;
 	}
 
+	fz_var(encstm);
+	fz_var(stm);
+
 	fz_try(ctx)
 	{
 		/* each decoder will close this */
-		stm = fz_open_memory(ctx, rp, rlen);
+		encstm = fz_open_memory(ctx, rp, rlen);
 
 		/* switch on compression to create a filter */
 		/* feed each chunk (strip or tile) to the filter */
@@ -323,22 +331,25 @@ tiff_decode_data(fz_context *ctx, struct tiff *tiff, unsigned char *rp, unsigned
 		{
 		case 1:
 			/* stm already open and reading uncompressed data */
+			stm = encstm;
 			break;
 		case 2:
 		case 3:
 		case 4:
-			stm = fz_open_faxd(ctx, stm,
-					tiff->compression == 4 ? -1 : 0,
+			stm = fz_open_faxd(ctx, encstm,
+					tiff->compression == 4 ? -1 :
+					tiff->compression == 2 ? 0 :
+					tiff->g3opts & 1,
 					0,
 					tiff->compression == 2,
 					tiff->imagewidth,
 					tiff->imagelength,
 					0,
-					tiff->photometric == 0);
+					1);
 			break;
 		case 5:
 			old_tiff = rp[0] == 0 && (rp[1] & 1);
-			stm = fz_open_lzwd(ctx, stm, old_tiff ? 0 : 1, 9, old_tiff ? 1 : 0, old_tiff);
+			stm = fz_open_lzwd(ctx, encstm, old_tiff ? 0 : 1, 9, old_tiff ? 1 : 0, old_tiff);
 			break;
 		case 6:
 			fz_warn(ctx, "deprecated JPEG in TIFF compression not fully supported");
@@ -347,33 +358,34 @@ tiff_decode_data(fz_context *ctx, struct tiff *tiff, unsigned char *rp, unsigned
 			if (tiff->jpegtables && (int)tiff->jpegtableslen > 0)
 				jpegtables = fz_open_memory(ctx, tiff->jpegtables, tiff->jpegtableslen);
 
-			stm = fz_open_dctd(ctx, stm,
+			stm = fz_open_dctd(ctx, encstm,
 					tiff->photometric == 2 || tiff->photometric == 3 ? 0 : -1,
 					0,
 					jpegtables);
 			break;
 		case 8:
 		case 32946:
-			stm = fz_open_flated(ctx, stm, 15);
+			stm = fz_open_flated(ctx, encstm, 15);
 			break;
 		case 32773:
-			stm = fz_open_rld(ctx, stm);
+			stm = fz_open_rld(ctx, encstm);
 			break;
 		case 34676:
 			if (tiff->photometric == 32845)
-				stm = fz_open_sgilog32(ctx, stm, tiff->imagewidth);
+				stm = fz_open_sgilog32(ctx, encstm, tiff->imagewidth);
 			else
-				stm = fz_open_sgilog16(ctx, stm, tiff->imagewidth);
+				stm = fz_open_sgilog16(ctx, encstm, tiff->imagewidth);
 			break;
 		case 34677:
-			stm = fz_open_sgilog24(ctx, stm, tiff->imagewidth);
+			stm = fz_open_sgilog24(ctx, encstm, tiff->imagewidth);
 			break;
 		case 32809:
 			if (tiff->bitspersample != 4)
 				fz_throw(ctx, FZ_ERROR_GENERIC, "invalid bits per pixel in thunder encoding");
-			stm = fz_open_thunder(ctx, stm, tiff->imagewidth);
+			stm = fz_open_thunder(ctx, encstm, tiff->imagewidth);
 			break;
 		default:
+			stm = encstm;
 			fz_throw(ctx, FZ_ERROR_GENERIC, "unknown TIFF compression: %d", tiff->compression);
 		}
 
@@ -418,6 +430,8 @@ tiff_paste_tile(fz_context *ctx, struct tiff *tiff, unsigned char *tile, unsigne
 				case 4: *dst |= (*src >> (4 - 4 * ((col + x) % 2))) & 0xf; break;
 				case 8: *dst = *src; break;
 				case 16: dst[0] = src[0]; dst[1] = src[1]; break;
+				case 24: dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; break;
+				case 32: dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = src[3]; break;
 				}
 			}
 		}
@@ -582,7 +596,7 @@ tiff_decode_tiles(fz_context *ctx, struct tiff *tiff)
 			{
 				unsigned int offset = tiff->tileoffsets[tile];
 				unsigned int rlen = tiff->tilebytecounts[tile];
-				unsigned char *rp = tiff->bp + offset;
+				const unsigned char *rp = tiff->bp + offset;
 				unsigned decoded;
 
 				if (offset > (unsigned)(tiff->ep - tiff->bp))
@@ -608,7 +622,7 @@ tiff_decode_tiles(fz_context *ctx, struct tiff *tiff)
 			{
 				unsigned int offset = tiff->tileoffsets[tile];
 				unsigned int rlen = tiff->tilebytecounts[tile];
-				unsigned char *rp = tiff->bp + offset;
+				const unsigned char *rp = tiff->bp + offset;
 
 				if (offset > (unsigned)(tiff->ep - tiff->bp))
 					fz_throw(ctx, FZ_ERROR_GENERIC, "invalid tile offset %u", offset);
@@ -659,7 +673,7 @@ tiff_decode_strips(fz_context *ctx, struct tiff *tiff)
 		{
 			unsigned offset = tiff->stripoffsets[strip];
 			unsigned rlen = tiff->stripbytecounts[strip];
-			unsigned char *rp = tiff->bp + offset;
+			const unsigned char *rp = tiff->bp + offset;
 			int decoded;
 
 			if (offset > (unsigned)(tiff->ep - tiff->bp))
@@ -680,7 +694,7 @@ tiff_decode_strips(fz_context *ctx, struct tiff *tiff)
 			unsigned offset = tiff->stripoffsets[strip];
 			unsigned rlen = tiff->stripbytecounts[strip];
 			unsigned wlen = tiff->stride * tiff->rowsperstrip;
-			unsigned char *rp = tiff->bp + offset;
+			const unsigned char *rp = tiff->bp + offset;
 
 			if (offset > (unsigned)(tiff->ep - tiff->bp))
 				fz_throw(ctx, FZ_ERROR_GENERIC, "invalid strip offset %u", offset);
@@ -905,7 +919,7 @@ tiff_read_tag(fz_context *ctx, struct tiff *tiff, unsigned offset)
 		break;
 
 	case TileByteCounts:
-		if (tiff->tileoffsets)
+		if (tiff->tilebytecounts)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "at most one tile byte counts tag allowed");
 		tiff->tilebytecounts = fz_malloc_array(ctx, count, sizeof(unsigned));
 		tiff_read_tag_value(tiff->tilebytecounts, tiff, type, value, count);
@@ -931,7 +945,25 @@ tiff_swap_byte_order(unsigned char *buf, int n)
 }
 
 static void
-tiff_read_header(fz_context *ctx, struct tiff *tiff, unsigned char *buf, size_t len)
+tiff_scale_lab_samples(fz_context *ctx, unsigned char *buf, int bps, int n)
+{
+	int i;
+	if (bps == 8)
+		for (i = 0; i < n; i++, buf += 3)
+		{
+			buf[1] ^= 128;
+			buf[2] ^= 128;
+		}
+	else if (bps == 16)
+		for (i = 0; i < n; i++, buf += 6)
+		{
+			buf[2] ^= 128;
+			buf[4] ^= 128;
+		}
+}
+
+static void
+tiff_read_header(fz_context *ctx, struct tiff *tiff, const unsigned char *buf, size_t len)
 {
 	unsigned version;
 
@@ -1033,9 +1065,27 @@ tiff_read_ifd(fz_context *ctx, struct tiff *tiff)
 }
 
 static void
+tiff_cielab_to_icclab(fz_context *ctx, struct tiff *tiff)
+{
+	unsigned x, y;
+	int offset = tiff->samplesperpixel;
+
+	for (y = 0; y < tiff->imagelength; y++)
+	{
+		unsigned char * row = &tiff->samples[tiff->stride * y];
+		for (x = 0; x < tiff->imagewidth; x++)
+		{
+			row[x * offset + 1] ^= 0x80;
+			row[x * offset + 2] ^= 0x80;
+		}
+	}
+}
+
+static void
 tiff_ycc_to_rgb(fz_context *ctx, struct tiff *tiff)
 {
 	unsigned x, y;
+	int offset = tiff->samplesperpixel;
 
 	for (y = 0; y < tiff->imagelength; y++)
 	{
@@ -1043,13 +1093,13 @@ tiff_ycc_to_rgb(fz_context *ctx, struct tiff *tiff)
 		for (x = 0; x < tiff->imagewidth; x++)
 		{
 			int ycc[3];
-			ycc[0] = row[x * 3 + 0];
-			ycc[1] = row[x * 3 + 1] - 128;
-			ycc[2] = row[x * 3 + 2] - 128;
+			ycc[0] = row[x * offset + 0];
+			ycc[1] = row[x * offset + 1] - 128;
+			ycc[2] = row[x * offset + 2] - 128;
 
-			row[x * 3 + 0] = fz_clampi((double)ycc[0] + 1.402 * ycc[2], 0, 255);
-			row[x * 3 + 1] = fz_clampi((double)ycc[0] - 0.34413 * ycc[1] - 0.71414 * ycc[2], 0, 255);
-			row[x * 3 + 2] = fz_clampi((double)ycc[0] + 1.772 * ycc[1], 0, 255);
+			row[x * offset + 0] = fz_clampi(ycc[0] + 1.402f * ycc[2], 0, 255);
+			row[x * offset + 1] = fz_clampi(ycc[0] - 0.34413f * ycc[1] - 0.71414f * ycc[2], 0, 255);
+			row[x * offset + 2] = fz_clampi(ycc[0] + 1.772f * ycc[1], 0, 255);
 		}
 	}
 }
@@ -1076,49 +1126,74 @@ tiff_decode_ifd(fz_context *ctx, struct tiff *tiff)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "unsupported samples per pixel when subsampling");
 		if (tiff->bitspersample != 8)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "unsupported bits per sample when subsampling");
+		if (tiff->ycbcrsubsamp[0] == 0 || tiff->ycbcrsubsamp[1] == 0)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "unsupported subsampling factor");
 	}
 
 	tiff->stride = (tiff->imagewidth * tiff->samplesperpixel * tiff->bitspersample + 7) / 8;
 	tiff->tilestride = (tiff->tilewidth * tiff->samplesperpixel * tiff->bitspersample + 7) / 8;
 
-	switch (tiff->photometric)
+	if (tiff->profile)
 	{
-	case 0: /* WhiteIsZero -- inverted */
-		tiff->colorspace = fz_device_gray(ctx);
-		break;
-	case 1: /* BlackIsZero */
-		tiff->colorspace = fz_device_gray(ctx);
-		break;
-	case 2: /* RGB */
-		tiff->colorspace = fz_device_rgb(ctx);
-		break;
-	case 3: /* RGBPal */
-		tiff->colorspace = fz_device_rgb(ctx);
-		break;
-	case 5: /* CMYK */
-		tiff->colorspace = fz_device_cmyk(ctx);
-		break;
-	case 6: /* YCbCr */
-		/* it's probably a jpeg ... we let jpeg convert to rgb */
-		tiff->colorspace = fz_device_rgb(ctx);
-		break;
-	case 8: /* 1976 CIE L*a*b* */
-		tiff->colorspace = fz_device_lab(ctx);
-		break;
-	case 32844: /* SGI CIE Log 2 L (16bpp Greyscale) */
-		tiff->colorspace = fz_device_gray(ctx);
-		if (tiff->bitspersample != 8)
-			tiff->bitspersample = 8;
-		tiff->stride >>= 1;
-		break;
-	case 32845: /* SGI CIE Log 2 L, u, v (24bpp or 32bpp) */
-		tiff->colorspace = fz_device_rgb(ctx);
-		if (tiff->bitspersample != 8)
-			tiff->bitspersample = 8;
-		tiff->stride >>= 1;
-		break;
-	default:
-		fz_throw(ctx, FZ_ERROR_GENERIC, "unknown photometric: %d", tiff->photometric);
+		fz_buffer *buff = NULL;
+
+		fz_try(ctx)
+		{
+			buff = fz_new_buffer_from_copied_data(ctx, tiff->profile, tiff->profilesize);
+			tiff->colorspace = fz_new_icc_colorspace(ctx, NULL, 0, buff);
+		}
+		fz_always(ctx)
+			fz_drop_buffer(ctx, buff);
+		fz_catch(ctx)
+		{
+			fz_warn(ctx, "Failed to read ICC Profile from tiff");
+			fz_drop_colorspace(ctx, tiff->colorspace);
+			tiff->colorspace = NULL;
+		}
+	}
+
+	if (tiff->colorspace == NULL)
+	{
+		switch (tiff->photometric)
+		{
+		case 0: /* WhiteIsZero -- inverted */
+			tiff->colorspace = fz_keep_colorspace(ctx, fz_device_gray(ctx));
+			break;
+		case 1: /* BlackIsZero */
+			tiff->colorspace = fz_keep_colorspace(ctx, fz_device_gray(ctx));
+			break;
+		case 2: /* RGB */
+			tiff->colorspace = fz_keep_colorspace(ctx, fz_device_rgb(ctx));
+			break;
+		case 3: /* RGBPal */
+			tiff->colorspace = fz_keep_colorspace(ctx, fz_device_rgb(ctx));
+			break;
+		case 5: /* CMYK */
+			tiff->colorspace = fz_keep_colorspace(ctx, fz_device_cmyk(ctx));
+			break;
+		case 6: /* YCbCr */
+				/* it's probably a jpeg ... we let jpeg convert to rgb */
+			tiff->colorspace = fz_keep_colorspace(ctx, fz_device_rgb(ctx));
+			break;
+		case 8: /* Direct L*a*b* encoding. a*, b* signed values */
+		case 9: /* ICC Style L*a*b* encoding */
+			tiff->colorspace = fz_keep_colorspace(ctx, fz_device_lab(ctx));
+			break;
+		case 32844: /* SGI CIE Log 2 L (16bpp Greyscale) */
+			tiff->colorspace = fz_keep_colorspace(ctx, fz_device_gray(ctx));
+			if (tiff->bitspersample != 8)
+				tiff->bitspersample = 8;
+			tiff->stride >>= 1;
+			break;
+		case 32845: /* SGI CIE Log 2 L, u, v (24bpp or 32bpp) */
+			tiff->colorspace = fz_keep_colorspace(ctx, fz_device_rgb(ctx));
+			if (tiff->bitspersample != 8)
+				tiff->bitspersample = 8;
+			tiff->stride >>= 1;
+			break;
+		default:
+			fz_throw(ctx, FZ_ERROR_GENERIC, "unknown photometric: %d", tiff->photometric);
+		}
 	}
 
 	switch (tiff->resolutionunit)
@@ -1215,6 +1290,10 @@ tiff_decode_samples(fz_context *ctx, struct tiff *tiff)
 		}
 	}
 
+	/* CIE Lab to ICC Lab */
+	if (tiff->photometric == 8)
+		tiff_cielab_to_icclab(ctx, tiff);
+
 	/* YCbCr -> RGB, but JPEG already has done this conversion  */
 	if (tiff->photometric == 6 && tiff->compression != 6 && tiff->compression != 7)
 		tiff_ycc_to_rgb(ctx, tiff);
@@ -1251,10 +1330,17 @@ tiff_decode_samples(fz_context *ctx, struct tiff *tiff)
 	/* Byte swap 16-bit images to big endian if necessary */
 	if (tiff->bitspersample == 16 && tiff->order == TII)
 		tiff_swap_byte_order(tiff->samples, tiff->imagewidth * tiff->imagelength * tiff->samplesperpixel);
+
+	/* Lab colorspace expects all sample components 0..255.
+	TIFF supplies them as L = 0..255, a/b = -128..127 (for
+	8 bits per sample, -32768..32767 for 16 bits per sample)
+	Scale them to the colorspace's expectations. */
+	if (tiff->photometric == 8 && tiff->samplesperpixel == 3)
+		tiff_scale_lab_samples(ctx, tiff->samples, tiff->bitspersample, tiff->imagewidth * tiff->imagelength);
 }
 
 fz_pixmap *
-fz_load_tiff_subimage(fz_context *ctx, unsigned char *buf, size_t len, int subimage)
+fz_load_tiff_subimage(fz_context *ctx, const unsigned char *buf, size_t len, int subimage)
 {
 	fz_pixmap *image = NULL;
 	struct tiff tiff = { 0 };
@@ -1274,18 +1360,16 @@ fz_load_tiff_subimage(fz_context *ctx, unsigned char *buf, size_t len, int subim
 
 		/* Expand into fz_pixmap struct */
 		alpha = tiff.extrasamples != 0;
-		image = fz_new_pixmap(ctx, tiff.colorspace, tiff.imagewidth, tiff.imagelength, alpha);
+		image = fz_new_pixmap(ctx, tiff.colorspace, tiff.imagewidth, tiff.imagelength, NULL, alpha);
 		image->xres = tiff.xresolution;
 		image->yres = tiff.yresolution;
 
 		fz_unpack_tile(ctx, image, tiff.samples, tiff.samplesperpixel, tiff.bitspersample, tiff.stride, 0);
 
 		/* We should only do this on non-pre-multiplied images, but files in the wild are bad */
+		/* TODO: check if any samples are non-premul to detect bad files */
 		if (tiff.extrasamples /* == 2 */)
-		{
-			image = fz_ensure_pixmap_is_additive(ctx, image);
 			fz_premultiply_pixmap(ctx, image);
-		}
 	}
 	fz_always(ctx)
 	{
@@ -1309,13 +1393,13 @@ fz_load_tiff_subimage(fz_context *ctx, unsigned char *buf, size_t len, int subim
 }
 
 fz_pixmap *
-fz_load_tiff(fz_context *ctx, unsigned char *buf, size_t len)
+fz_load_tiff(fz_context *ctx, const unsigned char *buf, size_t len)
 {
 	return fz_load_tiff_subimage(ctx, buf, len, 0);
 }
 
 void
-fz_load_tiff_info_subimage(fz_context *ctx, unsigned char *buf, size_t len, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep, int subimage)
+fz_load_tiff_info_subimage(fz_context *ctx, const unsigned char *buf, size_t len, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep, int subimage)
 {
 	struct tiff tiff = { 0 };
 
@@ -1331,6 +1415,11 @@ fz_load_tiff_info_subimage(fz_context *ctx, unsigned char *buf, size_t len, int 
 		*hp = tiff.imagelength;
 		*xresp = (tiff.xresolution ? tiff.xresolution : 96);
 		*yresp = (tiff.yresolution ? tiff.yresolution : 96);
+		if (tiff.extrasamples /* == 2 */)
+		{
+			fz_drop_colorspace(ctx, tiff.colorspace);
+			tiff.colorspace = fz_keep_colorspace(ctx, fz_device_rgb(ctx));
+		}
 		*cspacep = tiff.colorspace;
 	}
 	fz_always(ctx)
@@ -1349,13 +1438,13 @@ fz_load_tiff_info_subimage(fz_context *ctx, unsigned char *buf, size_t len, int 
 }
 
 void
-fz_load_tiff_info(fz_context *ctx, unsigned char *buf, size_t len, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
+fz_load_tiff_info(fz_context *ctx, const unsigned char *buf, size_t len, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
 {
 	fz_load_tiff_info_subimage(ctx, buf, len, wp, hp, xresp, yresp, cspacep, 0);
 }
 
 int
-fz_load_tiff_subimage_count(fz_context *ctx, unsigned char *buf, size_t len)
+fz_load_tiff_subimage_count(fz_context *ctx, const unsigned char *buf, size_t len)
 {
 	unsigned offset;
 	unsigned subimage_count = 0;

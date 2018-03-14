@@ -1,4 +1,9 @@
-#include "mupdf/html.h"
+#include "mupdf/fitz.h"
+#include "html-imp.h"
+
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 static const char *inherit_list[] = {
 	"color",
@@ -323,7 +328,7 @@ match_selector(fz_css_selector *sel, fz_xml *node)
 
 	if (sel->name)
 	{
-		if (strcmp(sel->name, fz_xml_tag(node)))
+		if (!fz_xml_is_tag(node, sel->name))
 			return 0;
 	}
 
@@ -735,8 +740,6 @@ fz_add_css_font_face(fz_context *ctx, fz_html_font_set *set, fz_archive *zip, co
 				custom->is_italic == is_italic)
 			return; /* already loaded */
 
-	printf("epub: @font-face: family='%s' b=%d i=%d src=%s\n", family, is_bold, is_italic, src);
-
 	fz_var(buf);
 	fz_var(font);
 
@@ -970,28 +973,28 @@ border_style_from_property(fz_css_match *match, const char *property)
 }
 
 float
-fz_from_css_number(fz_css_number number, float em, float width)
+fz_from_css_number(fz_css_number number, float em, float percent_value, float auto_value)
 {
 	switch (number.unit) {
 	default:
 	case N_NUMBER: return number.value;
 	case N_LENGTH: return number.value;
 	case N_SCALE: return number.value * em;
-	case N_PERCENT: return number.value * 0.01 * width;
-	case N_AUTO: return width;
+	case N_PERCENT: return number.value * 0.01f * percent_value;
+	case N_AUTO: return auto_value;
 	}
 }
 
 float
-fz_from_css_number_scale(fz_css_number number, float scale, float em, float width)
+fz_from_css_number_scale(fz_css_number number, float scale)
 {
 	switch (number.unit) {
 	default:
 	case N_NUMBER: return number.value * scale;
 	case N_LENGTH: return number.value;
-	case N_SCALE: return number.value * em;
-	case N_PERCENT: return number.value * 0.01 * width;
-	case N_AUTO: return width;
+	case N_SCALE: return number.value * scale;
+	case N_PERCENT: return number.value * 0.01f * scale;
+	case N_AUTO: return scale;
 	}
 }
 
@@ -1051,9 +1054,9 @@ hex_color:
 		vr = value->args;
 		vg = vr && vr->next ? vr->next->next : NULL; /* skip the ',' nodes */
 		vb = vg && vg->next ? vg->next->next : NULL; /* skip the ',' nodes */
-		r = fz_from_css_number(number_from_value(vr, 0, N_NUMBER), 255, 255);
-		g = fz_from_css_number(number_from_value(vg, 0, N_NUMBER), 255, 255);
-		b = fz_from_css_number(number_from_value(vb, 0, N_NUMBER), 255, 255);
+		r = fz_from_css_number(number_from_value(vr, 0, N_NUMBER), 255, 255, 0);
+		g = fz_from_css_number(number_from_value(vg, 0, N_NUMBER), 255, 255, 0);
+		b = fz_from_css_number(number_from_value(vb, 0, N_NUMBER), 255, 255, 0);
 		return make_color(r, g, b, 255);
 	}
 
@@ -1319,8 +1322,7 @@ fz_apply_css_style(fz_context *ctx, fz_html_font_set *set, fz_css_style *style, 
  * Pretty printing
  */
 
-void
-print_value(fz_css_value *val)
+static void print_value(fz_css_value *val)
 {
 	printf("%s", val->data);
 	if (val->args)
@@ -1336,8 +1338,7 @@ print_value(fz_css_value *val)
 	}
 }
 
-void
-print_property(fz_css_property *prop)
+static void print_property(fz_css_property *prop)
 {
 	printf("\t%s: ", prop->name);
 	print_value(prop->value);
@@ -1346,8 +1347,7 @@ print_property(fz_css_property *prop)
 	printf(";\n");
 }
 
-void
-print_condition(fz_css_condition *cond)
+static void print_condition(fz_css_condition *cond)
 {
 	if (cond->type == '=')
 		printf("[%s=%s]", cond->key, cond->val);
@@ -1359,19 +1359,16 @@ print_condition(fz_css_condition *cond)
 		print_condition(cond->next);
 }
 
-void
-print_selector(fz_css_selector *sel)
+static void print_selector(fz_css_selector *sel)
 {
 	if (sel->combine)
 	{
-putchar('(');
 		print_selector(sel->left);
 		if (sel->combine == ' ')
 			printf(" ");
 		else
 			printf(" %c ", sel->combine);
 		print_selector(sel->right);
-putchar(')');
 	}
 	else if (sel->name)
 		printf("%s", sel->name);
@@ -1383,8 +1380,7 @@ putchar(')');
 	}
 }
 
-void
-print_rule(fz_css_rule *rule)
+static void print_rule(fz_css_rule *rule)
 {
 	fz_css_selector *sel;
 	fz_css_property *prop;
@@ -1406,8 +1402,9 @@ print_rule(fz_css_rule *rule)
 }
 
 void
-print_rules(fz_css_rule *rule)
+fz_debug_css(fz_context *ctx, fz_css *css)
 {
+	fz_css_rule *rule = css->rule;
 	while (rule)
 	{
 		print_rule(rule);

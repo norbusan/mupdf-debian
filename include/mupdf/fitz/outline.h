@@ -36,20 +36,11 @@ struct fz_outline_s
 	char *title;
 	char *uri;
 	int page;
+	float x, y;
 	fz_outline *next;
 	fz_outline *down;
 	int is_open;
 };
-
-/*
-	fz_print_outline_xml: Print an outline to 'out' as XML.
-*/
-void fz_print_outline_xml(fz_context *ctx, fz_output *out, fz_outline *outline);
-
-/*
-	fz_print_outline: Print an outline to 'out' as plain text.
-*/
-void fz_print_outline(fz_context *ctx, fz_output *out, fz_outline *outline);
 
 fz_outline *fz_new_outline(fz_context *ctx);
 fz_outline *fz_keep_outline(fz_context *ctx, fz_outline *outline);

@@ -13,6 +13,11 @@ intermediate results rather than ints.
 #include "mupdf/fitz.h"
 #include "draw-imp.h"
 
+#include <math.h>
+#include <string.h>
+#include <assert.h>
+#include <limits.h>
+
 /* Do we special case handling of single pixel high/wide images? The
  * 'purest' handling is given by not special casing them, but certain
  * files that use such images 'stack' them to give full images. Not
@@ -409,11 +414,11 @@ check_weights(fz_weights *weights, int j, int w, float x, float wf)
 		weights->index[maxidx-1] += 256-sum;
 	/* Otherwise, if we are the first pixel, and it's fully covered, then
 	 * adjust it. */
-	else if ((j == 0) && (x < 0.0001F) && (sum != 256))
+	else if ((j == 0) && (x < 0.0001f) && (sum != 256))
 		weights->index[maxidx-1] += 256-sum;
 	/* Finally, if we are the last pixel, and it's fully covered, then
 	 * adjust it. */
-	else if ((j == w-1) && ((float)w-wf < 0.0001F) && (sum != 256))
+	else if ((j == w-1) && (w - wf < 0.0001f) && (sum != 256))
 		weights->index[maxidx-1] += 256-sum;
 }
 
@@ -1611,7 +1616,7 @@ fz_scale_pixmap_cached(fz_context *ctx, const fz_pixmap *src, float x, float y, 
 	else
 	{
 		dst_x_int = floorf(x);
-		x -= (float)dst_x_int;
+		x -= dst_x_int;
 		dst_w_int = (int)ceilf(x + w);
 	}
 	/* dst_y_int is calculated to be the top of the scaled image, and
@@ -1632,7 +1637,7 @@ fz_scale_pixmap_cached(fz_context *ctx, const fz_pixmap *src, float x, float y, 
 	else
 	{
 		dst_y_int = floorf(y);
-		y -= (float)dst_y_int;
+		y -= dst_y_int;
 		dst_h_int = (int)ceilf(y + h);
 	}
 
@@ -1706,7 +1711,7 @@ fz_scale_pixmap_cached(fz_context *ctx, const fz_pixmap *src, float x, float y, 
 #endif /* SINGLE_PIXEL_SPECIALS */
 			contrib_rows = make_weights(ctx, src->h, y, h, filter, 1, dst_h_int, patch.y0, patch.y1, src->n, flip_y, cache_y);
 
-		output = fz_new_pixmap(ctx, src->colorspace, patch.x1 - patch.x0, patch.y1 - patch.y0, src->alpha || forcealpha);
+		output = fz_new_pixmap(ctx, src->colorspace, patch.x1 - patch.x0, patch.y1 - patch.y0, src->seps, src->alpha || forcealpha);
 	}
 	fz_catch(ctx)
 	{

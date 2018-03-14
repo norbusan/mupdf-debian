@@ -1,5 +1,8 @@
 #include "mupdf/fitz.h"
+#include "mupdf/pdf.h"
 #include "pdf-imp.h"
+
+#include <string.h>
 
 /*
 	Notes on OCGs etc.
@@ -470,7 +473,7 @@ pdf_layer_config_ui_info(fz_context *ctx, pdf_document *doc, int ui, pdf_layer_c
 }
 
 static int
-ocg_intents_include(fz_context *ctx, pdf_ocg_descriptor *desc, char *name)
+ocg_intents_include(fz_context *ctx, pdf_ocg_descriptor *desc, const char *name)
 {
 	int i, len;
 
@@ -483,7 +486,7 @@ ocg_intents_include(fz_context *ctx, pdf_ocg_descriptor *desc, char *name)
 
 	if (pdf_is_name(ctx, desc->intent))
 	{
-		char *intent = pdf_to_name(ctx, desc->intent);
+		const char *intent = pdf_to_name(ctx, desc->intent);
 		if (strcmp(intent, "All") == 0)
 			return 1;
 		return (strcmp(intent, name) == 0);
@@ -494,7 +497,7 @@ ocg_intents_include(fz_context *ctx, pdf_ocg_descriptor *desc, char *name)
 	len = pdf_array_len(ctx, desc->intent);
 	for (i=0; i < len; i++)
 	{
-		char *intent = pdf_to_name(ctx, pdf_array_get(ctx, desc->intent, i));
+		const char *intent = pdf_to_name(ctx, pdf_array_get(ctx, desc->intent, i));
 		if (strcmp(intent, "All") == 0)
 			return 1;
 		if (strcmp(intent, name) == 0)
@@ -614,7 +617,7 @@ pdf_is_hidden_ocg(fz_context *ctx, pdf_ocg_descriptor *desc, pdf_obj *rdb, const
 	{
 		/* An Optional Content Membership Dictionary */
 		pdf_obj *name;
-		int combine, on;
+		int combine, on = 0;
 
 		obj = pdf_dict_get(ctx, ocg, PDF_NAME_VE);
 		if (pdf_is_array(ctx, obj)) {
@@ -708,9 +711,12 @@ pdf_read_ocg(fz_context *ctx, pdf_document *doc)
 		/* Not ever supposed to happen, but live with it. */
 		return;
 	len = pdf_array_len(ctx, ocg);
+
+	desc = fz_malloc_struct(ctx, pdf_ocg_descriptor);
+	desc->ocgs = NULL;
+
 	fz_try(ctx)
 	{
-		desc = fz_malloc_struct(ctx, pdf_ocg_descriptor);
 		desc->num_configs = num_configs;
 		desc->len = len;
 		desc->ocgs = fz_calloc(ctx, len, sizeof(*desc->ocgs));
@@ -725,8 +731,7 @@ pdf_read_ocg(fz_context *ctx, pdf_document *doc)
 	}
 	fz_catch(ctx)
 	{
-		if (desc)
-			fz_free(ctx, desc->ocgs);
+		fz_free(ctx, desc->ocgs);
 		fz_free(ctx, desc);
 		fz_rethrow(ctx);
 	}

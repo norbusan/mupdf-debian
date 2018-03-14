@@ -39,7 +39,7 @@ static void
 fz_trace_text_span(fz_context *ctx, fz_output *out, fz_text_span *span)
 {
 	int i;
-	fz_write_printf(ctx, out, "<span font=\"%s\" wmode=\"%d\"", fz_font_name(ctx, span->font), span->wmode);
+	fz_write_printf(ctx, out, "<span font=\"%s\" wmode=\"%d\" bidi=\"%d\"", fz_font_name(ctx, span->font), span->wmode, span->bidi_level);
 	fz_write_printf(ctx, out, " trm=\"%g %g %g %g\">\n", span->trm.a, span->trm.b, span->trm.c, span->trm.d);
 	for (i = 0; i < span->len; i++)
 	{
@@ -117,7 +117,7 @@ fz_trace_path(fz_context *ctx, fz_output *out, const fz_path *path)
 
 static void
 fz_trace_fill_path(fz_context *ctx, fz_device *dev, const fz_path *path, int even_odd, const fz_matrix *ctm,
-	fz_colorspace *colorspace, const float *color, float alpha)
+	fz_colorspace *colorspace, const float *color, float alpha, const fz_color_params *color_params)
 {
 	fz_output *out = ((fz_trace_device*)dev)->out;
 	fz_write_printf(ctx, out, "<fill_path");
@@ -134,7 +134,7 @@ fz_trace_fill_path(fz_context *ctx, fz_device *dev, const fz_path *path, int eve
 
 static void
 fz_trace_stroke_path(fz_context *ctx, fz_device *dev, const fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm,
-	fz_colorspace *colorspace, const float *color, float alpha)
+	fz_colorspace *colorspace, const float *color, float alpha, const fz_color_params *color_params)
 {
 	fz_output *out = ((fz_trace_device*)dev)->out;
 	int i;
@@ -190,7 +190,7 @@ fz_trace_clip_stroke_path(fz_context *ctx, fz_device *dev, const fz_path *path, 
 
 static void
 fz_trace_fill_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_matrix *ctm,
-	fz_colorspace *colorspace, const float *color, float alpha)
+	fz_colorspace *colorspace, const float *color, float alpha, const fz_color_params *color_params)
 {
 	fz_output *out = ((fz_trace_device*)dev)->out;
 	fz_write_printf(ctx, out, "<fill_text");
@@ -203,7 +203,7 @@ fz_trace_fill_text(fz_context *ctx, fz_device *dev, const fz_text *text, const f
 
 static void
 fz_trace_stroke_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_stroke_state *stroke, const fz_matrix *ctm,
-	fz_colorspace *colorspace, const float *color, float alpha)
+	fz_colorspace *colorspace, const float *color, float alpha, const fz_color_params *color_params)
 {
 	fz_output *out = ((fz_trace_device*)dev)->out;
 	fz_write_printf(ctx, out, "<stroke_text");
@@ -248,7 +248,7 @@ fz_trace_ignore_text(fz_context *ctx, fz_device *dev, const fz_text *text, const
 }
 
 static void
-fz_trace_fill_image(fz_context *ctx, fz_device *dev, fz_image *image, const fz_matrix *ctm, float alpha)
+fz_trace_fill_image(fz_context *ctx, fz_device *dev, fz_image *image, const fz_matrix *ctm, float alpha, const fz_color_params *color_params)
 {
 	fz_output *out = ((fz_trace_device*)dev)->out;
 	fz_write_printf(ctx, out, "<fill_image alpha=\"%g\"", alpha);
@@ -258,7 +258,7 @@ fz_trace_fill_image(fz_context *ctx, fz_device *dev, fz_image *image, const fz_m
 }
 
 static void
-fz_trace_fill_shade(fz_context *ctx, fz_device *dev, fz_shade *shade, const fz_matrix *ctm, float alpha)
+fz_trace_fill_shade(fz_context *ctx, fz_device *dev, fz_shade *shade, const fz_matrix *ctm, float alpha, const fz_color_params *color_params)
 {
 	fz_output *out = ((fz_trace_device*)dev)->out;
 	fz_write_printf(ctx, out, "<fill_shade alpha=\"%g\"", alpha);
@@ -268,7 +268,7 @@ fz_trace_fill_shade(fz_context *ctx, fz_device *dev, fz_shade *shade, const fz_m
 
 static void
 fz_trace_fill_image_mask(fz_context *ctx, fz_device *dev, fz_image *image, const fz_matrix *ctm,
-	fz_colorspace *colorspace, const float *color, float alpha)
+	fz_colorspace *colorspace, const float *color, float alpha, const fz_color_params *color_params)
 {
 	fz_output *out = ((fz_trace_device*)dev)->out;
 	fz_write_printf(ctx, out, "<fill_image_mask");
@@ -296,7 +296,7 @@ fz_trace_pop_clip(fz_context *ctx, fz_device *dev)
 }
 
 static void
-fz_trace_begin_mask(fz_context *ctx, fz_device *dev, const fz_rect *bbox, int luminosity, fz_colorspace *colorspace, const float *color)
+fz_trace_begin_mask(fz_context *ctx, fz_device *dev, const fz_rect *bbox, int luminosity, fz_colorspace *colorspace, const float *color, const fz_color_params *color_params)
 {
 	fz_output *out = ((fz_trace_device*)dev)->out;
 	fz_write_printf(ctx, out, "<mask bbox=\"%g %g %g %g\" s=\"%s\"",
@@ -313,7 +313,7 @@ fz_trace_end_mask(fz_context *ctx, fz_device *dev)
 }
 
 static void
-fz_trace_begin_group(fz_context *ctx, fz_device *dev, const fz_rect *bbox, int isolated, int knockout, int blendmode, float alpha)
+fz_trace_begin_group(fz_context *ctx, fz_device *dev, const fz_rect *bbox, fz_colorspace *cs, int isolated, int knockout, int blendmode, float alpha)
 {
 	fz_output *out = ((fz_trace_device*)dev)->out;
 	fz_write_printf(ctx, out, "<group bbox=\"%g %g %g %g\" isolated=\"%d\" knockout=\"%d\" blendmode=\"%s\" alpha=\"%g\">\n",
@@ -332,7 +332,7 @@ static int
 fz_trace_begin_tile(fz_context *ctx, fz_device *dev, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *ctm, int id)
 {
 	fz_output *out = ((fz_trace_device*)dev)->out;
-	fz_write_printf(ctx, out, "<tile");
+	fz_write_printf(ctx, out, "<tile id=\"%d\"", id);
 	fz_write_printf(ctx, out, " area=\"%g %g %g %g\"", area->x0, area->y0, area->x1, area->y1);
 	fz_write_printf(ctx, out, " view=\"%g %g %g %g\"", view->x0, view->y0, view->x1, view->y1);
 	fz_write_printf(ctx, out, " xstep=\"%g\" ystep=\"%g\"", xstep, ystep);

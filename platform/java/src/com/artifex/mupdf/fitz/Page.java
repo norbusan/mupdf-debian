@@ -2,6 +2,10 @@ package com.artifex.mupdf.fitz;
 
 public class Page
 {
+	static {
+		Context.init();
+	}
+
 	private long pointer;
 
 	protected native void finalize();
@@ -43,8 +47,5 @@ public class Page
 
 	public native byte[] textAsHtml();
 
-	public native int countSeparations();
-	public native Separation getSeparation(int index);
-	public native void enableSeparation(int index, boolean enabled);
-
+	public native Separations getSeparations();
 }

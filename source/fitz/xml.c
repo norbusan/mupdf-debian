@@ -1,5 +1,8 @@
 #include "mupdf/fitz.h"
 
+#include <string.h>
+#include <stdlib.h>
+
 static const struct { const char *ent; int ucs; } html_entities[] = {
 	{"nbsp",160}, {"iexcl",161}, {"cent",162}, {"pound",163},
 	{"curren",164}, {"yen",165}, {"brvbar",166}, {"sect",167},
@@ -85,6 +88,7 @@ struct fz_xml_s
 	fz_xml *up, *down, *tail, *prev, *next;
 };
 
+#if 0
 static void xml_indent(int n)
 {
 	while (n--) {
@@ -141,6 +145,7 @@ void fz_debug_xml(fz_xml *item, int level)
 		printf(")%s\n", item->name);
 	}
 }
+#endif
 
 fz_xml *fz_xml_prev(fz_xml *item)
 {
@@ -585,9 +590,9 @@ parse_attribute_value:
 	return "end of data in attribute value";
 }
 
-static char *convert_to_utf8(fz_context *doc, unsigned char *s, size_t n, int *dofree)
+static char *convert_to_utf8(fz_context *doc, const unsigned char *s, size_t n, int *dofree)
 {
-	unsigned char *e = s + n;
+	const unsigned char *e = s + n;
 	char *dst, *d;
 	int c;
 

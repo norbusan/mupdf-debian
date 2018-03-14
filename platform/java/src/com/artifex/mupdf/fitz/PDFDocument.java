@@ -2,6 +2,10 @@ package com.artifex.mupdf.fitz;
 
 public class PDFDocument extends Document
 {
+	static {
+		Context.init();
+	}
+
 	private static native long newNative();
 
 	protected PDFDocument(long p) {
@@ -26,6 +30,7 @@ public class PDFDocument extends Document
 	public native PDFObject newInteger(int i);
 	public native PDFObject newReal(float f);
 	public native PDFObject newString(String s);
+	public native PDFObject newByteString(byte[] bs);
 	public native PDFObject newName(String name);
 	public native PDFObject newIndirect(int num, int gen);
 	public native PDFObject newArray();
@@ -40,7 +45,7 @@ public class PDFDocument extends Document
 	}
 
 	public native PDFGraftMap newPDFGraftMap();
-	public native PDFObject graftObject(PDFDocument src, PDFObject obj, PDFGraftMap map);
+	public native PDFObject graftObject(PDFObject obj);
 
 	private native PDFObject addStreamBuffer(Buffer buf, Object obj, boolean compressed);
 	private native PDFObject addStreamString(String str, Object obj, boolean compressed);

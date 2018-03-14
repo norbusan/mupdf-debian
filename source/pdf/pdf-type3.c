@@ -1,11 +1,12 @@
+#include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
 
 #include "../fitz/font-imp.h"
 
 static void
-pdf_run_glyph_func(fz_context *ctx, void *doc, void *rdb, fz_buffer *contents, fz_device *dev, const fz_matrix *ctm, void *gstate, int nested_depth)
+pdf_run_glyph_func(fz_context *ctx, void *doc, void *rdb, fz_buffer *contents, fz_device *dev, const fz_matrix *ctm, void *gstate, int nested_depth, fz_default_colorspaces *default_cs)
 {
-	pdf_run_glyph(ctx, doc, (pdf_obj *)rdb, contents, dev, ctm, gstate, nested_depth);
+	pdf_run_glyph(ctx, doc, (pdf_obj *)rdb, contents, dev, ctm, gstate, nested_depth, default_cs);
 }
 
 static void
@@ -29,7 +30,7 @@ pdf_load_type3_font(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, pdf_obj *d
 	int i, k, n;
 	fz_rect bbox;
 	fz_matrix matrix;
-	fz_font *font;
+	fz_font *font = NULL;
 
 	fz_var(fontdesc);
 
@@ -108,6 +109,14 @@ pdf_load_type3_font(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, pdf_obj *d
 		fontdesc->size += pdf_cmap_size(ctx, fontdesc->encoding);
 
 		pdf_load_to_unicode(ctx, doc, fontdesc, estrings, NULL, pdf_dict_get(ctx, dict, PDF_NAME_ToUnicode));
+
+		/* Use the glyph index as ASCII when we can't figure out a proper encoding */
+		if (fontdesc->cid_to_ucs_len == 256)
+		{
+			for (i = 32; i < 127; ++i)
+				if (fontdesc->cid_to_ucs[i] == FZ_REPLACEMENT_CHARACTER)
+					fontdesc->cid_to_ucs[i] = i;
+		}
 
 		/* Widths */
 

@@ -1,4 +1,7 @@
+#include "mupdf/fitz.h"
 #include "fitz-imp.h"
+
+#include <string.h>
 
 #include <zlib.h>
 
@@ -66,7 +69,7 @@ fz_write_zip_entry(fz_context *ctx, fz_zip_writer *zip, const char *name, fz_buf
 void
 fz_close_zip_writer(fz_context *ctx, fz_zip_writer *zip)
 {
-	fz_off_t offset = fz_tell_output(ctx, zip->output);
+	int64_t offset = fz_tell_output(ctx, zip->output);
 
 	fz_write_data(ctx, zip->output, zip->central->data, zip->central->len);
 
@@ -80,6 +83,8 @@ fz_close_zip_writer(fz_context *ctx, fz_zip_writer *zip)
 	fz_write_int16_le(ctx, zip->output, 5); /* zip file comment length */
 
 	fz_write_data(ctx, zip->output, "MuPDF", 5);
+
+	fz_close_output(ctx, zip->output);
 
 	zip->closed = 1;
 }

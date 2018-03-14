@@ -1,4 +1,7 @@
-#include "mupdf/html.h"
+#include "mupdf/fitz.h"
+#include "html-imp.h"
+
+#include <string.h>
 
 struct lexbuf
 {
@@ -24,7 +27,7 @@ FZ_NORETURN static void fz_css_error(struct lexbuf *buf, const char *msg)
 fz_css *fz_new_css(fz_context *ctx)
 {
 	fz_pool *pool = fz_new_pool(ctx);
-	fz_css *css;
+	fz_css *css = NULL;
 
 	fz_try(ctx)
 	{

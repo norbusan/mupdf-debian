@@ -1,5 +1,8 @@
 #include "mupdf/fitz.h"
 
+#include <string.h>
+#include <math.h>
+
 typedef struct fz_mesh_processor_s fz_mesh_processor;
 
 struct fz_mesh_processor_s {
@@ -198,7 +201,7 @@ fz_paint_annulus(fz_context *ctx, const fz_matrix *ctm,
 	int i;
 
 	theta = atan2f(p1.y - p0.y, p1.x - p0.x);
-	step = (float)M_PI / count;
+	step = FZ_PI / count;
 
 	a = 0;
 	for (i = 1; i <= count; i++)
@@ -1083,46 +1086,4 @@ fz_bound_shade(fz_context *ctx, fz_shade *shade, const fz_matrix *ctm, fz_rect *
 		fz_intersect_rect(s, &rect);
 	}
 	return fz_transform_rect(s, &local_ctm);
-}
-
-void
-fz_print_shade(fz_context *ctx, fz_output *out, fz_shade *shade)
-{
-	int i;
-
-	fz_write_printf(ctx, out, "shading {\n");
-
-	switch (shade->type)
-	{
-	case FZ_FUNCTION_BASED: fz_write_printf(ctx, out, "\ttype function_based\n"); break;
-	case FZ_LINEAR: fz_write_printf(ctx, out, "\ttype linear\n"); break;
-	case FZ_RADIAL: fz_write_printf(ctx, out, "\ttype radial\n"); break;
-	default: /* MESH */ fz_write_printf(ctx, out, "\ttype mesh\n"); break;
-	}
-
-	fz_write_printf(ctx, out, "\tbbox [%g %g %g %g]\n",
-		shade->bbox.x0, shade->bbox.y0,
-		shade->bbox.x1, shade->bbox.y1);
-
-	fz_write_printf(ctx, out, "\tcolorspace %s\n", fz_colorspace_name(ctx, shade->colorspace));
-
-	fz_write_printf(ctx, out, "\tmatrix [%g %g %g %g %g %g]\n",
-			shade->matrix.a, shade->matrix.b, shade->matrix.c,
-			shade->matrix.d, shade->matrix.e, shade->matrix.f);
-
-	if (shade->use_background)
-	{
-		int n = fz_colorspace_n(ctx, shade->colorspace);
-		fz_write_printf(ctx, out, "\tbackground [");
-		for (i = 0; i < n; i++)
-			fz_write_printf(ctx, out, "%s%g", i == 0 ? "" : " ", shade->background[i]);
-		fz_write_printf(ctx, out, "]\n");
-	}
-
-	if (shade->use_function)
-	{
-		fz_write_printf(ctx, out, "\tfunction\n");
-	}
-
-	fz_write_printf(ctx, out, "}\n");
 }

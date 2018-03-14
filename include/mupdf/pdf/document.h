@@ -10,7 +10,7 @@ typedef struct pdf_portfolio_s pdf_portfolio;
 
 typedef struct pdf_page_s pdf_page;
 typedef struct pdf_annot_s pdf_annot;
-typedef struct pdf_widget_s pdf_widget;
+typedef struct pdf_annot_s pdf_widget;
 typedef struct pdf_hotspot_s pdf_hotspot;
 typedef struct pdf_js_s pdf_js;
 
@@ -25,7 +25,7 @@ struct pdf_lexbuf_s
 	int size;
 	int base_size;
 	int len;
-	fz_off_t i;
+	int64_t i;
 	float f;
 	char *scratch;
 	char buffer[PDF_LEXBUF_SMALL];
@@ -90,10 +90,13 @@ pdf_document *pdf_open_document_with_stream(fz_context *ctx, fz_stream *file);
 
 	The resource store in the context associated with pdf_document
 	is emptied.
-
-	Does not throw exceptions.
 */
 void pdf_drop_document(fz_context *ctx, pdf_document *doc);
+
+/*
+	pdf_keep_document: Keep a reference to an open document.
+*/
+pdf_document *pdf_keep_document(fz_context *ctx, pdf_document *doc);
 
 /*
 	pdf_specifics: down-cast a fz_document to a pdf_document.
@@ -563,12 +566,13 @@ struct pdf_document_s
 	fz_stream *file;
 
 	int version;
-	fz_off_t startxref;
-	fz_off_t file_size;
+	int64_t startxref;
+	int64_t file_size;
 	pdf_crypt *crypt;
 	pdf_ocg_descriptor *ocg;
 	pdf_portfolio *portfolio;
 	pdf_hotspot hotspot;
+	fz_colorspace *oi;
 
 	int max_xref_len;
 	int num_xref_sections;
@@ -582,21 +586,22 @@ struct pdf_document_s
 	int freeze_updates;
 	int has_xref_streams;
 
-	int page_count;
+	int rev_page_count;
 	pdf_rev_page_map *rev_page_map;
 
 	int repair_attempted;
 
 	/* State indicating which file parsing method we are using */
 	int file_reading_linearly;
-	fz_off_t file_length;
+	int64_t file_length;
 
+	int linear_page_count;
 	pdf_obj *linear_obj; /* Linearized object (if used) */
 	pdf_obj **linear_page_refs; /* Page objects for linear loading */
 	int linear_page1_obj_num;
 
 	/* The state for the pdf_progressive_advance parser */
-	fz_off_t linear_pos;
+	int64_t linear_pos;
 	int linear_page_num;
 
 	int hint_object_offset;
@@ -620,17 +625,17 @@ struct pdf_document_s
 	struct
 	{
 		int number; /* Page object number */
-		fz_off_t offset; /* Offset of page object */
-		fz_off_t index; /* Index into shared hint_shared_ref */
+		int64_t offset; /* Offset of page object */
+		int64_t index; /* Index into shared hint_shared_ref */
 	} *hint_page;
 	int *hint_shared_ref;
 	struct
 	{
 		int number; /* Object number of first object */
-		fz_off_t offset; /* Offset of first object */
+		int64_t offset; /* Offset of first object */
 	} *hint_shared;
 	int hint_obj_offsets_max;
-	fz_off_t *hint_obj_offsets;
+	int64_t *hint_obj_offsets;
 
 	int resources_localised;
 
@@ -677,9 +682,54 @@ pdf_document *pdf_create_document(fz_context *ctx);
 */
 typedef struct pdf_graft_map_s pdf_graft_map;
 
-pdf_graft_map *pdf_new_graft_map(fz_context *ctx, pdf_document *src);
+/*
+	pdf_graft_object: Return a deep copied object equivalent to the
+	supplied object, suitable for use within the given document.
+
+	dst: The document in which the returned object is to be used.
+
+	obj: The object deep copy.
+
+	Note: If grafting multiple objects, you should use a pdf_graft_map
+	to avoid potential duplication of target objects.
+*/
+pdf_obj *pdf_graft_object(fz_context *ctx, pdf_document *dst, pdf_obj *obj);
+
+/*
+	pdf_new_graft_map: Prepare a graft map object to allow objects
+	to be deep copied from one document to the given one, avoiding
+	problems with duplicated child objects.
+
+	dst: The document to copy objects to.
+
+	Note: all the source objects must come from the same document.
+*/
+pdf_graft_map *pdf_new_graft_map(fz_context *ctx, pdf_document *dst);
+
+/*
+	pdf_keep_graft_map: Keep a reference to a graft map object.
+*/
+pdf_graft_map *pdf_keep_graft_map(fz_context *ctx, pdf_graft_map *map);
+
+/*
+	pdf_drop_graft_map: Drop a graft map.
+*/
 void pdf_drop_graft_map(fz_context *ctx, pdf_graft_map *map);
-pdf_obj *pdf_graft_object(fz_context *ctx, pdf_document *dst, pdf_document *src, pdf_obj *obj, pdf_graft_map *map);
+
+/*
+	pdf_graft_mapped_object: Return a deep copied object equivalent
+	to the supplied object, suitable for use within the target
+	document of the map.
+
+	map: A map targeted at the document in which the returned
+	object is to be used.
+
+	obj: The object deep copy.
+
+	Note: Copying multiple objects via the same graft map ensures
+	that any shared child are not duplicated more than once.
+*/
+pdf_obj *pdf_graft_mapped_object(fz_context *ctx, pdf_graft_map *map, pdf_obj *obj);
 
 /*
 	pdf_page_write: Create a device that will record the

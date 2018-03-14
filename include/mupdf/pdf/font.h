@@ -1,6 +1,8 @@
 #ifndef MUPDF_PDF_FONT_H
 #define MUPDF_PDF_FONT_H
 
+#include "mupdf/pdf/cmap.h"
+
 /*
  * Font
  */
@@ -18,7 +20,7 @@ enum
 	PDF_FD_FORCE_BOLD = 1 << 18
 };
 
-void pdf_load_encoding(const char **estrings, char *encoding);
+void pdf_load_encoding(const char **estrings, const char *encoding);
 int pdf_lookup_agl(const char *name);
 const char **pdf_lookup_agl_duplicates(int ucs);
 
@@ -103,11 +105,11 @@ void pdf_load_to_unicode(fz_context *ctx, pdf_document *doc, pdf_font_desc *font
 
 int pdf_font_cid_to_gid(fz_context *ctx, pdf_font_desc *fontdesc, int cid);
 
-const char *pdf_lookup_substitute_font(fz_context *ctx, int mono, int serif, int bold, int italic, int *len);
+const unsigned char *pdf_lookup_substitute_font(fz_context *ctx, int mono, int serif, int bold, int italic, int *len);
 
 pdf_font_desc *pdf_load_type3_font(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, pdf_obj *obj);
-void pdf_load_type3_glyphs(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc, int nestedDepth);
-pdf_font_desc *pdf_load_font(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, pdf_obj *obj, int nestedDepth);
+void pdf_load_type3_glyphs(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc, int nested_depth);
+pdf_font_desc *pdf_load_font(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, pdf_obj *obj, int nested_depth);
 pdf_font_desc *pdf_load_hail_mary_font(fz_context *ctx, pdf_document *doc);
 
 pdf_font_desc *pdf_new_font_desc(fz_context *ctx);
@@ -119,7 +121,7 @@ void pdf_print_font(fz_context *ctx, fz_output *out, pdf_font_desc *fontdesc);
 fz_rect *pdf_measure_text(fz_context *ctx, pdf_font_desc *fontdesc, unsigned char *buf, size_t len, fz_rect *rect);
 float pdf_text_stride(fz_context *ctx, pdf_font_desc *fontdesc, float fontsize, unsigned char *buf, size_t len, float room, size_t *count);
 
-void pdf_run_glyph(fz_context *ctx, pdf_document *doc, pdf_obj *resources, fz_buffer *contents, fz_device *dev, const fz_matrix *ctm, void *gstate, int nestedDepth);
+void pdf_run_glyph(fz_context *ctx, pdf_document *doc, pdf_obj *resources, fz_buffer *contents, fz_device *dev, const fz_matrix *ctm, void *gstate, int nested_depth, fz_default_colorspaces *default_cs);
 
 pdf_obj *pdf_add_simple_font(fz_context *ctx, pdf_document *doc, fz_font *font);
 pdf_obj *pdf_add_cid_font(fz_context *ctx, pdf_document *doc, fz_font *font);

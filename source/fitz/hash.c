@@ -1,4 +1,8 @@
 #include "mupdf/fitz.h"
+#include "fitz-imp.h"
+
+#include <string.h>
+#include <assert.h>
 
 /*
 Simple hashtable with open addressing linear probe.
@@ -23,7 +27,7 @@ struct fz_hash_table_s
 	int size;
 	int load;
 	int lock; /* -1 or the lock used to protect this hash table */
-	fz_hash_table_drop_fn drop_val;
+	fz_hash_table_drop_fn *drop_val;
 	fz_hash_entry *ents;
 };
 
@@ -44,7 +48,7 @@ static unsigned hash(const unsigned char *s, int len)
 }
 
 fz_hash_table *
-fz_new_hash_table(fz_context *ctx, int initialsize, int keylen, int lock, fz_hash_table_drop_fn drop_val)
+fz_new_hash_table(fz_context *ctx, int initialsize, int keylen, int lock, fz_hash_table_drop_fn *drop_val)
 {
 	fz_hash_table *table;
 
@@ -118,7 +122,10 @@ do_hash_insert(fz_context *ctx, fz_hash_table *table, const void *key, void *val
 		if (memcmp(key, ents[pos].key, table->keylen) == 0)
 		{
 			/* This is legal, but should rarely happen. */
-			fz_warn(ctx, "assert: overwrite hash slot");
+			if (val != ents[pos].val)
+				fz_warn(ctx, "assert: overwrite hash slot with different value!");
+			else
+				fz_warn(ctx, "assert: overwrite hash slot with same value");
 			return ents[pos].val;
 		}
 
@@ -280,31 +287,10 @@ fz_hash_remove(fz_context *ctx, fz_hash_table *table, const void *key)
 }
 
 void
-fz_print_hash(fz_context *ctx, fz_output *out, fz_hash_table *table)
+fz_hash_for_each(fz_context *ctx, fz_hash_table *table, void *state, fz_hash_table_for_each_fn *callback)
 {
-	fz_print_hash_details(ctx, out, table, NULL, 0);
-}
-
-void
-fz_print_hash_details(fz_context *ctx, fz_output *out, fz_hash_table *table, void (*details)(fz_context*,fz_output*,void*), int compact)
-{
-	int i, k;
-
-	fz_write_printf(ctx, out, "cache load %d / %d\n", table->load, table->size);
-
-	for (i = 0; i < table->size; i++)
-	{
-		if (!table->ents[i].val && !compact)
-			fz_write_printf(ctx, out, "table %04d: empty\n", i);
-		else if (table->ents[i].val)
-		{
-			fz_write_printf(ctx, out, "table %04d: key=", i);
-			for (k = 0; k < MAX_KEY_LEN; k++)
-				fz_write_printf(ctx, out, "%02x", ((unsigned char*)table->ents[i].key)[k]);
-			if (details)
-				details(ctx, out, table->ents[i].val);
-			else
-				fz_write_printf(ctx, out, " val=$%p\n", table->ents[i].val);
-		}
-	}
+	int i;
+	for (i = 0; i < table->size; ++i)
+		if (table->ents[i].val)
+			callback(ctx, state, table->ents[i].key, table->keylen, table->ents[i].val);
 }

@@ -1,8 +1,12 @@
+#include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
 
 #if FZ_ENABLE_JS
 
 #include "mujs.h"
+
+#include <stdarg.h>
+#include <string.h>
 
 struct pdf_js_s
 {
@@ -87,6 +91,7 @@ static void app_alert(js_State *J)
 	event.icon_type = js_tointeger(J, 2);
 	event.button_group_type = js_tointeger(J, 3);
 	event.title = js_tostring(J, 4);
+	event.button_pressed = 0; /* WIP WIP WIP IS THIS CORRECT? */
 
 	fz_try(js->ctx)
 		pdf_event_issue_alert(js->ctx, js->doc, &event);
@@ -157,7 +162,7 @@ static void field_getName(js_State *J)
 {
 	pdf_js *js = js_getcontext(J);
 	pdf_obj *field = js_touserdata(J, 0, "Field");
-	char *name;
+	char *name = NULL;
 	fz_try(js->ctx)
 		name = pdf_field_name(js->ctx, js->doc, field);
 	fz_catch(js->ctx)
@@ -175,7 +180,7 @@ static void field_getDisplay(js_State *J)
 {
 	pdf_js *js = js_getcontext(J);
 	pdf_obj *field = js_touserdata(J, 0, "Field");
-	int display;
+	int display = 0;
 	fz_try(js->ctx)
 		display = pdf_field_display(js->ctx, js->doc, field);
 	fz_catch(js->ctx)
@@ -275,7 +280,7 @@ static void field_getBorderStyle(js_State *J)
 {
 	pdf_js *js = js_getcontext(J);
 	pdf_obj *field = js_touserdata(J, 0, "Field");
-	const char *border_style;
+	const char *border_style = NULL;
 	fz_try(js->ctx)
 		border_style = pdf_field_border_style(js->ctx, js->doc, field);
 	fz_catch(js->ctx)
@@ -298,7 +303,7 @@ static void field_getValue(js_State *J)
 {
 	pdf_js *js = js_getcontext(J);
 	pdf_obj *field = js_touserdata(J, 0, "Field");
-	char *val;
+	char *val = NULL;
 
 	fz_try(js->ctx)
 		val = pdf_field_value(js->ctx, js->doc, field);
@@ -379,7 +384,7 @@ static void doc_getField(js_State *J)
 	fz_context *ctx = js->ctx;
 	const char *cName = js_tostring(J, 1);
 	char *name = pdf_from_utf8(ctx, cName);
-	pdf_obj *dict;
+	pdf_obj *dict = NULL;
 
 	fz_try(ctx)
 		dict = pdf_lookup_field(ctx, js->form, name);
@@ -505,6 +510,15 @@ static void declare_dom(pdf_js *js)
 	/* Create the 'app' object */
 	js_newobject(J);
 	{
+#if defined(_WIN32) || defined(_WIN64)
+		js_pushstring(J, "WIN");
+#elif defined(__APPLE__)
+		js_pushstring(J, "MAC");
+#else
+		js_pushstring(J, "UNIX");
+#endif
+		js_defproperty(J, -2, "app.platform", JS_READONLY | JS_DONTENUM | JS_DONTCONF);
+
 		addmethod(J, "app.alert", app_alert, 4);
 		addmethod(J, "app.execDialog", app_execDialog, 0);
 		addmethod(J, "app.execMenuItem", app_execMenuItem, 1);
@@ -549,7 +563,7 @@ static void declare_dom(pdf_js *js)
 	js_setglobal(J, "MuPDF_Doc"); /* for pdf-util.js use */
 }
 
-#include "gen_js_util.h"
+extern const unsigned char fz_source_pdf_pdf_js_util_js[];
 
 static void preload_helpers(pdf_js *js)
 {
@@ -569,7 +583,7 @@ static void preload_helpers(pdf_js *js)
 	);
 #endif
 
-	js_dostring(js->imp, fz_source_pdf_pdf_js_util_js);
+	js_dostring(js->imp, (const char *)fz_source_pdf_pdf_js_util_js);
 }
 
 void pdf_drop_js(fz_context *ctx, pdf_js *js)
@@ -622,7 +636,7 @@ static pdf_js *pdf_new_js(fz_context *ctx, pdf_document *doc)
 	fz_catch(ctx)
 	{
 		pdf_drop_js(ctx, js);
-		js = NULL;
+		fz_rethrow(ctx);
 	}
 
 	return js;

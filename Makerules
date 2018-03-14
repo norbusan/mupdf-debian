@@ -8,8 +8,7 @@ OS := $(OS:Darwin=MACOS)
 
 HAVE_LIBDL ?= yes
 
-
-CFLAGS += -Wall
+CFLAGS += -Wall -Wdeclaration-after-statement
 
 ifeq (,$(findstring -fembed-bitcode,$(XCFLAGS)))
 # clang does not support these in combination with -fembed-bitcode
@@ -35,8 +34,11 @@ else ifeq "$(build)" "valgrind"
 CFLAGS += -pipe -O2 -DNDEBUG -DPACIFY_VALGRIND -fno-omit-frame-pointer
 LDFLAGS += $(LDREMOVEUNREACH) -Wl,-s
 else ifeq "$(build)" "sanitize"
-CFLAGS += -pipe -g -fsanitize=address -fno-omit-frame-pointer
-LDFLAGS += -fsanitize=address
+CFLAGS += -pipe -g -fno-omit-frame-pointer -fsanitize=address
+LDFLAGS += -g -fsanitize=address
+else ifeq "$(build)" "sanitize-release"
+CFLAGS += -pipe -O2 -DNDEBUG -fno-omit-frame-pointer -fsanitize=address
+LDFLAGS += $(LDREMOVEUNREACH) -Wl,-s -fsanitize=address
 else ifeq "$(build)" "profile"
 CFLAGS += -pipe -O2 -DNDEBUG -pg
 LDFLAGS += -pg
@@ -60,10 +62,6 @@ else
 $(error unknown build setting: '$(build)')
 endif
 
-ifeq "$(largefile)" "yes"
-CFLAGS += -DFZ_LARGEFILE
-endif
-
 # Windows (MINGW) build doesn't use system libraries.
 ifeq "$(OS)" "MINGW"
 
@@ -79,35 +77,14 @@ else ifeq "$(OS)" "MACOS"
 
 HAVE_X11 ?= no
 
-HAVE_PTHREAD := yes
-SYS_PTHREAD_CFLAGS :=
-SYS_PTHREAD_LIBS := -lpthread
+HAVE_GLUT ?= yes
+SYS_GLUT_CFLAGS := -Wno-deprecated-declarations
+SYS_GLUT_LIBS := -framework GLUT -framework OpenGL
 
-# Mac OS X deprecated libcrypto, so the default is to not include it.
-HAVE_LIBCRYTO := no
-SYS_LIBCRYPTO_CFLAGS :=
-SYS_LIBCRYPTO_LIBS :=
-ifeq "$(HAVE_LIBCRYPTO)" "yes"
-SYS_LIBCRYPTO_CFLAGS := -DHAVE_LIBCRYPTO
-SYS_LIBCRYPTO_LIBS := -lcrypto
-endif
-
-SYS_CURL_DEPS := -lpthread
-
-SYS_X11_CFLAGS := -I/usr/X11R6/include
-SYS_X11_LIBS := -L/usr/X11R6/lib -lX11 -lXext
-
-SYS_FREETYPE_CFLAGS := $(shell freetype-config --cflags)
-SYS_FREETYPE_LIBS := $(shell freetype-config --libs)
-SYS_OPENJPEG_LIBS := -lopenjpeg
-SYS_JBIG2DEC_LIBS := -ljbig2dec
-SYS_LIBJPEG_LIBS := -ljpeg
-SYS_ZLIB_LIBS := -lz
-
-CC := xcrun cc
-AR := xcrun ar
-LD := xcrun ld
-RANLIB_CMD := xcrun ranlib $@
+CC = xcrun cc
+AR = xcrun ar
+LD = xcrun ld
+RANLIB_CMD = xcrun ranlib $@
 
 # Linux uses pkg-config for system libraries.
 else ifeq "$(OS)" "Linux"
@@ -115,6 +92,10 @@ else ifeq "$(OS)" "Linux"
 HAVE_PTHREAD := yes
 SYS_PTHREAD_CFLAGS :=
 SYS_PTHREAD_LIBS := -lpthread
+
+HAVE_GLUT := yes
+SYS_GLUT_CFLAGS :=
+SYS_GLUT_LIBS := -lglut -lGL
 
 ifeq "$(shell pkg-config --exists 'libcrypto <= 1.0.1t' && echo yes)" "yes"
 HAVE_LIBCRYPTO := yes
@@ -277,5 +258,5 @@ endif
 # TODO: If crosscompiling, why not just call "make libs" instead of this exception?
 ifeq "$(CROSSCOMPILE)" "yes"
 HAVE_X11 ?= no
-HAVE_GLFW ?= no
+HAVE_GLUT ?= no
 endif

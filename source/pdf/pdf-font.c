@@ -1,6 +1,10 @@
+#include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
 
 #include "../fitz/font-imp.h"
+#include "../fitz/fitz-imp.h"
+
+#include <assert.h>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -16,7 +20,8 @@
 #define FT_SFNT_HEAD ft_sfnt_head
 #endif
 
-static void pdf_load_font_descriptor(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc, pdf_obj *dict, char *collection, char *basefont, int iscidfont);
+static void pdf_load_font_descriptor(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc, pdf_obj *dict,
+	const char *collection, const char *basefont, int iscidfont);
 
 static const char *base_font_names[][10] =
 {
@@ -49,7 +54,7 @@ static const char *base_font_names[][10] =
 	{ "ZapfDingbats", NULL }
 };
 
-const char *
+const unsigned char *
 pdf_lookup_substitute_font(fz_context *ctx, int mono, int serif, int bold, int italic, int *len)
 {
 	if (mono) {
@@ -128,7 +133,7 @@ static int is_builtin_font(fz_context *ctx, fz_font *font)
 	if (!font->buffer)
 		return 0;
 	fz_buffer_storage(ctx, font->buffer, &data);
-	return fz_lookup_base14_font(ctx, clean_font_name(font->name), &size) == (char*)data;
+	return fz_lookup_base14_font(ctx, clean_font_name(font->name), &size) == data;
 }
 
 /*
@@ -337,7 +342,7 @@ static int lookup_mre_code(const char *name)
  */
 
 static void
-pdf_load_builtin_font(fz_context *ctx, pdf_font_desc *fontdesc, char *fontname, int has_descriptor)
+pdf_load_builtin_font(fz_context *ctx, pdf_font_desc *fontdesc, const char *fontname, int has_descriptor)
 {
 	FT_Face face;
 	const char *clean_name = clean_font_name(fontname);
@@ -345,7 +350,7 @@ pdf_load_builtin_font(fz_context *ctx, pdf_font_desc *fontdesc, char *fontname, 
 	fontdesc->font = fz_load_system_font(ctx, fontname, 0, 0, !has_descriptor);
 	if (!fontdesc->font)
 	{
-		const char *data;
+		const unsigned char *data;
 		int len;
 
 		data = fz_lookup_base14_font(ctx, clean_name, &len);
@@ -365,12 +370,12 @@ pdf_load_builtin_font(fz_context *ctx, pdf_font_desc *fontdesc, char *fontname, 
 }
 
 static void
-pdf_load_substitute_font(fz_context *ctx, pdf_font_desc *fontdesc, char *fontname, int mono, int serif, int bold, int italic)
+pdf_load_substitute_font(fz_context *ctx, pdf_font_desc *fontdesc, const char *fontname, int mono, int serif, int bold, int italic)
 {
 	fontdesc->font = fz_load_system_font(ctx, fontname, bold, italic, 0);
 	if (!fontdesc->font)
 	{
-		const char *data;
+		const unsigned char *data;
 		int len;
 
 		data = pdf_lookup_substitute_font(ctx, mono, serif, bold, italic, &len);
@@ -392,12 +397,12 @@ pdf_load_substitute_font(fz_context *ctx, pdf_font_desc *fontdesc, char *fontnam
 }
 
 static void
-pdf_load_substitute_cjk_font(fz_context *ctx, pdf_font_desc *fontdesc, char *fontname, int ros, int serif)
+pdf_load_substitute_cjk_font(fz_context *ctx, pdf_font_desc *fontdesc, const char *fontname, int ros, int serif)
 {
 	fontdesc->font = fz_load_system_cjk_font(ctx, fontname, ros, serif);
 	if (!fontdesc->font)
 	{
-		const char *data;
+		const unsigned char *data;
 		int len;
 		int index;
 
@@ -414,7 +419,7 @@ pdf_load_substitute_cjk_font(fz_context *ctx, pdf_font_desc *fontdesc, char *fon
 }
 
 static void
-pdf_load_system_font(fz_context *ctx, pdf_font_desc *fontdesc, char *fontname, char *collection)
+pdf_load_system_font(fz_context *ctx, pdf_font_desc *fontdesc, const char *fontname, const char *collection)
 {
 	int bold = 0;
 	int italic = 0;
@@ -461,7 +466,7 @@ pdf_load_system_font(fz_context *ctx, pdf_font_desc *fontdesc, char *fontname, c
 }
 
 static void
-pdf_load_embedded_font(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc, char *fontname, pdf_obj *stmref)
+pdf_load_embedded_font(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc, const char *fontname, pdf_obj *stmref)
 {
 	fz_buffer *buf;
 
@@ -593,15 +598,18 @@ select_truetype_cmap(FT_Face face, int symbolic)
 	/* Then look for a Microsoft Unicode cmap */
 	for (i = 0; i < face->num_charmaps; i++)
 		if (face->charmaps[i]->platform_id == 3 && face->charmaps[i]->encoding_id == 1)
-			return face->charmaps[i];
+			if (FT_Get_CMap_Format(face->charmaps[i]) != -1)
+				return face->charmaps[i];
 
 	/* Finally look for an Apple MacRoman cmap */
 	for (i = 0; i < face->num_charmaps; i++)
 		if (face->charmaps[i]->platform_id == 1 && face->charmaps[i]->encoding_id == 0)
-			return face->charmaps[i];
+			if (FT_Get_CMap_Format(face->charmaps[i]) != -1)
+				return face->charmaps[i];
 
 	if (face->num_charmaps > 0)
-		return face->charmaps[0];
+		if (FT_Get_CMap_Format(face->charmaps[0]) != -1)
+			return face->charmaps[0];
 	return NULL;
 }
 
@@ -614,7 +622,7 @@ select_unknown_cmap(FT_Face face)
 }
 
 static pdf_font_desc *
-pdf_load_simple_font_by_name(fz_context *ctx, pdf_document *doc, pdf_obj *dict, char *basefont)
+pdf_load_simple_font_by_name(fz_context *ctx, pdf_document *doc, pdf_obj *dict, const char *basefont)
 {
 	pdf_obj *descriptor;
 	pdf_obj *encoding;
@@ -927,8 +935,7 @@ pdf_load_simple_font_by_name(fz_context *ctx, pdf_document *doc, pdf_obj *dict, 
 static pdf_font_desc *
 pdf_load_simple_font(fz_context *ctx, pdf_document *doc, pdf_obj *dict)
 {
-	char *basefont = pdf_to_name(ctx, pdf_dict_get(ctx, dict, PDF_NAME_BaseFont));
-
+	const char *basefont = pdf_to_name(ctx, pdf_dict_get(ctx, dict, PDF_NAME_BaseFont));
 	return pdf_load_simple_font_by_name(ctx, doc, dict, basefont);
 }
 
@@ -958,9 +965,9 @@ hail_mary_cmp_key(fz_context *ctx, void *k0, void *k1)
 }
 
 static void
-hail_mary_print_key(fz_context *ctx, fz_output *out, void *key_)
+hail_mary_format_key(fz_context *ctx, char *s, int n, void *key_)
 {
-	fz_write_printf(ctx, out, "hail mary ");
+	fz_strlcpy(s, "(hail mary font)", n);
 }
 
 static int hail_mary_store_key; /* Dummy */
@@ -971,7 +978,8 @@ static const fz_store_type hail_mary_store_type =
 	hail_mary_keep_key,
 	hail_mary_drop_key,
 	hail_mary_cmp_key,
-	hail_mary_print_key
+	hail_mary_format_key,
+	NULL
 };
 
 pdf_font_desc *
@@ -1008,7 +1016,7 @@ load_cid_font(fz_context *ctx, pdf_document *doc, pdf_obj *dict, pdf_obj *encodi
 	pdf_cmap *cmap;
 	FT_Face face;
 	char collection[256];
-	char *basefont;
+	const char *basefont;
 	int i, k, fterr;
 	pdf_obj *cidtogidmap;
 	pdf_obj *obj;
@@ -1270,10 +1278,11 @@ pdf_load_type0_font(fz_context *ctx, pdf_document *doc, pdf_obj *dict)
  */
 
 static void
-pdf_load_font_descriptor(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc, pdf_obj *dict, char *collection, char *basefont, int iscidfont)
+pdf_load_font_descriptor(fz_context *ctx, pdf_document *doc, pdf_font_desc *fontdesc, pdf_obj *dict,
+	const char *collection, const char *basefont, int iscidfont)
 {
 	pdf_obj *obj1, *obj2, *obj3, *obj;
-	char *fontname;
+	const char *fontname;
 	FT_Face face;
 
 	/* Prefer BaseFont; don't bother with FontName */
@@ -1380,7 +1389,7 @@ pdf_load_font(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, pdf_obj *dict, i
 	pdf_obj *subtype;
 	pdf_obj *dfonts;
 	pdf_obj *charprocs;
-	pdf_font_desc *fontdesc;
+	pdf_font_desc *fontdesc = NULL;
 	int type3 = 0;
 
 	if ((fontdesc = pdf_find_item(ctx, pdf_drop_font_imp, dict)) != NULL)
@@ -1392,38 +1401,49 @@ pdf_load_font(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, pdf_obj *dict, i
 	dfonts = pdf_dict_get(ctx, dict, PDF_NAME_DescendantFonts);
 	charprocs = pdf_dict_get(ctx, dict, PDF_NAME_CharProcs);
 
-	if (pdf_name_eq(ctx, subtype, PDF_NAME_Type0))
-		fontdesc = pdf_load_type0_font(ctx, doc, dict);
-	else if (pdf_name_eq(ctx, subtype, PDF_NAME_Type1))
-		fontdesc = pdf_load_simple_font(ctx, doc, dict);
-	else if (pdf_name_eq(ctx, subtype, PDF_NAME_MMType1))
-		fontdesc = pdf_load_simple_font(ctx, doc, dict);
-	else if (pdf_name_eq(ctx, subtype, PDF_NAME_TrueType))
-		fontdesc = pdf_load_simple_font(ctx, doc, dict);
-	else if (pdf_name_eq(ctx, subtype, PDF_NAME_Type3))
-	{
-		fontdesc = pdf_load_type3_font(ctx, doc, rdb, dict);
-		type3 = 1;
-	}
-	else if (charprocs)
-	{
-		fz_warn(ctx, "unknown font format, guessing type3.");
-		fontdesc = pdf_load_type3_font(ctx, doc, rdb, dict);
-		type3 = 1;
-	}
-	else if (dfonts)
-	{
-		fz_warn(ctx, "unknown font format, guessing type0.");
-		fontdesc = pdf_load_type0_font(ctx, doc, dict);
-	}
-	else
-	{
-		fz_warn(ctx, "unknown font format, guessing type1 or truetype.");
-		fontdesc = pdf_load_simple_font(ctx, doc, dict);
-	}
+	fz_var(fontdesc);
 
-	/* Create glyph width table for stretching substitute fonts and text extraction. */
-	pdf_make_width_table(ctx, fontdesc);
+	fz_try(ctx)
+	{
+		if (pdf_name_eq(ctx, subtype, PDF_NAME_Type0))
+			fontdesc = pdf_load_type0_font(ctx, doc, dict);
+		else if (pdf_name_eq(ctx, subtype, PDF_NAME_Type1))
+			fontdesc = pdf_load_simple_font(ctx, doc, dict);
+		else if (pdf_name_eq(ctx, subtype, PDF_NAME_MMType1))
+			fontdesc = pdf_load_simple_font(ctx, doc, dict);
+		else if (pdf_name_eq(ctx, subtype, PDF_NAME_TrueType))
+			fontdesc = pdf_load_simple_font(ctx, doc, dict);
+		else if (pdf_name_eq(ctx, subtype, PDF_NAME_Type3))
+		{
+			fontdesc = pdf_load_type3_font(ctx, doc, rdb, dict);
+			type3 = 1;
+		}
+		else if (charprocs)
+		{
+			fz_warn(ctx, "unknown font format, guessing type3.");
+			fontdesc = pdf_load_type3_font(ctx, doc, rdb, dict);
+			type3 = 1;
+		}
+		else if (dfonts)
+		{
+			fz_warn(ctx, "unknown font format, guessing type0.");
+			fontdesc = pdf_load_type0_font(ctx, doc, dict);
+		}
+		else
+		{
+			fz_warn(ctx, "unknown font format, guessing type1 or truetype.");
+			fontdesc = pdf_load_simple_font(ctx, doc, dict);
+		}
+
+		/* Create glyph width table for stretching substitute fonts and text extraction. */
+		pdf_make_width_table(ctx, fontdesc);
+
+	}
+	fz_catch(ctx)
+	{
+		pdf_drop_font(ctx, fontdesc);
+		fz_rethrow(ctx);
+	}
 
 	pdf_store_item(ctx, dict, fontdesc, fontdesc->size);
 
@@ -1485,7 +1505,7 @@ float pdf_text_stride(fz_context *ctx, pdf_font_desc *fontdesc, float fontsize, 
 {
 	pdf_hmtx h;
 	size_t i = 0;
-	float x = 0.0;
+	float x = 0.0f;
 
 	while(i < len)
 	{
@@ -1493,7 +1513,7 @@ float pdf_text_stride(fz_context *ctx, pdf_font_desc *fontdesc, float fontsize, 
 
 		h = pdf_lookup_hmtx(ctx, fontdesc, buf[i]);
 
-		span = h.w * fontsize / 1000.0;
+		span = h.w * fontsize / 1000.0f;
 
 		if (x + span > room)
 			break;

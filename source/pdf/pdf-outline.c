@@ -1,9 +1,10 @@
+#include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
 
 static fz_outline *
 pdf_load_outline_imp(fz_context *ctx, pdf_document *doc, pdf_obj *dict)
 {
-	fz_outline *node, **prev, *first;
+	fz_outline *node, **prev, *first = NULL;
 	pdf_obj *obj;
 	pdf_obj *odict = dict;
 
@@ -12,7 +13,6 @@ pdf_load_outline_imp(fz_context *ctx, pdf_document *doc, pdf_obj *dict)
 
 	fz_try(ctx)
 	{
-		first = NULL;
 		prev = &first;
 		while (dict && pdf_is_dict(ctx, dict))
 		{
@@ -29,12 +29,12 @@ pdf_load_outline_imp(fz_context *ctx, pdf_document *doc, pdf_obj *dict)
 			if ((obj = pdf_dict_get(ctx, dict, PDF_NAME_Dest)) != NULL)
 				node->uri = pdf_parse_link_dest(ctx, doc, obj);
 			else if ((obj = pdf_dict_get(ctx, dict, PDF_NAME_A)) != NULL)
-				node->uri = pdf_parse_link_action(ctx, doc, obj);
+				node->uri = pdf_parse_link_action(ctx, doc, obj, -1);
 			else
 				node->uri = NULL;
 
 			if (node->uri)
-				node->page = pdf_resolve_link(ctx, doc, node->uri, NULL, NULL);
+				node->page = pdf_resolve_link(ctx, doc, node->uri, &node->x, &node->y);
 			else
 				node->page = -1;
 

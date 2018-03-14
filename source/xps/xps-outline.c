@@ -1,6 +1,9 @@
 #include "mupdf/fitz.h"
 #include "xps-imp.h"
 
+#include <stdlib.h>
+#include <math.h>
+
 /*
  * Parse the document structure / outline parts referenced from fixdoc relationships.
  */
@@ -34,7 +37,7 @@ xps_parse_document_outline(fz_context *ctx, xps_document *doc, fz_xml *root)
 			entry = fz_new_outline(ctx);
 			entry->title = fz_strdup(ctx, description);
 			entry->uri = fz_strdup(ctx, target);
-			entry->page = xps_lookup_link_target(ctx, doc, target, NULL, NULL);
+			entry->page = xps_lookup_link_target(ctx, (fz_document*)doc, target, NULL, NULL);
 			entry->down = NULL;
 			entry->next = NULL;
 
@@ -80,8 +83,8 @@ static fz_outline *
 xps_load_document_structure(fz_context *ctx, xps_document *doc, xps_fixdoc *fixdoc)
 {
 	xps_part *part;
-	fz_xml *root;
-	fz_outline *outline;
+	fz_xml *root = NULL;
+	fz_outline *outline = NULL;
 
 	part = xps_read_part(ctx, doc, fixdoc->outline);
 	fz_try(ctx)
@@ -116,10 +119,11 @@ xps_load_document_structure(fz_context *ctx, xps_document *doc, xps_fixdoc *fixd
 }
 
 fz_outline *
-xps_load_outline(fz_context *ctx, xps_document *doc)
+xps_load_outline(fz_context *ctx, fz_document *doc_)
 {
+	xps_document *doc = (xps_document*)doc_;
 	xps_fixdoc *fixdoc;
-	fz_outline *head = NULL, *tail, *outline;
+	fz_outline *head = NULL, *tail, *outline = NULL;
 
 	for (fixdoc = doc->first_fixdoc; fixdoc; fixdoc = fixdoc->next)
 	{

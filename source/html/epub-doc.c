@@ -1,4 +1,8 @@
-#include "mupdf/html.h"
+#include "mupdf/fitz.h"
+#include "html-imp.h"
+
+#include <string.h>
+#include <math.h>
 
 enum { T, R, B, L };
 
@@ -71,7 +75,7 @@ epub_update_outline(fz_context *ctx, fz_document *doc, fz_outline *node)
 {
 	while (node)
 	{
-		node->page = epub_resolve_link(ctx, doc, node->uri, NULL, NULL);
+		node->page = epub_resolve_link(ctx, doc, node->uri, &node->x, &node->y);
 		epub_update_outline(ctx, doc, node->down);
 		node = node->next;
 	}
@@ -282,20 +286,34 @@ static epub_chapter *
 epub_parse_chapter(fz_context *ctx, epub_document *doc, const char *path)
 {
 	fz_archive *zip = doc->zip;
-	fz_buffer *buf;
+	fz_buffer *buf = NULL;
 	epub_chapter *ch;
 	char base_uri[2048];
 
 	fz_dirname(base_uri, path, sizeof base_uri);
 
-	buf = fz_read_archive_entry(ctx, zip, path);
-
 	ch = fz_malloc_struct(ctx, epub_chapter);
-	ch->path = fz_strdup(ctx, path);
-	ch->html = fz_parse_html(ctx, doc->set, zip, base_uri, buf, fz_user_css(ctx));
+	ch->path = NULL;
+	ch->html = NULL;
 	ch->next = NULL;
 
-	fz_drop_buffer(ctx, buf);
+	fz_var(buf);
+
+	fz_try(ctx)
+	{
+		buf = fz_read_archive_entry(ctx, zip, path);
+		ch->path = fz_strdup(ctx, path);
+		ch->html = fz_parse_html(ctx, doc->set, zip, base_uri, buf, fz_user_css(ctx));
+	}
+	fz_always(ctx)
+		fz_drop_buffer(ctx, buf);
+	fz_catch(ctx)
+	{
+		fz_drop_html(ctx, ch->html);
+		fz_free(ctx, ch->path);
+		fz_free(ctx, ch);
+		fz_rethrow(ctx);
+	}
 
 	return ch;
 }
@@ -367,8 +385,9 @@ static void
 epub_parse_header(fz_context *ctx, epub_document *doc)
 {
 	fz_archive *zip = doc->zip;
-	fz_buffer *buf;
-	fz_xml *container_xml, *content_opf;
+	fz_buffer *buf = NULL;
+	fz_xml *container_xml = NULL;
+	fz_xml *content_opf = NULL;
 	fz_xml *container, *rootfiles, *rootfile;
 	fz_xml *package, *manifest, *spine, *itemref, *metadata;
 	char base_uri[2048];
@@ -382,62 +401,77 @@ epub_parse_header(fz_context *ctx, epub_document *doc)
 	if (fz_has_archive_entry(ctx, zip, "META-INF/encryption.xml"))
 		fz_throw(ctx, FZ_ERROR_GENERIC, "EPUB is locked by DRM");
 
-	/* parse META-INF/container.xml to find OPF */
+	fz_var(buf);
+	fz_var(container_xml);
+	fz_var(content_opf);
 
-	buf = fz_read_archive_entry(ctx, zip, "META-INF/container.xml");
-	container_xml = fz_parse_xml(ctx, buf, 0);
-	fz_drop_buffer(ctx, buf);
-
-	container = fz_xml_find(container_xml, "container");
-	rootfiles = fz_xml_find_down(container, "rootfiles");
-	rootfile = fz_xml_find_down(rootfiles, "rootfile");
-	full_path = fz_xml_att(rootfile, "full-path");
-	if (!full_path)
-		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find root file in EPUB");
-
-	fz_dirname(base_uri, full_path, sizeof base_uri);
-
-	/* parse OPF to find NCX and spine */
-
-	buf = fz_read_archive_entry(ctx, zip, full_path);
-	content_opf = fz_parse_xml(ctx, buf, 0);
-	fz_drop_buffer(ctx, buf);
-
-	package = fz_xml_find(content_opf, "package");
-	version = fz_xml_att(package, "version");
-	if (!version || strcmp(version, "2.0"))
-		fz_warn(ctx, "unknown epub version: %s", version ? version : "<none>");
-
-	metadata = fz_xml_find_down(package, "metadata");
-	if (metadata)
+	fz_try(ctx)
 	{
-		doc->dc_title = find_metadata(ctx, metadata, "title");
-		doc->dc_creator = find_metadata(ctx, metadata, "creator");
-	}
+		/* parse META-INF/container.xml to find OPF */
 
-	manifest = fz_xml_find_down(package, "manifest");
-	spine = fz_xml_find_down(package, "spine");
+		buf = fz_read_archive_entry(ctx, zip, "META-INF/container.xml");
+		container_xml = fz_parse_xml(ctx, buf, 0);
+		fz_drop_buffer(ctx, buf);
+		buf = NULL;
 
-	if (path_from_idref(ncx, manifest, base_uri, fz_xml_att(spine, "toc"), sizeof ncx))
-	{
-		epub_parse_ncx(ctx, doc, ncx);
-	}
+		container = fz_xml_find(container_xml, "container");
+		rootfiles = fz_xml_find_down(container, "rootfiles");
+		rootfile = fz_xml_find_down(rootfiles, "rootfile");
+		full_path = fz_xml_att(rootfile, "full-path");
+		if (!full_path)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find root file in EPUB");
 
-	doc->spine = NULL;
-	tailp = &doc->spine;
-	itemref = fz_xml_find_down(spine, "itemref");
-	while (itemref)
-	{
-		if (path_from_idref(s, manifest, base_uri, fz_xml_att(itemref, "idref"), sizeof s))
+		fz_dirname(base_uri, full_path, sizeof base_uri);
+
+		/* parse OPF to find NCX and spine */
+
+		buf = fz_read_archive_entry(ctx, zip, full_path);
+		content_opf = fz_parse_xml(ctx, buf, 0);
+		fz_drop_buffer(ctx, buf);
+		buf = NULL;
+
+		package = fz_xml_find(content_opf, "package");
+		version = fz_xml_att(package, "version");
+		if (!version || strcmp(version, "2.0"))
+			fz_warn(ctx, "unknown epub version: %s", version ? version : "<none>");
+
+		metadata = fz_xml_find_down(package, "metadata");
+		if (metadata)
 		{
-			*tailp = epub_parse_chapter(ctx, doc, s);
-			tailp = &(*tailp)->next;
+			doc->dc_title = find_metadata(ctx, metadata, "title");
+			doc->dc_creator = find_metadata(ctx, metadata, "creator");
 		}
-		itemref = fz_xml_find_next(itemref, "itemref");
-	}
 
-	fz_drop_xml(ctx, container_xml);
-	fz_drop_xml(ctx, content_opf);
+		manifest = fz_xml_find_down(package, "manifest");
+		spine = fz_xml_find_down(package, "spine");
+
+		if (path_from_idref(ncx, manifest, base_uri, fz_xml_att(spine, "toc"), sizeof ncx))
+		{
+			epub_parse_ncx(ctx, doc, ncx);
+		}
+
+		doc->spine = NULL;
+		tailp = &doc->spine;
+		itemref = fz_xml_find_down(spine, "itemref");
+		while (itemref)
+		{
+			if (path_from_idref(s, manifest, base_uri, fz_xml_att(itemref, "idref"), sizeof s))
+			{
+				*tailp = epub_parse_chapter(ctx, doc, s);
+				tailp = &(*tailp)->next;
+			}
+			itemref = fz_xml_find_next(itemref, "itemref");
+		}
+	}
+	fz_always(ctx)
+	{
+		fz_drop_xml(ctx, content_opf);
+		fz_drop_xml(ctx, container_xml);
+		fz_drop_buffer(ctx, buf);
+	}
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+
 }
 
 static fz_outline *
@@ -519,20 +553,28 @@ epub_open_document(fz_context *ctx, const char *filename)
 static int
 epub_recognize(fz_context *doc, const char *magic)
 {
-	char *ext = strrchr(magic, '.');
-	if (ext)
-		if (!fz_strcasecmp(ext, ".epub"))
-			return 100;
 	if (strstr(magic, "META-INF/container.xml") || strstr(magic, "META-INF\\container.xml"))
 		return 200;
-	if (!strcmp(magic, "application/epub+zip"))
-		return 100;
 	return 0;
 }
+
+static const char *epub_extensions[] =
+{
+	"epub",
+	NULL
+};
+
+static const char *epub_mimetypes[] =
+{
+	"application/epub+zip",
+	NULL
+};
 
 fz_document_handler epub_document_handler =
 {
 	epub_recognize,
 	epub_open_document,
-	epub_open_document_with_stream
+	epub_open_document_with_stream,
+	epub_extensions,
+	epub_mimetypes
 };

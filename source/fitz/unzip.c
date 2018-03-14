@@ -1,4 +1,7 @@
+#include "mupdf/fitz.h"
 #include "fitz-imp.h"
+
+#include <string.h>
 
 #include <zlib.h>
 
@@ -33,6 +36,16 @@ struct fz_zip_archive_s
 	int count;
 	zip_entry *entries;
 };
+
+static void *zalloc_zip(void *opaque, unsigned int items, unsigned int size)
+{
+	return fz_malloc_array_no_throw(opaque, items, size);
+}
+
+static void zfree_zip(void *opaque, void *address)
+{
+	fz_free(opaque, address);
+}
 
 static void drop_zip_archive(fz_context *ctx, fz_archive *arch)
 {
@@ -138,6 +151,9 @@ static void read_zip_dir_imp(fz_context *ctx, fz_zip_archive *zip, int start_off
 		(void) fz_read_int32_le(ctx, file); /* ext file atts */
 		offset = fz_read_int32_le(ctx, file);
 
+		if (namesize < 0 || metasize < 0 || commentsize < 0)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "invalid size in zip entry");
+
 		name = fz_malloc(ctx, namesize + 1);
 		n = fz_read(ctx, file, (unsigned char*)name, namesize);
 		if (n < (size_t)namesize)
@@ -232,7 +248,7 @@ static void ensure_zip_entries(fz_context *ctx, fz_zip_archive *zip)
 
 	while (back < maxback)
 	{
-		fz_seek(ctx, file, (fz_off_t)(size - back), 0);
+		fz_seek(ctx, file, (int64_t)(size - back), 0);
 		n = fz_read(ctx, file, buf, sizeof buf);
 		if (n < 4)
 			break;
@@ -317,8 +333,8 @@ static fz_buffer *read_zip_entry(fz_context *ctx, fz_archive *arch, const char *
 		{
 			fz_read(ctx, file, cbuf, ent->csize);
 
-			z.zalloc = (alloc_func) fz_malloc_array;
-			z.zfree = (free_func) fz_free;
+			z.zalloc = zalloc_zip;
+			z.zfree = zfree_zip;
 			z.opaque = ctx;
 			z.next_in = cbuf;
 			z.avail_in = ent->csize;

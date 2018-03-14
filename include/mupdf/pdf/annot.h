@@ -31,8 +31,8 @@ typedef enum
 	PDF_ANNOT_UNKNOWN = -1
 } fz_annot_type;
 
-const char *pdf_string_from_annot_type(fz_annot_type type);
-int pdf_annot_type_from_string(const char *subtype);
+const char *pdf_string_from_annot_type(fz_context *ctx, fz_annot_type type);
+int pdf_annot_type_from_string(fz_context *ctx, const char *subtype);
 
 enum
 {
@@ -48,24 +48,32 @@ enum
 	PDF_ANNOT_IS_LOCKED_CONTENTS = 1 << (10-1)
 };
 
+enum
+{
+	PDF_ANNOT_LINE_ENDING_NONE = 0,
+	PDF_ANNOT_LINE_ENDING_SQUARE,
+	PDF_ANNOT_LINE_ENDING_CIRCLE,
+	PDF_ANNOT_LINE_ENDING_DIAMOND,
+	PDF_ANNOT_LINE_ENDING_OPENARROW,
+	PDF_ANNOT_LINE_ENDING_CLOSEDARROW,
+	PDF_ANNOT_LINE_ENDING_BUTT,
+	PDF_ANNOT_LINE_ENDING_ROPENARROW,
+	PDF_ANNOT_LINE_ENDING_RCLOSEDARROW,
+	PDF_ANNOT_LINE_ENDING_SLASH
+};
+
 /*
 	pdf_first_annot: Return the first annotation on a page.
-
-	Does not throw exceptions.
 */
 pdf_annot *pdf_first_annot(fz_context *ctx, pdf_page *page);
 
 /*
 	pdf_next_annot: Return the next annotation on a page.
-
-	Does not throw exceptions.
 */
 pdf_annot *pdf_next_annot(fz_context *ctx, pdf_annot *annot);
 
 /*
 	pdf_bound_annot: Return the rectangle for an annotation on a page.
-
-	Does not throw exceptions.
 */
 fz_rect *pdf_bound_annot(fz_context *ctx, pdf_annot *annot, fz_rect *rect);
 
@@ -97,20 +105,20 @@ struct pdf_annot_s
 	pdf_xobject *ap;
 
 	int ap_iteration;
-	int changed;
+	int dirty;
 
 	pdf_annot *next;
 };
 
 char *pdf_parse_file_spec(fz_context *ctx, pdf_document *doc, pdf_obj *file_spec, pdf_obj *dest);
 char *pdf_parse_link_dest(fz_context *ctx, pdf_document *doc, pdf_obj *obj);
-char *pdf_parse_link_action(fz_context *ctx, pdf_document *doc, pdf_obj *obj);
+char *pdf_parse_link_action(fz_context *ctx, pdf_document *doc, pdf_obj *obj, int pagenum);
 pdf_obj *pdf_lookup_dest(fz_context *ctx, pdf_document *doc, pdf_obj *needle);
 pdf_obj *pdf_lookup_name(fz_context *ctx, pdf_document *doc, pdf_obj *which, pdf_obj *needle);
 pdf_obj *pdf_load_name_tree(fz_context *ctx, pdf_document *doc, pdf_obj *which);
 
 int pdf_resolve_link(fz_context *ctx, pdf_document *doc, const char *uri, float *xp, float *yp);
-fz_link *pdf_load_link_annots(fz_context *ctx, pdf_document *, pdf_obj *annots, const fz_matrix *page_ctm);
+fz_link *pdf_load_link_annots(fz_context *ctx, pdf_document *, pdf_obj *annots, int pagenum, const fz_matrix *page_ctm);
 
 void pdf_annot_transform(fz_context *ctx, pdf_annot *annot, fz_matrix *annot_ctm);
 void pdf_load_annots(fz_context *ctx, pdf_page *page, pdf_obj *annots);
@@ -128,6 +136,15 @@ pdf_annot *pdf_create_annot(fz_context *ctx, pdf_page *page, fz_annot_type type)
 	pdf_delete_annot: delete an annotation
 */
 void pdf_delete_annot(fz_context *ctx, pdf_page *page, pdf_annot *annot);
+
+int pdf_annot_has_ink_list(fz_context *ctx, pdf_annot *annot);
+int pdf_annot_has_quad_points(fz_context *ctx, pdf_annot *annot);
+int pdf_annot_has_vertices(fz_context *ctx, pdf_annot *annot);
+int pdf_annot_has_interior_color(fz_context *ctx, pdf_annot *annot);
+int pdf_annot_has_line_ending_styles(fz_context *ctx, pdf_annot *annot);
+int pdf_annot_has_icon_name(fz_context *ctx, pdf_annot *annot);
+int pdf_annot_has_open(fz_context *ctx, pdf_annot *annot);
+int pdf_annot_has_author(fz_context *ctx, pdf_annot *annot);
 
 int pdf_annot_flags(fz_context *ctx, pdf_annot *annot);
 void pdf_annot_rect(fz_context *ctx, pdf_annot *annot, fz_rect *rect);
@@ -168,31 +185,34 @@ void pdf_annot_vertex(fz_context *ctx, pdf_annot *annot, int i, float v[2]);
 void pdf_set_text_annot_position(fz_context *ctx, pdf_annot *annot, fz_point pt);
 
 /*
+	pdf_copy_annot_contents: return a copy of the contents of an annotation.
+*/
+char *pdf_copy_annot_contents(fz_context *ctx, pdf_annot *annot);
+
+/*
 	pdf_set_annot_contents: set the contents of an annotation.
 */
 void pdf_set_annot_contents(fz_context *ctx, pdf_annot *annot, const char *text);
 
 /*
-	pdf_annot_contents: return the contents of an annotation.
+	pdf_copy_annot_author: return a copy of the author of an annotation.
 */
-const char *pdf_annot_contents(fz_context *ctx, pdf_annot *annot);
+char *pdf_copy_annot_author(fz_context *ctx, pdf_annot *annot);
 
 /*
-	pdf_annot_author: return the author of an annotation.
+	pdf_set_annot_author: set the author of an annotation.
 */
-const char *pdf_annot_author(fz_context *ctx, pdf_annot *annot);
+void pdf_set_annot_author(fz_context *ctx, pdf_annot *annot, const char *author);
 
 /*
-	pdf_annot_author: return the date of an annotation.
+	pdf_annot_modification_date: Get annotation's modification date in seconds since the epoch.
 */
-// TODO: creation date
-// TODO: modification date
-const char *pdf_annot_date(fz_context *ctx, pdf_annot *annot);
+int64_t pdf_annot_modification_date(fz_context *ctx, pdf_annot *annot);
 
 /*
-	pdf_annot_irt: return the indirect reference that this annotation is in reply to.
+	pdf_set_annot_modification_date: Set annotation's modification date in seconds since the epoch.
 */
-pdf_obj *pdf_annot_irt(fz_context *ctx, pdf_annot *annot);
+void pdf_set_annot_modification_date(fz_context *ctx, pdf_annot *annot, int64_t time);
 
 /*
 	pdf_set_free_text_details: set the position, text, font and color for a free text annotation.
@@ -204,5 +224,9 @@ void pdf_set_free_text_details(fz_context *ctx, pdf_annot *annot, fz_point *pos,
 	pdf_new_annot: Internal function for creating a new pdf annotation.
 */
 pdf_annot *pdf_new_annot(fz_context *ctx, pdf_page *page);
+
+void pdf_dirty_annot(fz_context *ctx, pdf_annot *annot);
+void pdf_clean_annot(fz_context *ctx, pdf_annot *annot);
+int pdf_annot_is_dirty(fz_context *ctx, pdf_annot *annot);
 
 #endif
