@@ -10,6 +10,8 @@ Files-Excluded: thirdparty/curl
                 thirdparty/libjpeg
                 thirdparty/openjpeg
                 thirdparty/zlib
+                thirdparty/freeglut
+                thirdparty/lcms2
 
 Files: *
 Copyright: 2006-2014, Artifex Software, Inc.
