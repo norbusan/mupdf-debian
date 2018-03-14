@@ -7,10 +7,10 @@ Subject: Sort files in static library to make the build reproducible
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/Makefile b/Makefile
-index c31317f..5c9d705 100644
+index 114a6eb..1483a95 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -71,7 +71,7 @@ endif
+@@ -73,7 +73,7 @@ endif
  
  CC_CMD = $(QUIET_CC) $(CC) $(CFLAGS) -o $@ -c $<
  CXX_CMD = $(QUIET_CXX) $(CXX) $(CFLAGS) -o $@ -c $<
