@@ -2,6 +2,10 @@ package com.artifex.mupdf.fitz;
 
 public class StructuredText
 {
+	static {
+		Context.init();
+	}
+
 	private long pointer;
 
 	protected native void finalize();
@@ -16,36 +20,25 @@ public class StructuredText
 	}
 
 	public native Rect[] search(String needle);
-	public native Rect[] highlight(Rect rect);
-	public native String copy(Rect rect);
+	public native Rect[] highlight(Point a, Point b);
+	public native String copy(Point a, Point b);
 
 	public native TextBlock[] getBlocks();
 
-	public class TextBlock
-	{
+	public class TextBlock {
 		public TextLine[] lines;
 		public Rect bbox;
 	}
 
-	public class TextLine
-	{
-		public TextSpan[] spans;
-		public Rect bbox;
-	}
-
-	public class TextSpan
-	{
+	public class TextLine {
 		public TextChar[] chars;
 		public Rect bbox;
 	}
 
-	public class TextChar
-	{
+	public class TextChar {
 		public int c;
 		public Rect bbox;
-
-		public boolean isWhitespace()
-		{
+		public boolean isWhitespace() {
 			return Character.isWhitespace(c);
 		}
 	}

@@ -2,6 +2,9 @@
 
 #ifdef HAVE_JPEGXR
 
+#include <math.h>
+#include <string.h>
+
 #include <jpegxr.h>
 
 struct info
@@ -274,7 +277,7 @@ jxr_decode_block_alpha(jxr_image_t image, int mx, int my, int *data)
 }
 
 static void
-jxr_read_image(fz_context *ctx, unsigned char *data, int size, struct info *info, int only_metadata)
+jxr_read_image(fz_context *ctx, const unsigned char *data, int size, struct info *info, int only_metadata)
 {
 	jxr_container_t container;
 	jxr_image_t image = NULL;
@@ -285,7 +288,7 @@ jxr_read_image(fz_context *ctx, unsigned char *data, int size, struct info *info
 	{
 		container = jxr_create_container();
 
-		rc = jxr_read_image_container_memory(container, data, size);
+		rc = jxr_read_image_container_memory(container, (unsigned char *)data, size);
 		if (rc < 0)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot read jxr image container: %s", jxr_error_string(rc));
 
@@ -342,7 +345,7 @@ jxr_read_image(fz_context *ctx, unsigned char *data, int size, struct info *info
 			jxr_set_user_data(image, info);
 			jxr_set_block_output(image, jxr_decode_block);
 
-			rc = jxr_read_image_bitstream_memory(image, data + image_offset, size - image_offset);
+			rc = jxr_read_image_bitstream_memory(image, (unsigned char *)data + image_offset, size - image_offset);
 			if (rc < 0)
 				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot read jxr image: %s", jxr_error_string(rc));
 
@@ -370,7 +373,7 @@ jxr_read_image(fz_context *ctx, unsigned char *data, int size, struct info *info
 				jxr_set_user_data(alpha, info);
 				jxr_set_block_output(alpha, jxr_decode_block_alpha);
 
-				rc = jxr_read_image_bitstream_memory(alpha, data + alpha_offset, size - alpha_offset);
+				rc = jxr_read_image_bitstream_memory(alpha, (unsigned char *)data + alpha_offset, size - alpha_offset);
 				if (rc < 0)
 					fz_throw(ctx, FZ_ERROR_GENERIC, "cannot read jxr image: %s", jxr_error_string(rc));
 			}
@@ -391,7 +394,7 @@ jxr_read_image(fz_context *ctx, unsigned char *data, int size, struct info *info
 }
 
 fz_pixmap *
-fz_load_jxr(fz_context *ctx, unsigned char *data, size_t size)
+fz_load_jxr(fz_context *ctx, const unsigned char *data, size_t size)
 {
 	struct info info = { 0 };
 	fz_pixmap *image = NULL;
@@ -400,7 +403,7 @@ fz_load_jxr(fz_context *ctx, unsigned char *data, size_t size)
 
 	jxr_read_image(ctx, data, size, &info, 0);
 
-	image = fz_new_pixmap(ctx, info.cspace, info.width, info.height, 1);
+	image = fz_new_pixmap(ctx, info.cspace, info.width, info.height, NULL, 1);
 
 	image->xres = info.xres;
 	image->yres = info.yres;
@@ -409,10 +412,7 @@ fz_load_jxr(fz_context *ctx, unsigned char *data, size_t size)
 	{
 		fz_unpack_tile(ctx, image, info.samples, fz_colorspace_n(ctx, info.cspace) + 1, 8, info.stride, 0);
 		if (info.has_alpha && !info.has_premul)
-		{
-			image = fz_ensure_pixmap_is_additive(ctx, image);
 			fz_premultiply_pixmap(ctx, image);
-		}
 	}
 	fz_always(ctx)
 	{
@@ -429,28 +429,27 @@ fz_load_jxr(fz_context *ctx, unsigned char *data, size_t size)
 }
 
 void
-fz_load_jxr_info(fz_context *ctx, unsigned char *data, size_t size, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
+fz_load_jxr_info(fz_context *ctx, const unsigned char *data, size_t size, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
 {
 	struct info info = { 0 };
 
 	jxr_read_image(ctx, data, size, &info, 1);
-
-	*xresp = info.xres;
-	*yresp = info.yres;
+	*cspacep = fz_keep_colorspace(ctx, info.cspace); /* info.cspace is a borrowed device colorspace */
 	*wp = info.width;
 	*hp = info.height;
-	*cspacep = info.cspace;
+	*xresp = info.xres;
+	*yresp = info.yres;
 }
 #else /* HAVE_JPEGXR */
 
 fz_pixmap *
-fz_load_jxr(fz_context *ctx, unsigned char *data, size_t size)
+fz_load_jxr(fz_context *ctx, const unsigned char *data, size_t size)
 {
 	fz_throw(ctx, FZ_ERROR_GENERIC, "JPEG-XR codec is not available");
 }
 
 void
-fz_load_jxr_info(fz_context *ctx, unsigned char *data, size_t size, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
+fz_load_jxr_info(fz_context *ctx, const unsigned char *data, size_t size, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
 {
 	fz_throw(ctx, FZ_ERROR_GENERIC, "JPEG-XR codec is not available");
 }

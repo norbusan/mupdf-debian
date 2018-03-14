@@ -2,7 +2,12 @@
  * pdfportfolio -- manipulate embedded files in a PDF
  */
 
+#include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
+
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 
 static pdf_document *doc = NULL;
 static fz_context *ctx = NULL;
@@ -10,15 +15,15 @@ static fz_context *ctx = NULL;
 static void usage(void)
 {
 	fprintf(stderr, "usage: mutool portfolio [options] portfolio.pdf [actions]\n");
-	fprintf(stderr, "\tOptions are:\n");
+	fprintf(stderr, "\nOptions are:\n");
 	fprintf(stderr, "\t-p -\tpassword\n");
 	fprintf(stderr, "\t-o -\toutput (defaults to input file)\n");
 	fprintf(stderr, "\t-O -\tPDF output options (see mutool create)\n");
-	fprintf(stderr, "Actions are:\n");
-	fprintf(stderr, "\tt\tlist embedded files\n");
-	fprintf(stderr, "\tx N <filename>\n\t\textract Nth embedded file as <filename>\n");
-	fprintf(stderr, "\ta <filename> <entry>\n\t\tembed contents of <filename> named as <entry>\n");
-	fprintf(stderr, "\nFor safety, keep all filenames as 7 bit clean for now.\n");
+	fprintf(stderr, "\nActions are:\n");
+	fprintf(stderr, "\tt\tdisplay a table listing the contents of the portfolio\n");
+	fprintf(stderr, "\tx N <file>\n\t\textract Nth entry to <file>\n");
+	fprintf(stderr, "\ta <file> <name>\n\t\tadd contents of <file> as an entry named <name>\n");
+	fprintf(stderr, "\nFor safety, only use ASCII characters in entry names for now.\n");
 	exit(1);
 }
 
@@ -68,7 +73,7 @@ safe_print_pdf_obj(fz_context *ctx, pdf_obj *obj, const char *dflt)
 }
 
 static void
-pdfportfolio_list()
+pdfportfolio_list(void)
 {
 	/* List files */
 	int m = pdf_count_portfolio_schema(ctx, doc);
@@ -240,7 +245,7 @@ int pdfportfolio_main(int argc, char **argv)
 		/* add a blank page */
 		{
 			const char *template = "BT /Tm 16 Tf 50 434 TD (This is a portfolio document.) Tj ET\n";
-			const char *data;
+			const unsigned char *data;
 			int size;
 			fz_font *font;
 			pdf_obj *font_obj, *page_obj;
@@ -256,11 +261,12 @@ int pdfportfolio_main(int argc, char **argv)
 			resources = pdf_add_object_drop(ctx, doc, pdf_new_dict(ctx, doc, 1));
 			pdf_dict_putp_drop(ctx, resources, "Font/Tm", font_obj);
 
-			contents = fz_new_buffer_from_shared_data(ctx, template, strlen(template));
+			contents = fz_new_buffer_from_shared_data(ctx, (const unsigned char *)template, strlen(template));
 
 			page_obj = pdf_add_page(ctx, doc, &mediabox, 0, resources, contents);
 			pdf_insert_page(ctx, doc, -1, page_obj);
 			pdf_drop_obj(ctx, page_obj);
+			pdf_drop_obj(ctx, resources);
 			fz_drop_buffer(ctx, contents);
 		}
 	}

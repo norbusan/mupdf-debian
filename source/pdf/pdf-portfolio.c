@@ -1,5 +1,8 @@
 #include "mupdf/fitz.h"
+#include "mupdf/pdf.h"
 #include "pdf-imp.h"
+
+#include <string.h>
 
 /*
 	PDF Portfolio is just a sorted list of schema entries.
@@ -32,7 +35,7 @@ load_portfolio(fz_context *ctx, pdf_document *doc)
 		int editable = eo ? pdf_to_bool(ctx, eo) : 0;
 		pdf_obj *vo = pdf_dict_get(ctx, v, PDF_NAME_V);
 		int visible = vo ? pdf_to_bool(ctx, vo) : 1;
-		char *subtype = pdf_to_name(ctx, pdf_dict_get(ctx, v, PDF_NAME_Subtype));
+		const char *subtype = pdf_to_name(ctx, pdf_dict_get(ctx, v, PDF_NAME_Subtype));
 		pdf_obj *name = pdf_dict_get(ctx, v, PDF_NAME_N);
 		pdf_portfolio *p = fz_malloc_struct(ctx, pdf_portfolio);
 		p->key = pdf_keep_obj(ctx, k);
@@ -285,7 +288,7 @@ void pdf_add_portfolio_schema(fz_context *ctx, pdf_document *doc, int entry, con
 	pdf_portfolio **pp;
 	pdf_portfolio *p;
 	pdf_obj *s;
-	pdf_obj *sc;
+	pdf_obj *sc = NULL;
 	int num;
 	char str_name[32];
 	pdf_obj *num_name = NULL;
@@ -297,6 +300,7 @@ void pdf_add_portfolio_schema(fz_context *ctx, pdf_document *doc, int entry, con
 		load_portfolio(ctx, doc);
 
 	fz_var(num_name);
+	fz_var(sc);
 
 	pp = &doc->portfolio;
 	while (*pp && entry > 0)
@@ -311,7 +315,7 @@ void pdf_add_portfolio_schema(fz_context *ctx, pdf_document *doc, int entry, con
 			pdf_drop_obj(ctx, num_name);
 			num_name = NULL;
 			num++;
-			sprintf(str_name, "%d", num);
+			fz_snprintf(str_name, sizeof str_name, "%d", num);
 			num_name = pdf_new_name(ctx, doc, str_name);
 			p = doc->portfolio;
 			for (p = doc->portfolio; p; p = p->next)
@@ -347,7 +351,10 @@ void pdf_add_portfolio_schema(fz_context *ctx, pdf_document *doc, int entry, con
 		}
 	}
 	fz_always(ctx)
+	{
 		pdf_drop_obj(ctx, num_name);
+		pdf_drop_obj(ctx, sc);
+	}
 	fz_catch(ctx)
 		fz_rethrow(ctx);
 }
@@ -514,7 +521,7 @@ pdf_obj *pdf_portfolio_entry_info(fz_context *ctx, pdf_document *doc, int entry,
 		if (ef)
 			obj = pdf_dict_getl(ctx, obj, PDF_NAME_EF, PDF_NAME_F, PDF_NAME_Params, NULL);
 		res = pdf_dict_get(ctx, obj, lookup);
-		if (res == NULL && lookup == PDF_NAME_UF)
+		if (res == NULL && pdf_name_eq(ctx, lookup, PDF_NAME_UF))
 			res = pdf_dict_get(ctx, obj, PDF_NAME_F);
 		return res;
 	}
@@ -607,7 +614,7 @@ int pdf_add_portfolio_entry(fz_context *ctx, pdf_document *doc,
 				const char *filename, int filename_len,
 				const char *unifile, int unifile_len, fz_buffer *buf)
 {
-	int entry, len;
+	int len, entry = 0;
 	pdf_obj *ef, *f, *params, *s;
 	pdf_obj *key;
 	pdf_obj *val = NULL;
@@ -715,7 +722,7 @@ void pdf_set_portfolio_entry_info(fz_context *ctx, pdf_document *doc, int entry,
 		if (ef)
 			obj = pdf_dict_getl(ctx, obj, PDF_NAME_EF, PDF_NAME_F, PDF_NAME_Params, NULL);
 		pdf_dict_put(ctx, obj, lookup, data);
-		if (lookup == PDF_NAME_UF)
+		if (pdf_name_eq(ctx, lookup, PDF_NAME_UF))
 			pdf_dict_put(ctx, obj, PDF_NAME_F, data);
 		return;
 	}

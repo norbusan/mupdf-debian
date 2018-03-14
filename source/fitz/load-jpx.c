@@ -1,4 +1,8 @@
 #include "mupdf/fitz.h"
+#include "fitz-imp.h"
+
+#include <assert.h>
+#include <string.h>
 
 #if FZ_ENABLE_JPX
 
@@ -29,9 +33,9 @@ jpx_ycc_to_rgb(fz_context *ctx, fz_pixmap *pix, int cbsign, int crsign)
 			if (crsign)
 				ycc[2] -= 128;
 
-			row[x * 3 + 0] = fz_clampi((double)ycc[0] + 1.402 * ycc[2], 0, 255);
-			row[x * 3 + 1] = fz_clampi((double)ycc[0] - 0.34413 * ycc[1] - 0.71414 * ycc[2], 0, 255);
-			row[x * 3 + 2] = fz_clampi((double)ycc[0] + 1.772 * ycc[1], 0, 255);
+			row[x * 3 + 0] = fz_clampi(ycc[0] + 1.402f * ycc[2], 0, 255);
+			row[x * 3 + 1] = fz_clampi(ycc[0] - 0.34413f * ycc[1] - 0.71414f * ycc[2], 0, 255);
+			row[x * 3 + 2] = fz_clampi(ycc[0] + 1.772f * ycc[1], 0, 255);
 		}
 	}
 }
@@ -70,7 +74,7 @@ struct fz_jpxd_s
 
 struct stream_block_s
 {
-	unsigned char *data;
+	const unsigned char *data;
 	size_t size;
 };
 
@@ -194,7 +198,7 @@ jpx_write(unsigned char * pucData, short sComponent, unsigned long ulRow,
 }
 
 static fz_pixmap *
-jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size, fz_colorspace *defcs, int onlymeta)
+jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_t size, fz_colorspace *defcs, int onlymeta)
 {
 	JP2_Decomp_Handle doc;
 	JP2_Channel_Def_Params *chans = NULL;
@@ -276,10 +280,10 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size
 			{
 				err = JP2_Decompress_GetProp(doc, cJP2_Prop_Width, &widths[k], -1, k);
 				if (err != cJP2_Error_OK)
-					fz_throw(ctx, FZ_ERROR_GENERIC, "cannot get width for component %ld: %d", k, (int) err);
+					fz_throw(ctx, FZ_ERROR_GENERIC, "cannot get width for component %d: %d", (int) k, (int) err);
 				err = JP2_Decompress_GetProp(doc, cJP2_Prop_Height, &heights[k], -1, k);
 				if (err != cJP2_Error_OK)
-					fz_throw(ctx, FZ_ERROR_GENERIC, "cannot get height for component %ld: %d", k, (int) err);
+					fz_throw(ctx, FZ_ERROR_GENERIC, "cannot get height for component %d: %d", (int) k, (int) err);
 
 				state->width = fz_maxi(state->width, widths[k]);
 				state->height = fz_maxi(state->height, heights[k]);
@@ -343,7 +347,7 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size
 		return NULL;
 	}
 
-	state->pix = fz_new_pixmap(ctx, state->cs, state->width, state->height, alphas);
+	state->pix = fz_new_pixmap(ctx, state->cs, state->width, state->height, NULL, alphas);
 	fz_clear_pixmap_with_value(ctx, state->pix, 0);
 
 	fz_try(ctx)
@@ -377,10 +381,10 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size
 			{
 				err = JP2_Decompress_GetProp(doc, cJP2_Prop_Bits_Per_Sample, &state->bpss[k], -1, k);
 				if (err != cJP2_Error_OK)
-					fz_throw(ctx, FZ_ERROR_GENERIC, "cannot get bits per sample for component %ld: %d", k, (int) err);
+					fz_throw(ctx, FZ_ERROR_GENERIC, "cannot get bits per sample for component %d: %d", (int) k, (int) err);
 				err = JP2_Decompress_GetProp(doc, cJP2_Prop_Signed_Samples, &state->signs[k], -1, k);
 				if (err != cJP2_Error_OK)
-					fz_throw(ctx, FZ_ERROR_GENERIC, "cannot get signed for component %ld: %d", k, (int) err);
+					fz_throw(ctx, FZ_ERROR_GENERIC, "cannot get signed for component %d: %d", (int) k, (int) err);
 			}
 			if (state->signs[k])
 				state->signs[k] = 1 << (state->bpss[k] - 1);
@@ -403,10 +407,7 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size
 		if (state->pix->alpha && ! (HAS_PALETTE(colorspace) && !state->expand_indexed))
 		{
 			if (alphas > 0 && prealphas == 0)
-			{
-				state->pix = fz_ensure_pixmap_is_additive(ctx, state->pix);
 				fz_premultiply_pixmap(ctx, state->pix);
-			}
 		}
 	}
 	fz_always(ctx)
@@ -421,7 +422,7 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size
 }
 
 fz_pixmap *
-fz_load_jpx(fz_context *ctx, unsigned char *data, size_t size, fz_colorspace *defcs)
+fz_load_jpx(fz_context *ctx, const unsigned char *data, size_t size, fz_colorspace *defcs)
 {
 	fz_jpxd state = { 0 };
 
@@ -429,13 +430,13 @@ fz_load_jpx(fz_context *ctx, unsigned char *data, size_t size, fz_colorspace *de
 }
 
 void
-fz_load_jpx_info(fz_context *ctx, unsigned char *data, size_t size, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
+fz_load_jpx_info(fz_context *ctx, const unsigned char *data, size_t size, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
 {
 	fz_jpxd state = { 0 };
 
 	jpx_read_image(ctx, &state, data, size, NULL, 1);
 
-	*cspacep = state.cs;
+	*cspacep = fz_keep_colorspace(ctx, state.cs); /* state.cs is a borrowed device colorspace */
 	*wp = state.width;
 	*hp = state.height;
 	*xresp = state.xres;
@@ -446,7 +447,7 @@ fz_load_jpx_info(fz_context *ctx, unsigned char *data, size_t size, int *wp, int
 
 #define OPJ_STATIC
 #define OPJ_HAVE_INTTYPES_H
-#if !defined(_WIN32) && !defined(_WIN64)
+#if !defined(_MSC_VER) || _MSC_VER >= 1600
 #define OPJ_HAVE_STDINT_H
 #endif
 #define USE_JPIP
@@ -464,7 +465,7 @@ struct fz_jpxd_s
 
 struct stream_block_s
 {
-	unsigned char *data;
+	const unsigned char *data;
 	OPJ_SIZE_T size;
 	OPJ_SIZE_T pos;
 };
@@ -497,7 +498,7 @@ static void set_opj_context(fz_context *ctx)
 	opj_secret = ctx;
 }
 
-static fz_context *get_opj_context()
+static fz_context *get_opj_context(void)
 {
 	return opj_secret;
 }
@@ -648,14 +649,14 @@ l2subfactor(fz_context *ctx, unsigned int max_w, unsigned int w)
 	for (i = 0; max_w != 0 && w != max_w; i++)
 		max_w >>= 1;
 	if (max_w == 0)
-		fz_throw(ctx, FZ_ERROR_GENERIC, "image components are of incompatible dimensions");
+		return -1;
 	return i;
 }
 
 static fz_pixmap *
-jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size, fz_colorspace *defcs, int onlymeta)
+jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_t size, fz_colorspace *defcs, int onlymeta)
 {
-	fz_pixmap *img;
+	fz_pixmap *img = NULL;
 	opj_dparameters_t params;
 	opj_codec_t *codec;
 	opj_image_t *jpx;
@@ -669,6 +670,7 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size
 	int sub_w[FZ_MAX_COLORS];
 	int sub_h[FZ_MAX_COLORS];
 	int upsample_required = 0;
+	OPJ_UINT32 i;
 
 	fz_var(img);
 
@@ -729,15 +731,18 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size
 	if (!jpx)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "opj_decode failed");
 
-	n = jpx->numcomps;
 	depth = jpx->comps[0].prec;
 	sgnd = jpx->comps[0].sgnd;
 
-	if (jpx->color_space == OPJ_CLRSPC_SRGB && n == 4) { n = 3; a = 1; }
-	else if (jpx->color_space == OPJ_CLRSPC_SYCC && n == 4) { n = 3; a = 1; }
-	else if (n == 2) { n = 1; a = 1; }
-	else if (n > 4) { n = 4; a = 1; }
-	else { a = 0; }
+	/* Count number of alpha and color channels */
+	n = a = 0;
+	for (i = 0; i < jpx->numcomps; ++i)
+	{
+		if (jpx->comps[i].alpha)
+			++a;
+		else
+			++n;
+	}
 
 	if (defcs)
 	{
@@ -759,7 +764,11 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size
 		case 1: state->cs = fz_device_gray(ctx); break;
 		case 3: state->cs = fz_device_rgb(ctx); break;
 		case 4: state->cs = fz_device_cmyk(ctx); break;
-		default: fz_throw(ctx, FZ_ERROR_GENERIC, "unsupported number of components: %d", n);
+		default:
+			{
+				opj_image_destroy(jpx);
+				fz_throw(ctx, FZ_ERROR_GENERIC, "unsupported number of components: %d", n);
+			}
 		}
 	}
 
@@ -787,6 +796,11 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size
 	{
 		sub_w[k] = l2subfactor(ctx, max_w, jpx->comps[k].w);
 		sub_h[k] = l2subfactor(ctx, max_h, jpx->comps[k].h);
+		if (sub_w[k] == -1 || sub_h[k] == -1)
+		{
+			opj_image_destroy(jpx);
+			fz_throw(ctx, FZ_ERROR_GENERIC, "image components are of incompatible dimensions");
+		}
 		if (sub_w[k] != 0 || sub_h[k] != 0)
 			upsample_required = 1;
 	}
@@ -802,10 +816,11 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size
 		return NULL;
 	}
 
-	img = fz_new_pixmap(ctx, state->cs, w, h, a);
-
 	fz_try(ctx)
 	{
+		a = !!a; /* ignore any superfluous alpha channels */
+		img = fz_new_pixmap(ctx, state->cs, w, h, NULL, a);
+
 		p = img->samples;
 		if (upsample_required)
 		{
@@ -816,7 +831,7 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size
 				{
 					int sh = sub_h[k];
 					int sw = sub_w[k];
-					int yy = (y>>sh) * jpx->comps[k].w;
+					int yy = (y>>sh) * (jpx->comps[k].w >> sw);
 					OPJ_INT32 *data = &jpx->comps[k].data[yy];
 					for (x = 0; x < w; x ++)
 					{
@@ -860,12 +875,8 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size
 
 		if (jpx->color_space == OPJ_CLRSPC_SYCC && n == 3 && a == 0)
 			jpx_ycc_to_rgb(ctx, img, 1, 1);
-
 		if (a)
-		{
-			img = fz_ensure_pixmap_is_additive(ctx, img);
 			fz_premultiply_pixmap(ctx, img);
-		}
 	}
 	fz_always(ctx)
 		opj_image_destroy(jpx);
@@ -879,10 +890,10 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, unsigned char *data, size_t size
 }
 
 fz_pixmap *
-fz_load_jpx(fz_context *ctx, unsigned char *data, size_t size, fz_colorspace *defcs)
+fz_load_jpx(fz_context *ctx, const unsigned char *data, size_t size, fz_colorspace *defcs)
 {
 	fz_jpxd state = { 0 };
-	fz_pixmap *pix;
+	fz_pixmap *pix = NULL;
 
 	fz_try(ctx)
 	{
@@ -898,7 +909,7 @@ fz_load_jpx(fz_context *ctx, unsigned char *data, size_t size, fz_colorspace *de
 }
 
 void
-fz_load_jpx_info(fz_context *ctx, unsigned char *data, size_t size, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
+fz_load_jpx_info(fz_context *ctx, const unsigned char *data, size_t size, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
 {
 	fz_jpxd state = { 0 };
 

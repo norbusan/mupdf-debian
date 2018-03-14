@@ -13,11 +13,11 @@ typedef struct pdf_obj_s pdf_obj;
 
 pdf_obj *pdf_new_null(fz_context *ctx, pdf_document *doc);
 pdf_obj *pdf_new_bool(fz_context *ctx, pdf_document *doc, int b);
-pdf_obj *pdf_new_int(fz_context *ctx, pdf_document *doc, int i);
-pdf_obj *pdf_new_int_offset(fz_context *ctx, pdf_document *doc, fz_off_t off);
+pdf_obj *pdf_new_int(fz_context *ctx, pdf_document *doc, int64_t i);
 pdf_obj *pdf_new_real(fz_context *ctx, pdf_document *doc, float f);
 pdf_obj *pdf_new_name(fz_context *ctx, pdf_document *doc, const char *str);
 pdf_obj *pdf_new_string(fz_context *ctx, pdf_document *doc, const char *str, size_t len);
+pdf_obj *pdf_new_text_string(fz_context *ctx, pdf_document *doc, const char *s);
 pdf_obj *pdf_new_indirect(fz_context *ctx, pdf_document *doc, int num, int gen);
 pdf_obj *pdf_new_array(fz_context *ctx, pdf_document *doc, int initialcap);
 pdf_obj *pdf_new_dict(fz_context *ctx, pdf_document *doc, int initialcap);
@@ -66,8 +66,15 @@ void pdf_unmark_obj(fz_context *ctx, pdf_obj *obj);
 /* obj memo functions - allows us to secretly remember "a memo" (a bool) in
  * an object, and to read back whether there was a memo, and if so, what it
  * was. */
-void pdf_set_obj_memo(fz_context *ctx, pdf_obj *obj, int memo);
-int pdf_obj_memo(fz_context *ctx, pdf_obj *obj, int *memo);
+
+enum
+{
+	PDF_FLAGS_MEMO_BM = 0,
+	PDF_FLAGS_MEMO_OP = 1
+};
+
+void pdf_set_obj_memo(fz_context *ctx, pdf_obj *obj, int bit, int memo);
+int pdf_obj_memo(fz_context *ctx, pdf_obj *obj, int bit, int *memo);
 
 /* obj dirty bit support. */
 int pdf_obj_is_dirty(fz_context *ctx, pdf_obj *obj);
@@ -77,9 +84,9 @@ void pdf_clean_obj(fz_context *ctx, pdf_obj *obj);
 /* safe, silent failure, no error reporting on type mismatches */
 int pdf_to_bool(fz_context *ctx, pdf_obj *obj);
 int pdf_to_int(fz_context *ctx, pdf_obj *obj);
-fz_off_t pdf_to_offset(fz_context *ctx, pdf_obj *obj);
+int64_t pdf_to_int64(fz_context *ctx, pdf_obj *obj);
 float pdf_to_real(fz_context *ctx, pdf_obj *obj);
-char *pdf_to_name(fz_context *ctx, pdf_obj *obj);
+const char *pdf_to_name(fz_context *ctx, pdf_obj *obj);
 char *pdf_to_str_buf(fz_context *ctx, pdf_obj *obj);
 int pdf_to_str_len(fz_context *ctx, pdf_obj *obj);
 int pdf_to_num(fz_context *ctx, pdf_obj *obj);
@@ -148,7 +155,6 @@ fz_matrix *pdf_to_matrix(fz_context *ctx, pdf_obj *array, fz_matrix *mat);
 pdf_document *pdf_get_indirect_document(fz_context *ctx, pdf_obj *obj);
 pdf_document *pdf_get_bound_document(fz_context *ctx, pdf_obj *obj);
 void pdf_set_str_len(fz_context *ctx, pdf_obj *obj, int newlen);
-void pdf_set_int(fz_context *ctx, pdf_obj *obj, int i);
-void pdf_set_int_offset(fz_context *ctx, pdf_obj *obj, fz_off_t i);
+void pdf_set_int(fz_context *ctx, pdf_obj *obj, int64_t i);
 
 #endif

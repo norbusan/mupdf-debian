@@ -1,4 +1,7 @@
+#include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
+
+#include <string.h>
 
 static pdf_obj *
 resolve_dest_rec(fz_context *ctx, pdf_document *doc, pdf_obj *dest, int depth)
@@ -41,7 +44,7 @@ pdf_parse_link_dest(fz_context *ctx, pdf_document *doc, pdf_obj *dest)
 {
 	pdf_obj *obj;
 	char buf[256];
-	char *ld;
+	const char *ld;
 	int page;
 	int x, y;
 
@@ -154,7 +157,7 @@ pdf_parse_file_spec(fz_context *ctx, pdf_document *doc, pdf_obj *file_spec, pdf_
 		fz_snprintf(buf, sizeof buf, "#page=%d", pdf_to_int(ctx, pdf_array_get(ctx, dest, 0)) + 1);
 	else if (pdf_is_name(ctx, dest))
 		fz_snprintf(buf, sizeof buf, "#%s", pdf_to_name(ctx, dest));
-	else if (pdf_is_stream(ctx, dest))
+	else if (pdf_is_string(ctx, dest))
 		fz_snprintf(buf, sizeof buf, "#%s", pdf_to_str_buf(ctx, dest));
 	else
 		buf[0] = 0;
@@ -169,7 +172,7 @@ pdf_parse_file_spec(fz_context *ctx, pdf_document *doc, pdf_obj *file_spec, pdf_
 }
 
 char *
-pdf_parse_link_action(fz_context *ctx, pdf_document *doc, pdf_obj *action)
+pdf_parse_link_action(fz_context *ctx, pdf_document *doc, pdf_obj *action, int pagenum)
 {
 	pdf_obj *obj, *dest, *file_spec;
 
@@ -208,18 +211,41 @@ pdf_parse_link_action(fz_context *ctx, pdf_document *doc, pdf_obj *action)
 		file_spec = pdf_dict_get(ctx, action, PDF_NAME_F);
 		return pdf_parse_file_spec(ctx, doc, file_spec, dest);
 	}
+	else if (pdf_name_eq(ctx, PDF_NAME_Named, obj))
+	{
+		dest = pdf_dict_get(ctx, action, PDF_NAME_N);
+
+		if (pdf_name_eq(ctx, PDF_NAME_FirstPage, dest))
+			pagenum = 0;
+		else if (pdf_name_eq(ctx, PDF_NAME_LastPage, dest))
+			pagenum = pdf_count_pages(ctx, doc) - 1;
+		else if (pdf_name_eq(ctx, PDF_NAME_PrevPage, dest) && pagenum >= 0)
+		{
+			if (pagenum > 0)
+				pagenum--;
+		}
+		else if (pdf_name_eq(ctx, PDF_NAME_NextPage, dest) && pagenum >= 0)
+		{
+			if (pagenum < pdf_count_pages(ctx, doc) - 1)
+				pagenum++;
+		}
+		else
+			return NULL;
+
+		return fz_asprintf(ctx, "#%d", pagenum + 1);
+	}
 
 	return NULL;
 }
 
 static fz_link *
-pdf_load_link(fz_context *ctx, pdf_document *doc, pdf_obj *dict, const fz_matrix *page_ctm)
+pdf_load_link(fz_context *ctx, pdf_document *doc, pdf_obj *dict, int pagenum, const fz_matrix *page_ctm)
 {
 	pdf_obj *action;
 	pdf_obj *obj;
 	fz_rect bbox;
 	char *uri;
-	fz_link *link;
+	fz_link *link = NULL;
 
 	obj = pdf_dict_get(ctx, dict, PDF_NAME_Subtype);
 	if (!pdf_name_eq(ctx, obj, PDF_NAME_Link))
@@ -241,19 +267,24 @@ pdf_load_link(fz_context *ctx, pdf_document *doc, pdf_obj *dict, const fz_matrix
 		/* fall back to additional action button's down/up action */
 		if (!action)
 			action = pdf_dict_geta(ctx, pdf_dict_get(ctx, dict, PDF_NAME_AA), PDF_NAME_U, PDF_NAME_D);
-		uri = pdf_parse_link_action(ctx, doc, action);
+		uri = pdf_parse_link_action(ctx, doc, action, pagenum);
 	}
 
 	if (!uri)
 		return NULL;
 
-	link = fz_new_link(ctx, &bbox, doc, uri);
-	fz_free(ctx, uri);
+	fz_try(ctx)
+		link = fz_new_link(ctx, &bbox, doc, uri);
+	fz_always(ctx)
+		fz_free(ctx, uri);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+
 	return link;
 }
 
 fz_link *
-pdf_load_link_annots(fz_context *ctx, pdf_document *doc, pdf_obj *annots, const fz_matrix *page_ctm)
+pdf_load_link_annots(fz_context *ctx, pdf_document *doc, pdf_obj *annots, int pagenum, const fz_matrix *page_ctm)
 {
 	fz_link *link, *head, *tail;
 	pdf_obj *obj;
@@ -269,7 +300,7 @@ pdf_load_link_annots(fz_context *ctx, pdf_document *doc, pdf_obj *annots, const 
 		fz_try(ctx)
 		{
 			obj = pdf_array_get(ctx, annots, i);
-			link = pdf_load_link(ctx, doc, obj, page_ctm);
+			link = pdf_load_link(ctx, doc, obj, pagenum, page_ctm);
 		}
 		fz_catch(ctx)
 		{
@@ -525,4 +556,28 @@ pdf_bound_annot(fz_context *ctx, pdf_annot *annot, fz_rect *rect)
 	pdf_page_transform(ctx, annot->page, &mediabox, &page_ctm);
 	fz_transform_rect(rect, &page_ctm);
 	return rect;
+}
+
+void
+pdf_dirty_annot(fz_context *ctx, pdf_annot *annot)
+{
+	if (annot)
+	{
+		annot->dirty = 1;
+		if (annot->page && annot->page->doc)
+			annot->page->doc->dirty = 1;
+	}
+}
+
+void
+pdf_clean_annot(fz_context *ctx, pdf_annot *annot)
+{
+	if (annot)
+		annot->dirty = 0;
+}
+
+int
+pdf_annot_is_dirty(fz_context *ctx, pdf_annot *annot)
+{
+	return annot ? annot->dirty: 0;
 }

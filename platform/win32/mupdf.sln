@@ -41,7 +41,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mujstest", "mujstest.vcproj
 		{5F615F91-DFF8-4F05-BF48-6222B7D86519} = {5F615F91-DFF8-4F05-BF48-6222B7D86519}
 	EndProjectSection
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libglfw", "libglfw.vcproj", "{A1B75D29-9F5C-4A0F-B368-322A10477D0C}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libfreeglut", "libfreeglut.vcproj", "{A1B75D29-9F5C-4A0F-B368-322A10477D0C}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mupdf-gl", "mupdf-gl.vcproj", "{CE3A76A8-A28F-4991-8FB9-C9453D922037}"
 	ProjectSection(ProjectDependencies) = postProject
@@ -49,7 +49,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mupdf-gl", "mupdf-gl.vcproj
 		{5F615F91-DFF8-4F05-BF48-6222B7D86519} = {5F615F91-DFF8-4F05-BF48-6222B7D86519}
 	EndProjectSection
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libfonts", "libfonts.vcproj", "{52DCAB29-C8EE-4422-954C-29AFA6B33E22}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libresources", "libresources.vcproj", "{52DCAB29-C8EE-4422-954C-29AFA6B33E22}"
 	ProjectSection(ProjectDependencies) = postProject
 		{A5053AA7-02E5-4903-B596-04F17AEB1526} = {A5053AA7-02E5-4903-B596-04F17AEB1526}
 	EndProjectSection

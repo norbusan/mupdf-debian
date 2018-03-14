@@ -1,5 +1,8 @@
 #include "mupdf/fitz.h"
 
+#include <string.h>
+#include <limits.h>
+
 static const unsigned char web_palette[] = {
 	0x00, 0x00, 0x00, 0x33, 0x00, 0x00, 0x66, 0x00, 0x00, 0x99, 0x00, 0x00, 0xCC, 0x00, 0x00, 0xFF, 0x00, 0x00,
 	0x00, 0x00, 0x33, 0x33, 0x00, 0x33, 0x66, 0x00, 0x33, 0x99, 0x00, 0x33, 0xCC, 0x00, 0x33, 0xFF, 0x00, 0x33,
@@ -99,8 +102,8 @@ struct info
 #define read16(p) (((p)[1] << 8) | (p)[0])
 #define read32(p) (((p)[3] << 24) | ((p)[2] << 16) | ((p)[1] << 8) | (p)[0])
 
-static unsigned char *
-bmp_read_file_header(fz_context *ctx, struct info *info, unsigned char *p, unsigned char *end)
+static const unsigned char *
+bmp_read_file_header(fz_context *ctx, struct info *info, const unsigned char *p, const unsigned char *end)
 {
 	if (end - p < 14)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end in file header in bmp image");
@@ -114,8 +117,8 @@ bmp_read_file_header(fz_context *ctx, struct info *info, unsigned char *p, unsig
 	return p + 14;
 }
 
-static unsigned char *
-bmp_read_bitmap_core_header(fz_context *ctx, struct info *info, unsigned char *p, unsigned char *end)
+static const unsigned char *
+bmp_read_bitmap_core_header(fz_context *ctx, struct info *info, const unsigned char *p, const unsigned char *end)
 {
 	int size;
 
@@ -141,8 +144,8 @@ bmp_read_bitmap_core_header(fz_context *ctx, struct info *info, unsigned char *p
 	return p + size;
 }
 
-static unsigned char *
-bmp_read_bitmap_os2_header(fz_context *ctx, struct info *info, unsigned char *p, unsigned char *end)
+static const unsigned char *
+bmp_read_bitmap_os2_header(fz_context *ctx, struct info *info, const unsigned char *p, const unsigned char *end)
 {
 	int size;
 
@@ -199,8 +202,8 @@ static void maskinfo(unsigned int mask, int *shift, int *bits)
 	}
 }
 
-static unsigned char *
-bmp_read_bitmap_info_header(fz_context *ctx, struct info *info, unsigned char *p, unsigned char *end)
+static const unsigned char *
+bmp_read_bitmap_info_header(fz_context *ctx, struct info *info, const unsigned char *p, const unsigned char *end)
 {
 	int size;
 
@@ -269,8 +272,8 @@ bmp_read_bitmap_info_header(fz_context *ctx, struct info *info, unsigned char *p
 	return p + size;
 }
 
-static unsigned char *
-bmp_read_extra_masks(fz_context *ctx, struct info *info, unsigned char *p, unsigned char *end)
+static const unsigned char *
+bmp_read_extra_masks(fz_context *ctx, struct info *info, const unsigned char *p, const unsigned char *end)
 {
 	int size = 0;
 
@@ -353,8 +356,8 @@ bmp_load_default_palette(fz_context *ctx, struct info *info, int readcolors)
 		memcpy(info->palette, bw_palette, sizeof(bw_palette));
 }
 
-static unsigned char *
-bmp_read_color_table(fz_context *ctx, struct info *info, unsigned char *p, unsigned char *end)
+static const unsigned char *
+bmp_read_color_table(fz_context *ctx, struct info *info, const unsigned char *p, const unsigned char *end)
 {
 	int i, colors, readcolors;
 
@@ -400,9 +403,10 @@ bmp_read_color_table(fz_context *ctx, struct info *info, unsigned char *p, unsig
 }
 
 static unsigned char *
-bmp_decompress_rle24(fz_context *ctx, struct info *info, unsigned char *p, unsigned char **end)
+bmp_decompress_rle24(fz_context *ctx, struct info *info, const unsigned char *p, const unsigned char **end)
 {
-	unsigned char *sp, *dp, *ep, *decompressed;
+	const unsigned char *sp;
+	unsigned char *dp, *ep, *decompressed;
 	int width = info->width;
 	int height = info->height;
 	int stride;
@@ -487,9 +491,10 @@ bmp_decompress_rle24(fz_context *ctx, struct info *info, unsigned char *p, unsig
 }
 
 static unsigned char *
-bmp_decompress_rle8(fz_context *ctx, struct info *info, unsigned char *p, unsigned char **end)
+bmp_decompress_rle8(fz_context *ctx, struct info *info, const unsigned char *p, const unsigned char **end)
 {
-	unsigned char *sp, *dp, *ep, *decompressed;
+	const unsigned char *sp;
+	unsigned char *dp, *ep, *decompressed;
 	int width = info->width;
 	int height = info->height;
 	int stride;
@@ -569,9 +574,10 @@ bmp_decompress_rle8(fz_context *ctx, struct info *info, unsigned char *p, unsign
 }
 
 static unsigned char *
-bmp_decompress_rle4(fz_context *ctx, struct info *info, unsigned char *p, unsigned char **end)
+bmp_decompress_rle4(fz_context *ctx, struct info *info, const unsigned char *p, const unsigned char **end)
 {
-	unsigned char *sp, *dp, *ep, *decompressed;
+	const unsigned char *sp;
+	unsigned char *dp, *ep, *decompressed;
 	int width = info->width;
 	int height = info->height;
 	int stride;
@@ -660,12 +666,13 @@ bmp_decompress_rle4(fz_context *ctx, struct info *info, unsigned char *p, unsign
 }
 
 static fz_pixmap *
-bmp_read_bitmap(fz_context *ctx, struct info *info, unsigned char *p, unsigned char *end)
+bmp_read_bitmap(fz_context *ctx, struct info *info, const unsigned char *p, const unsigned char *end)
 {
 	const int mults[] = { 0, 8191, 2730, 1170, 546, 264, 130, 64 };
 	fz_pixmap *pix;
+	const unsigned char *ssp;
+	unsigned char *ddp;
 	unsigned char *decompressed = NULL;
-	unsigned char *ssp, *ddp;
 	int bitcount, width, height;
 	int sstride, dstride;
 	int rmult, gmult, bmult, amult;
@@ -694,7 +701,7 @@ bmp_read_bitmap(fz_context *ctx, struct info *info, unsigned char *p, unsigned c
 	}
 
 	fz_try(ctx)
-		pix = fz_new_pixmap(ctx, fz_device_rgb(ctx), width, height, 1);
+		pix = fz_new_pixmap(ctx, fz_device_rgb(ctx), width, height, NULL, 1);
 	fz_catch(ctx)
 	{
 		fz_free(ctx, decompressed);
@@ -729,7 +736,7 @@ bmp_read_bitmap(fz_context *ctx, struct info *info, unsigned char *p, unsigned c
 
 	for (y = 0; y < height; y++)
 	{
-		unsigned char *sp = ssp + y * sstride;
+		const unsigned char *sp = ssp + y * sstride;
 		unsigned char *dp = ddp + y * dstride;
 
 		switch (bitcount)
@@ -846,10 +853,10 @@ bmp_read_bitmap(fz_context *ctx, struct info *info, unsigned char *p, unsigned c
 }
 
 static fz_pixmap *
-bmp_read_image(fz_context *ctx, struct info *info, unsigned char *p, size_t total, int only_metadata)
+bmp_read_image(fz_context *ctx, struct info *info, const unsigned char *p, size_t total, int only_metadata)
 {
-	unsigned char *begin = p;
-	unsigned char *end = p + total;
+	const unsigned char *begin = p;
+	const unsigned char *end = p + total;
 	int size;
 
 	memset(info, 0x00, sizeof (*info));
@@ -935,7 +942,7 @@ bmp_read_image(fz_context *ctx, struct info *info, unsigned char *p, size_t tota
 }
 
 fz_pixmap *
-fz_load_bmp(fz_context *ctx, unsigned char *p, size_t total)
+fz_load_bmp(fz_context *ctx, const unsigned char *p, size_t total)
 {
 	struct info bmp;
 	fz_pixmap *image;
@@ -948,13 +955,13 @@ fz_load_bmp(fz_context *ctx, unsigned char *p, size_t total)
 }
 
 void
-fz_load_bmp_info(fz_context *ctx, unsigned char *p, size_t total, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
+fz_load_bmp_info(fz_context *ctx, const unsigned char *p, size_t total, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
 {
 	struct info bmp;
 
 	bmp_read_image(ctx, &bmp, p, total, 1);
 
-	*cspacep = fz_device_rgb(ctx);
+	*cspacep = fz_keep_colorspace(ctx, fz_device_rgb(ctx));
 	*wp = bmp.width;
 	*hp = bmp.height;
 	*xresp = bmp.xres / (1000.0f / 25.4f);

@@ -1,5 +1,7 @@
 #include "mupdf/fitz.h"
 
+#include <string.h>
+
 /* Pretend we have a filter that just copies data forever */
 
 fz_stream *
@@ -14,7 +16,7 @@ struct null_filter
 {
 	fz_stream *chain;
 	size_t remain;
-	fz_off_t offset;
+	int64_t offset;
 	unsigned char buffer[4096];
 };
 
@@ -39,8 +41,8 @@ next_null(fz_context *ctx, fz_stream *stm, size_t max)
 		return EOF;
 	state->chain->rp += n;
 	state->remain -= n;
-	state->offset += (fz_off_t)n;
-	stm->pos += (fz_off_t)n;
+	state->offset += (int64_t)n;
+	stm->pos += (int64_t)n;
 	return *stm->rp++;
 }
 
@@ -54,9 +56,9 @@ close_null(fz_context *ctx, void *state_)
 }
 
 fz_stream *
-fz_open_null(fz_context *ctx, fz_stream *chain, int len, fz_off_t offset)
+fz_open_null(fz_context *ctx, fz_stream *chain, int len, int64_t offset)
 {
-	struct null_filter *state;
+	struct null_filter *state = NULL;
 
 	if (len < 0)
 		len = 0;
@@ -104,7 +106,7 @@ next_concat(fz_context *ctx, fz_stream *stm, size_t max)
 		{
 			stm->rp = state->chain[state->current]->rp;
 			stm->wp = state->chain[state->current]->wp;
-			stm->pos += (fz_off_t)n;
+			stm->pos += (int64_t)n;
 			return *stm->rp++;
 		}
 		else
@@ -160,12 +162,15 @@ fz_open_concat(fz_context *ctx, int len, int pad)
 }
 
 void
-fz_concat_push(fz_context *ctx, fz_stream *concat, fz_stream *chain)
+fz_concat_push_drop(fz_context *ctx, fz_stream *concat, fz_stream *chain)
 {
 	struct concat_filter *state = (struct concat_filter *)concat->state;
 
 	if (state->count == state->max)
+	{
+		fz_drop_stream(ctx, chain);
 		fz_throw(ctx, FZ_ERROR_GENERIC, "Concat filter size exceeded");
+	}
 
 	state->chain[state->count++] = chain;
 }
@@ -276,7 +281,7 @@ close_ahxd(fz_context *ctx, void *state_)
 fz_stream *
 fz_open_ahxd(fz_context *ctx, fz_stream *chain)
 {
-	fz_ahxd *state;
+	fz_ahxd *state = NULL;
 
 	fz_try(ctx)
 	{
@@ -420,7 +425,7 @@ close_a85d(fz_context *ctx, void *state_)
 fz_stream *
 fz_open_a85d(fz_context *ctx, fz_stream *chain)
 {
-	fz_a85d *state;
+	fz_a85d *state = NULL;
 
 	fz_try(ctx)
 	{
@@ -531,7 +536,7 @@ close_rld(fz_context *ctx, void *state_)
 fz_stream *
 fz_open_rld(fz_context *ctx, fz_stream *chain)
 {
-	fz_rld *state;
+	fz_rld *state = NULL;
 
 	fz_try(ctx)
 	{
@@ -576,7 +581,7 @@ next_arc4(fz_context *ctx, fz_stream *stm, size_t max)
 	stm->wp = state->buffer + n;
 	fz_arc4_encrypt(&state->arc4, stm->rp, state->chain->rp, n);
 	state->chain->rp += n;
-	stm->pos += (fz_off_t)n;
+	stm->pos += (int64_t)n;
 
 	return *stm->rp++;
 }
@@ -594,7 +599,7 @@ close_arc4(fz_context *ctx, void *state_)
 fz_stream *
 fz_open_arc4(fz_context *ctx, fz_stream *chain, unsigned char *key, unsigned keylen)
 {
-	fz_arc4c *state;
+	fz_arc4c *state = NULL;
 
 	fz_try(ctx)
 	{
@@ -656,7 +661,7 @@ next_aesd(fz_context *ctx, fz_stream *stm, size_t max)
 		else if (n < 16)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "partial block in aes filter");
 
-		aes_crypt_cbc(&state->aes, AES_DECRYPT, 16, state->iv, state->bp, state->bp);
+		fz_aes_crypt_cbc(&state->aes, FZ_AES_DECRYPT, 16, state->iv, state->bp, state->bp);
 		state->rp = state->bp;
 		state->wp = state->bp + 16;
 
@@ -704,7 +709,7 @@ fz_open_aesd(fz_context *ctx, fz_stream *chain, unsigned char *key, unsigned key
 	{
 		state = fz_malloc_struct(ctx, fz_aesd);
 		state->chain = chain;
-		if (aes_setkey_dec(&state->aes, key, keylen * 8))
+		if (fz_aes_setkey_dec(&state->aes, key, keylen * 8))
 			fz_throw(ctx, FZ_ERROR_GENERIC, "AES key init failed (keylen=%d)", keylen * 8);
 		state->ivcount = 0;
 		state->rp = state->bp;

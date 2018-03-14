@@ -1,5 +1,26 @@
 #include "mupdf/fitz.h"
 
+#include <float.h>
+#include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
+
+#ifdef _MSC_VER
+#if _MSC_VER < 1500 /* MSVC 2008 */
+int snprintf(char *s, size_t n, const char *fmt, ...)
+{
+		int r;
+		va_list ap;
+		va_start(ap, fmt);
+		r = vsprintf(s, fmt, ap);
+		va_end(ap);
+		return r;
+}
+#else if _MSC_VER < 1900 /* MSVC 2015 */
+#define snprintf _snprintf
+#endif
+#endif
+
 static const char *fz_hex_digits = "0123456789abcdef";
 
 struct fmtbuf
@@ -88,10 +109,16 @@ static void fmtuint32(struct fmtbuf *out, unsigned int a, int s, int z, int w, i
 		buf[i++] = fz_hex_digits[a % base];
 		a /= base;
 	}
+	if (z == '0')
+		while (i < w - !!s)
+			buf[i++] = z;
+	if (s)
+		buf[i++] = s;
 	while (i < w)
 		buf[i++] = z;
-	if (s)
-		fmtputc(out, '+');
+	if (z == ' ')
+		while (i < w)
+			buf[i++] = z;
 	while (i > 0)
 		fmtputc(out, buf[--i]);
 }
@@ -108,10 +135,19 @@ static void fmtuint64(struct fmtbuf *out, uint64_t a, int s, int z, int w, int b
 		buf[i++] = fz_hex_digits[a % base];
 		a /= base;
 	}
+	if (z == '0')
+		while (i < w - !!s)
+			buf[i++] = z;
+	if (s)
+	{
+		buf[i++] = s;
+		w += 1;
+	}
 	while (i < w)
 		buf[i++] = z;
-	if (s)
-		fmtputc(out, '+');
+	if (z == ' ')
+		while (i < w)
+			buf[i++] = z;
 	while (i > 0)
 		fmtputc(out, buf[--i]);
 }
@@ -122,11 +158,19 @@ static void fmtint32(struct fmtbuf *out, int value, int s, int z, int w, int bas
 
 	if (value < 0)
 	{
-		fmtputc(out, '-');
+		s = '-';
 		a = -value;
 	}
-	else
+	else if (s)
+	{
+		s = '+';
 		a = value;
+	}
+	else
+	{
+		s = 0;
+		a = value;
+	}
 	fmtuint32(out, a, s, z, w, base);
 }
 
@@ -136,11 +180,19 @@ static void fmtint64(struct fmtbuf *out, int64_t value, int s, int z, int w, int
 
 	if (value < 0)
 	{
-		fmtputc(out, '-');
+		s = '-';
 		a = -value;
 	}
-	else
+	else if (s)
+	{
+		s = '+';
 		a = value;
+	}
+	else
+	{
+		s = 0;
+		a = value;
+	}
 	fmtuint64(out, a, s, z, w, base);
 }
 
@@ -191,29 +243,29 @@ fz_format_string(fz_context *ctx, void *user, void (*emit)(fz_context *ctx, void
 	{
 		if (c == '%')
 		{
-			c = *fmt++;
+			s = 0;
+			z = 0;
+
+			/* flags */
+			while ((c = *fmt++) != 0)
+			{
+				/* sign */
+				if (c == '+')
+					s = 1;
+				/* space padding */
+				else if (c == ' ')
+					z = ' ';
+				/* leading zero */
+				else if (c == '0')
+					z = z != ' ' ? '0' : z;
+				/* TODO: '-' to left justify */
+				else
+					break;
+			}
+			if (!z)
+				z = ' ';
 			if (c == 0)
 				break;
-
-			/* sign */
-			s = 0;
-			if (c == '+') {
-				s = 1;
-				c = *fmt++;
-				if (c == 0)
-					break;
-			}
-
-			/* TODO: '-' to left justify */
-
-			/* leading zero */
-			z = ' ';
-			if (c == '0') {
-				z = '0';
-				c = *fmt++;
-				if (c == 0)
-					break;
-			}
 
 			/* width */
 			w = 0;
@@ -254,11 +306,7 @@ fz_format_string(fz_context *ctx, void *user, void (*emit)(fz_context *ctx, void
 			bits = 0;
 			if (c == 'l') {
 				c = *fmt++;
-				bits = sizeof(long) * 8;
-				if (c == 'l') {
-					c = *fmt++;
-					bits = 64;
-				}
+				bits = sizeof(int64_t) * 8;
 				if (c == 0)
 					break;
 			}
@@ -271,12 +319,6 @@ fz_format_string(fz_context *ctx, void *user, void (*emit)(fz_context *ctx, void
 			if (c == 'z') {
 				c = *fmt++;
 				bits = sizeof(size_t) * 8;
-				if (c == 0)
-					break;
-			}
-			if (c == 'Z') {
-				c = *fmt++;
-				bits = sizeof(fz_off_t) * 8;
 				if (c == 0)
 					break;
 			}
@@ -354,12 +396,12 @@ fz_format_string(fz_context *ctx, void *user, void (*emit)(fz_context *ctx, void
 				if (bits == 64)
 				{
 					i64 = va_arg(args, int64_t);
-					fmtuint64(&out, i64, s, z, w, 16);
+					fmtuint64(&out, i64, 0, z, w, 16);
 				}
 				else
 				{
 					i32 = va_arg(args, int);
-					fmtuint32(&out, i32, s, z, w, 16);
+					fmtuint32(&out, i32, 0, z, w, 16);
 				}
 				break;
 			case 'd':
@@ -378,17 +420,13 @@ fz_format_string(fz_context *ctx, void *user, void (*emit)(fz_context *ctx, void
 				if (bits == 64)
 				{
 					i64 = va_arg(args, int64_t);
-					fmtuint64(&out, i64, s, z, w, 10);
+					fmtuint64(&out, i64, 0, z, w, 10);
 				}
 				else
 				{
 					i32 = va_arg(args, int);
-					fmtuint32(&out, i32, s, z, w, 10);
+					fmtuint32(&out, i32, 0, z, w, 10);
 				}
-				break;
-			case 'o':
-				i32 = va_arg(args, int);
-				fmtint32(&out, i32, s, z, w, 8);
 				break;
 
 			case 's':
@@ -461,4 +499,20 @@ fz_snprintf(char *buffer, size_t space, const char *fmt, ...)
 	va_end(ap);
 
 	return out.n - 1;
+}
+
+char *
+fz_asprintf(fz_context *ctx, const char *fmt, ...)
+{
+	int len;
+	char *mem;
+	va_list ap;
+	va_start(ap, fmt);
+	len = fz_vsnprintf(NULL, 0, fmt, ap);
+	va_end(ap);
+	mem = fz_malloc(ctx, len+1);
+	va_start(ap, fmt);
+	fz_vsnprintf(mem, len+1, fmt, ap);
+	va_end(ap);
+	return mem;
 }

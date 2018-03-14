@@ -2,7 +2,11 @@
  * pdfshow -- the ultimate pdf debugging tool
  */
 
+#include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
+
+#include <stdlib.h>
+#include <stdio.h>
 
 static pdf_document *doc = NULL;
 static fz_context *ctx = NULL;
@@ -42,6 +46,24 @@ static void showencrypt(void)
 	fz_write_printf(ctx, out, "encryption dictionary\n");
 	pdf_print_obj(ctx, out, pdf_resolve_indirect(ctx, encrypt), 0);
 	fz_write_printf(ctx, out, "\n");
+}
+
+void
+pdf_print_xref(fz_context *ctx, pdf_document *doc)
+{
+	int i;
+	int xref_len = pdf_xref_len(ctx, doc);
+	printf("xref\n0 %d\n", xref_len);
+	for (i = 0; i < xref_len; i++)
+	{
+		pdf_xref_entry *entry = pdf_get_xref_entry(ctx, doc, i);
+		printf("%05d: %010d %05d %c (stm_ofs=%d; stm_buf=%p)\n", i,
+				(int)entry->ofs,
+				entry->gen,
+				entry->type ? entry->type : '-',
+				(int)entry->stm_ofs,
+				entry->stm_buf);
+	}
 }
 
 static void showxref(void)
@@ -191,26 +213,30 @@ static void showgrep(char *filename)
 	fz_write_printf(ctx, out, "\n");
 }
 
+static void
+fz_print_outline(fz_context *ctx, fz_output *out, fz_outline *outline, int level)
+{
+	int i;
+	while (outline)
+	{
+		for (i = 0; i < level; i++)
+			fz_write_printf(ctx, out, "\t");
+		fz_write_printf(ctx, out, "%s\t%s\n", outline->title, outline->uri);
+		if (outline->down)
+			fz_print_outline(ctx, out, outline->down, level + 1);
+		outline = outline->next;
+	}
+}
+
 static void showoutline(void)
 {
 	fz_outline *outline = fz_load_outline(ctx, (fz_document*)doc);
-	fz_output *out = NULL;
-
-	fz_var(out);
 	fz_try(ctx)
-	{
-		out = fz_stdout(ctx);
-		fz_print_outline(ctx, out, outline);
-	}
+		fz_print_outline(ctx, fz_stdout(ctx), outline, 0);
 	fz_always(ctx)
-	{
-		fz_drop_output(ctx, out);
 		fz_drop_outline(ctx, outline);
-	}
 	fz_catch(ctx)
-	{
 		fz_rethrow(ctx);
-	}
 }
 
 int pdfshow_main(int argc, char **argv)
@@ -274,6 +300,8 @@ int pdfshow_main(int argc, char **argv)
 			}
 			fz_optind++;
 		}
+
+		fz_close_output(ctx, out);
 	}
 	fz_catch(ctx)
 	{

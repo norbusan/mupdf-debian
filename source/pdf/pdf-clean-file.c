@@ -1,4 +1,7 @@
+#include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
+
+#include <string.h>
 
 typedef struct globals_s
 {
@@ -228,13 +231,8 @@ static void retainpages(fz_context *ctx, globals *glo, int argc, char **argv)
 
 	/* Update page count and kids array */
 	countobj = pdf_new_int(ctx, doc, pdf_array_len(ctx, kids));
-	pdf_dict_put(ctx, pages, PDF_NAME_Count, countobj);
-	pdf_drop_obj(ctx, countobj);
-	pdf_dict_put(ctx, pages, PDF_NAME_Kids, kids);
-	pdf_drop_obj(ctx, kids);
-
-	/* Force the next call to pdf_count_pages to recount */
-	glo->doc->page_count = 0;
+	pdf_dict_put_drop(ctx, pages, PDF_NAME_Count, countobj);
+	pdf_dict_put_drop(ctx, pages, PDF_NAME_Kids, kids);
 
 	pagecount = pdf_count_pages(ctx, doc);
 	page_object_nums = fz_calloc(ctx, pagecount, sizeof(*page_object_nums));

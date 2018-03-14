@@ -36,21 +36,19 @@ fz_pixmap *fz_new_pixmap_from_page_contents(fz_context *ctx, fz_page *page, cons
 fz_pixmap *fz_new_pixmap_from_annot(fz_context *ctx, fz_annot *annot, const fz_matrix *ctm, fz_colorspace *cs, int alpha);
 
 /*
-	fz_new_stext_page_from_page: Extract structured text from a page. The sheet must not be NULL.
+	fz_new_stext_page_from_page: Extract structured text from a page.
 */
-fz_stext_page *fz_new_stext_page_from_page(fz_context *ctx, fz_page *page, fz_stext_sheet *sheet, const fz_stext_options *options);
-fz_stext_page *fz_new_stext_page_from_page_number(fz_context *ctx, fz_document *doc, int number, fz_stext_sheet *sheet, const fz_stext_options *options);
-fz_stext_page *fz_new_stext_page_from_display_list(fz_context *ctx, fz_display_list *list, fz_stext_sheet *sheet, const fz_stext_options *options);
+fz_stext_page *fz_new_stext_page_from_page(fz_context *ctx, fz_page *page, const fz_stext_options *options);
+fz_stext_page *fz_new_stext_page_from_page_number(fz_context *ctx, fz_document *doc, int number, const fz_stext_options *options);
+fz_stext_page *fz_new_stext_page_from_display_list(fz_context *ctx, fz_display_list *list, const fz_stext_options *options);
 
 /*
-	fz_new_buffer_from_stext_page: Convert structured text into plain text, cropped by the selection rectangle.
-	Use fz_infinite_rect to extract all the text on the page. If 'crlf' is true, lines are separated by '\r\n',
-	otherwise '\n'.
+	fz_new_buffer_from_stext_page: Convert structured text into plain text.
 */
-fz_buffer *fz_new_buffer_from_stext_page(fz_context *ctx, fz_stext_page *text, const fz_rect *sel, int crlf);
-fz_buffer *fz_new_buffer_from_page(fz_context *ctx, fz_page *page, const fz_rect *sel, int crlf, const fz_stext_options *options);
-fz_buffer *fz_new_buffer_from_page_number(fz_context *ctx, fz_document *doc, int number, const fz_rect *sel, int crlf, const fz_stext_options *options);
-fz_buffer *fz_new_buffer_from_display_list(fz_context *ctx, fz_display_list *list, const fz_rect *sel, int crlf, const fz_stext_options *options);
+fz_buffer *fz_new_buffer_from_stext_page(fz_context *ctx, fz_stext_page *text);
+fz_buffer *fz_new_buffer_from_page(fz_context *ctx, fz_page *page, const fz_stext_options *options);
+fz_buffer *fz_new_buffer_from_page_number(fz_context *ctx, fz_document *doc, int number, const fz_stext_options *options);
+fz_buffer *fz_new_buffer_from_display_list(fz_context *ctx, fz_display_list *list, const fz_stext_options *options);
 
 /*
 	fz_search_page: Search for the 'needle' text on the page.
@@ -60,5 +58,20 @@ fz_buffer *fz_new_buffer_from_display_list(fz_context *ctx, fz_display_list *lis
 int fz_search_page(fz_context *ctx, fz_page *page, const char *needle, fz_rect *hit_bbox, int hit_max);
 int fz_search_page_number(fz_context *ctx, fz_document *doc, int number, const char *needle, fz_rect *hit_bbox, int hit_max);
 int fz_search_display_list(fz_context *ctx, fz_display_list *list, const char *needle, fz_rect *hit_bbox, int hit_max);
+
+/*
+	Parse an SVG document into a display-list.
+*/
+fz_display_list *fz_new_display_list_from_svg(fz_context *ctx, fz_buffer *buf, float *w, float *h);
+
+/*
+	Create a scalable image from an SVG document.
+*/
+fz_image *fz_new_image_from_svg(fz_context *ctx, fz_buffer *buf);
+
+/*
+	Write image as a data URI (for HTML and SVG output).
+*/
+void fz_write_image_as_data_uri(fz_context *ctx, fz_output *out, fz_image *image);
 
 #endif

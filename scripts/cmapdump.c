@@ -3,12 +3,17 @@
 /* We never want to build memento versions of the cmapdump util */
 #undef MEMENTO
 
-/* We never want large file access here */
-#undef FZ_LARGEFILE
+#ifndef _LARGEFILE64_SOURCE
+#ifdef _MSC_VER
+#if _MSC_VER >= 1400 /* MSVC 8 (Visual Studio 2005) or newer */
+#define _LARGEFILE64_SOURCE
+#endif
+#else
+#define _LARGEFILE64_SOURCE
+#endif
+#endif
 
-#include <stdio.h>
-#include <string.h>
-
+#include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
 
 #include "../source/fitz/context.c"
@@ -20,7 +25,6 @@
 #include "../source/fitz/crypt-md5.c"
 #include "../source/fitz/stream-open.c"
 #include "../source/fitz/stream-read.c"
-#include "../source/fitz/strtod.c"
 #include "../source/fitz/strtof.c"
 #include "../source/fitz/ftoa.c"
 #include "../source/fitz/printf.c"
@@ -31,6 +35,9 @@
 #include "../source/pdf/pdf-lex.c"
 #include "../source/pdf/pdf-cmap.c"
 #include "../source/pdf/pdf-cmap-parse.c"
+
+#include <stdio.h>
+#include <string.h>
 
 static void
 clean(char *p)
@@ -51,7 +58,7 @@ main(int argc, char **argv)
 	FILE *fo;
 	char name[256];
 	char *realname;
-	int i, k, m;
+	int i, k;
 	fz_context *ctx;
 
 	if (argc < 3)
@@ -75,7 +82,9 @@ main(int argc, char **argv)
 		return 1;
 	}
 
-	fprintf(fo, "/* This is an automatically generated file. Do not edit. */\n");
+	fprintf(fo, "/* This is an automatically generated file. Do not edit. */\n\n");
+	fprintf(fo, "#include \"mupdf/fitz.h\"\n");
+	fprintf(fo, "#include \"mupdf/pdf.h\"\n");
 
 	for (i = 2; i < argc; i++)
 	{
@@ -140,15 +149,24 @@ main(int argc, char **argv)
 			fprintf(fo, "static const pdf_mrange cmap_%s_mranges[] = {", name);
 			for (k = 0; k < cmap->mlen; k++)
 			{
-				fprintf(fo, "\n{%uu,%uu,{", cmap->mranges[k].low, cmap->mranges[k].len);
-				for (m = 0; m < PDF_MRANGE_CAP; ++m)
-					fprintf(fo, "%uu,", cmap->mranges[k].out[m]);
-				fprintf(fo, "}},");
+				fprintf(fo, "\n{%uu,%uu},", cmap->mranges[k].low, cmap->mranges[k].out);
 			}
 			fprintf(fo, "\n};\n\n");
 		}
 
-		fprintf(fo, "static pdf_cmap cmap_%s = {\n", name);
+		if (cmap->dlen > 0)
+		{
+			fprintf(fo, "static const int cmap_%s_dict[] = {", name);
+			for (k = 0; k < cmap->dlen; k++)
+			{
+				if (k % 4 == 0)
+					fprintf(fo, "\n");
+				fprintf(fo, "%uu,", cmap->dict[k]);
+			}
+			fprintf(fo, "\n};\n\n");
+		}
+
+		fprintf(fo, "pdf_cmap pdf_cmap_%s = {\n", name);
 		fprintf(fo, "\t{-1, pdf_drop_cmap_imp}, ");
 		fprintf(fo, "\"%s\", ", cmap->cmap_name);
 		fprintf(fo, "\"%s\", 0, ", cmap->usecmap_name);
@@ -174,6 +192,10 @@ main(int argc, char **argv)
 			fprintf(fo, "\t0, 0, NULL,\n");
 		if (cmap->mlen)
 			fprintf(fo, "\t%u, %u, (pdf_mrange*) cmap_%s_mranges,\n", cmap->mlen, cmap->mlen, name);
+		else
+			fprintf(fo, "\t0, 0, NULL,\n");
+		if (cmap->dict)
+			fprintf(fo, "\t%u, %u, (int*) cmap_%s_dict,\n", cmap->dlen, cmap->dlen, name);
 		else
 			fprintf(fo, "\t0, 0, NULL,\n");
 
@@ -206,6 +228,14 @@ void fz_drop_font_context(fz_context *ctx)
 fz_font_context *fz_keep_font_context(fz_context *ctx)
 {
 	return NULL;
+}
+
+void fz_new_cmm_context(fz_context *ctx)
+{
+}
+
+void fz_drop_cmm_context(fz_context *ctx)
+{
 }
 
 void fz_new_colorspace_context(fz_context *ctx)
@@ -295,6 +325,20 @@ void fz_default_image_decode(void *arg, int w, int h, int l2factor, fz_irect *ir
 }
 
 int fz_default_image_scale(void *arg, int w, int h, int src_w, int src_h)
+{
+	return 0;
+}
+
+fz_separations *fz_keep_separations(fz_context *ctx, fz_separations *seps)
+{
+	return NULL;
+}
+
+void fz_drop_separations(fz_context *ctx, fz_separations *seps)
+{
+}
+
+int fz_count_active_separations(fz_context *ctx, const fz_separations *seps)
 {
 	return 0;
 }

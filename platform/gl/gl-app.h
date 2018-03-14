@@ -5,10 +5,15 @@ int win_open_file(char *buf, int len);
 #endif
 
 #include "mupdf/fitz.h"
-#include <GLFW/glfw3.h>
+#include "mupdf/ucdn.h"
+
+#ifndef __APPLE__
+#include <GL/freeglut.h>
+#else
+#include <GLUT/glut.h>
+#endif
 
 extern fz_context *ctx;
-extern GLFWwindow *window;
 
 enum
 {
@@ -17,6 +22,7 @@ enum
 	KEY_ENTER = '\r',
 	KEY_TAB = '\t',
 	KEY_BACKSPACE = '\b',
+	KEY_DELETE = 127,
 
 	KEY_CTL_A = 'A' - 64,
 	KEY_CTL_B, KEY_CTL_C, KEY_CTL_D, KEY_CTL_E, KEY_CTL_F,
@@ -26,8 +32,7 @@ enum
 	KEY_CTL_Y, KEY_CTL_Z,
 
 	/* reuse control characters > 127 for special keys */
-	KEY_INSERT = 127,
-	KEY_DELETE,
+	KEY_INSERT = 128,
 	KEY_PAGE_UP,
 	KEY_PAGE_DOWN,
 	KEY_HOME,
@@ -55,7 +60,7 @@ struct ui
 	int x, y;
 	int down, middle, right;
 	int scroll_x, scroll_y;
-	int key, mod;
+	int key, mod, plain;
 
 	void *hot, *active, *focus;
 
@@ -65,6 +70,9 @@ struct ui
 };
 
 extern struct ui ui;
+
+void ui_set_clipboard(const char *buf);
+const char *ui_get_clipboard(void);
 
 void ui_init_fonts(fz_context *ctx, float pixelsize);
 void ui_finish_fonts(fz_context *ctx);

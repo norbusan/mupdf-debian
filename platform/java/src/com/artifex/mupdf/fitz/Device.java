@@ -2,6 +2,10 @@ package com.artifex.mupdf.fitz;
 
 public class Device
 {
+	static {
+		Context.init();
+	}
+
 	protected long pointer;
 
 	protected native void finalize();
@@ -20,11 +24,6 @@ public class Device
 	protected Device(long p) {
 		pointer = p;
 	}
-
-	/* An accessor for device hints */
-	public native int getHints();
-	public native void enableDeviceHints(int hints);
-	public native void disableDeviceHints(int hints);
 
 	/* To implement your own device in Java, you should define your own
 	 * class that extends Device, and override as many of the following
@@ -55,7 +54,7 @@ public class Device
 	public void popClip() {}
 	public void beginMask(Rect area, boolean luminosity, ColorSpace cs, float bc[]) {}
 	public void endMask() {}
-	public void beginGroup(Rect area, boolean isolated, boolean knockout, int blendmode, float alpha) {}
+	public void beginGroup(Rect area, ColorSpace cs, boolean isolated, boolean knockout, int blendmode, float alpha) {}
 	public void endGroup() {}
 	public int beginTile(Rect area, Rect view, float xstep, float ystep, Matrix ctm, int id) { return 0; }
 	public void endTile() {}

@@ -1,6 +1,11 @@
 #include "mupdf/fitz.h"
 #include "xps-imp.h"
 
+#include <string.h>
+#include <math.h>
+#include <float.h>
+#include <stdlib.h>
+
 #define MAX_STOPS 256
 
 enum { SPREAD_PAD, SPREAD_REPEAT, SPREAD_REFLECT };
@@ -63,7 +68,7 @@ xps_parse_gradient_stops(fz_context *ctx, xps_document *doc, char *base_uri, fz_
 
 				xps_parse_color(ctx, doc, base_uri, color, &colorspace, sample);
 
-				fz_convert_color(ctx, fz_device_rgb(ctx), rgb, colorspace, sample + 1);
+				fz_convert_color(ctx, fz_default_color_params(ctx), NULL, fz_device_rgb(ctx), rgb, colorspace, sample + 1);
 
 				stops[count].r = rgb[0];
 				stops[count].g = rgb[1];
@@ -217,7 +222,7 @@ xps_draw_one_radial_gradient(fz_context *ctx, xps_document *doc, const fz_matrix
 	/* TODO: this (and the stuff in pdf_shade) should move to res_shade.c */
 	shade = fz_malloc_struct(ctx, fz_shade);
 	FZ_INIT_STORABLE(shade, 1, fz_drop_shade_imp);
-	shade->colorspace = fz_device_rgb(ctx);
+	shade->colorspace = fz_keep_colorspace(ctx, fz_device_rgb(ctx));
 	shade->bbox = fz_infinite_rect;
 	shade->matrix = fz_identity;
 	shade->use_background = 0;
@@ -235,7 +240,7 @@ xps_draw_one_radial_gradient(fz_context *ctx, xps_document *doc, const fz_matrix
 	shade->u.l_or_r.coords[1][1] = y1;
 	shade->u.l_or_r.coords[1][2] = r1;
 
-	fz_fill_shade(ctx, dev, shade, ctm, 1);
+	fz_fill_shade(ctx, dev, shade, ctm, 1, fz_default_color_params(ctx));
 
 	fz_drop_shade(ctx, shade);
 }
@@ -256,7 +261,7 @@ xps_draw_one_linear_gradient(fz_context *ctx, xps_document *doc, const fz_matrix
 	/* TODO: this (and the stuff in pdf_shade) should move to res_shade.c */
 	shade = fz_malloc_struct(ctx, fz_shade);
 	FZ_INIT_STORABLE(shade, 1, fz_drop_shade_imp);
-	shade->colorspace = fz_device_rgb(ctx);
+	shade->colorspace = fz_keep_colorspace(ctx, fz_device_rgb(ctx));
 	shade->bbox = fz_infinite_rect;
 	shade->matrix = fz_identity;
 	shade->use_background = 0;
@@ -274,7 +279,7 @@ xps_draw_one_linear_gradient(fz_context *ctx, xps_document *doc, const fz_matrix
 	shade->u.l_or_r.coords[1][1] = y1;
 	shade->u.l_or_r.coords[1][2] = 0;
 
-	fz_fill_shade(ctx, dev, shade, ctm, doc->opacity[doc->opacity_top]);
+	fz_fill_shade(ctx, dev, shade, ctm, doc->opacity[doc->opacity_top], fz_default_color_params(ctx));
 
 	fz_drop_shade(ctx, shade);
 }
@@ -307,10 +312,10 @@ xps_draw_radial_gradient(fz_context *ctx, xps_document *doc, const fz_matrix *ct
 	char *radius_x_att = fz_xml_att(root, "RadiusX");
 	char *radius_y_att = fz_xml_att(root, "RadiusY");
 
-	x0 = y0 = 0.0;
-	x1 = y1 = 1.0;
-	xrad = 1.0;
-	yrad = 1.0;
+	x0 = y0 = 0.0f;
+	x1 = y1 = 1.0f;
+	xrad = 1.0f;
+	yrad = 1.0f;
 
 	if (origin_att)
 		xps_parse_point(ctx, doc, origin_att, &x0, &y0);
@@ -330,7 +335,7 @@ xps_draw_radial_gradient(fz_context *ctx, xps_document *doc, const fz_matrix *ct
 		fz_pre_scale(&local_ctm, 1, yrad/xrad);
 	}
 
-	if (yrad != 0.0)
+	if (yrad != 0.0f)
 	{
 		invscale = xrad / yrad;
 		y0 = y0 * invscale;

@@ -42,7 +42,8 @@ typedef void (fz_document_writer_close_writer_fn)(fz_context *ctx, fz_document_w
 	the process to release all the resources owned by the writer.
 
 	Calling drop without having previously called close may leave
-	the file in an inconsistent state.
+	the file in an inconsistent state and the user of the
+	fz_document_writer would need to do any cleanup required.
 */
 typedef void (fz_document_writer_drop_writer_fn)(fz_context *ctx, fz_document_writer *wri);
 
@@ -65,8 +66,11 @@ struct fz_document_writer_s
 	structure's function pointers populated correctly, and the extra
 	space zero initialised.
 */
-fz_document_writer *fz_new_document_writer_of_size(fz_context *ctx, size_t size, fz_document_writer_begin_page_fn *begin_page,
-	fz_document_writer_end_page_fn *end_page, fz_document_writer_close_writer_fn *close, fz_document_writer_drop_writer_fn *drop);
+fz_document_writer *fz_new_document_writer_of_size(fz_context *ctx, size_t size,
+		fz_document_writer_begin_page_fn *begin_page,
+		fz_document_writer_end_page_fn *end_page,
+		fz_document_writer_close_writer_fn *close,
+		fz_document_writer_drop_writer_fn *drop);
 
 #define fz_new_derived_document_writer(CTX,TYPE,BEGIN_PAGE,END_PAGE,CLOSE,DROP) \
 	((TYPE *)Memento_label(fz_new_document_writer_of_size(CTX,sizeof(TYPE),BEGIN_PAGE,END_PAGE,CLOSE,DROP),#TYPE))
@@ -80,17 +84,24 @@ int fz_option_eq(const char *a, const char *b);
 
 	path: The document name to write (or NULL for default)
 
-	format: Which format to write (currently cbz, pdf, pam, pbm,
-	pgm, pkm, png, ppm, pnm, svg, tga)
+	format: Which format to write (currently cbz, html, pdf, pam, pbm,
+	pgm, pkm, png, ppm, pnm, svg, text, tga, xhtml)
 
 	options: NULL, or pointer to comma separated string to control
 	file generation.
 */
 fz_document_writer *fz_new_document_writer(fz_context *ctx, const char *path, const char *format, const char *options);
 
-fz_document_writer *fz_new_cbz_writer(fz_context *ctx, const char *path, const char *options);
 fz_document_writer *fz_new_pdf_writer(fz_context *ctx, const char *path, const char *options);
 fz_document_writer *fz_new_svg_writer(fz_context *ctx, const char *path, const char *options);
+
+fz_document_writer *fz_new_text_writer(fz_context *ctx, const char *format, const char *path, const char *options);
+
+fz_document_writer *fz_new_ps_writer(fz_context *ctx, const char *path, const char *options);
+fz_document_writer *fz_new_pcl_writer(fz_context *ctx, const char *path, const char *options);
+fz_document_writer *fz_new_pwg_writer(fz_context *ctx, const char *path, const char *options);
+
+fz_document_writer *fz_new_cbz_writer(fz_context *ctx, const char *path, const char *options);
 fz_document_writer *fz_new_png_pixmap_writer(fz_context *ctx, const char *path, const char *options);
 fz_document_writer *fz_new_tga_pixmap_writer(fz_context *ctx, const char *path, const char *options);
 fz_document_writer *fz_new_pam_pixmap_writer(fz_context *ctx, const char *path, const char *options);
@@ -138,8 +149,11 @@ void fz_drop_document_writer(fz_context *ctx, fz_document_writer *wri);
 fz_document_writer *fz_new_pixmap_writer(fz_context *ctx, const char *path, const char *options, const char *default_path, int n,
 	void (*save)(fz_context *ctx, fz_pixmap *pix, const char *filename));
 
-extern const char *fz_cbz_write_options_usage;
 extern const char *fz_pdf_write_options_usage;
 extern const char *fz_svg_write_options_usage;
+
+extern const char *fz_pcl_write_options_usage;
+extern const char *fz_pclm_write_options_usage;
+extern const char *fz_pwg_write_options_usage;
 
 #endif

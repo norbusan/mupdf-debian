@@ -1,4 +1,8 @@
 #include "mupdf/fitz.h"
+#include "fitz-imp.h"
+
+#include <string.h>
+#include <assert.h>
 
 // Thoughts for further optimisations:
 // All paths start with MoveTo. We could probably avoid most cases where
@@ -1340,81 +1344,6 @@ void fz_trim_path(fz_context *ctx, fz_path *path)
 	{
 		path->coords = fz_resize_array(ctx, path->coords, path->coord_len, sizeof(float));
 		path->coord_cap = path->coord_len;
-	}
-}
-
-void
-fz_print_path(fz_context *ctx, fz_output *out, fz_path *path, int indent)
-{
-	float x, y;
-	int i = 0, k = 0;
-	int n;
-	while (i < path->cmd_len)
-	{
-		uint8_t cmd = path->cmds[i++];
-
-		for (n = 0; n < indent; n++)
-			fz_write_byte(ctx, out, ' ');
-		switch (cmd)
-		{
-		case FZ_MOVETO:
-		case FZ_MOVETOCLOSE:
-			x = path->coords[k++];
-			y = path->coords[k++];
-			fz_write_printf(ctx, out, "%g %g m%s\n", x, y, cmd == FZ_MOVETOCLOSE ? " z" : "");
-			break;
-		case FZ_LINETO:
-		case FZ_LINETOCLOSE:
-			x = path->coords[k++];
-			y = path->coords[k++];
-			fz_write_printf(ctx, out, "%g %g l%s\n", x, y, cmd == FZ_LINETOCLOSE ? " z" : "");
-			break;
-		case FZ_DEGENLINETO:
-		case FZ_DEGENLINETOCLOSE:
-			fz_write_printf(ctx, out, "d%s\n", cmd == FZ_DEGENLINETOCLOSE ? " z" : "");
-			break;
-		case FZ_HORIZTO:
-		case FZ_HORIZTOCLOSE:
-			x = path->coords[k++];
-			fz_write_printf(ctx, out, "%g h%s\n", x, cmd == FZ_HORIZTOCLOSE ? " z" : "");
-			break;
-		case FZ_VERTTOCLOSE:
-		case FZ_VERTTO:
-			y = path->coords[k++];
-			fz_write_printf(ctx, out, "%g i%s\n", y, cmd == FZ_VERTTOCLOSE ? " z" : "");
-			break;
-		case FZ_CURVETOCLOSE:
-		case FZ_CURVETO:
-			x = path->coords[k++];
-			y = path->coords[k++];
-			fz_write_printf(ctx, out, "%g %g ", x, y);
-			x = path->coords[k++];
-			y = path->coords[k++];
-			fz_write_printf(ctx, out, "%g %g ", x, y);
-			x = path->coords[k++];
-			y = path->coords[k++];
-			fz_write_printf(ctx, out, "%g %g c%s\n", x, y, cmd == FZ_CURVETOCLOSE ? " z" : "");
-			break;
-		case FZ_CURVETOVCLOSE:
-		case FZ_CURVETOV:
-		case FZ_CURVETOYCLOSE:
-		case FZ_CURVETOY:
-			x = path->coords[k++];
-			y = path->coords[k++];
-			fz_write_printf(ctx, out, "%g %g ", x, y);
-			x = path->coords[k++];
-			y = path->coords[k++];
-			fz_write_printf(ctx, out, "%g %g %c%s\n", x, y, (cmd == FZ_CURVETOVCLOSE || cmd == FZ_CURVETOV ? 'v' : 'y'), (cmd == FZ_CURVETOVCLOSE || cmd == FZ_CURVETOYCLOSE) ? " z" : "");
-			break;
-		case FZ_RECTTO:
-			x = path->coords[k++];
-			y = path->coords[k++];
-			fz_write_printf(ctx, out, "%g %g ", x, y);
-			x = path->coords[k++];
-			y = path->coords[k++];
-			fz_write_printf(ctx, out, "%g %g r\n", x, y);
-			break;
-		}
 	}
 }
 

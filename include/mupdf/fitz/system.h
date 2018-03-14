@@ -1,19 +1,6 @@
 #ifndef MUPDF_FITZ_SYSTEM_H
 #define MUPDF_FITZ_SYSTEM_H
 
-#if _MSC_VER >= 1400 /* MSVC 8 (Visual Studio 2005) or newer */
-#define FZ_LARGEFILE
-#endif
-
-/* The very first decision we need to make is, are we using the 64bit
- * file pointers code. This must happen before the stdio.h include. */
-#ifdef FZ_LARGEFILE
-/* Set _LARGEFILE64_SOURCE so that we know fopen64 et al will be declared. */
-#ifndef _LARGEFILE64_SOURCE
-#define _LARGEFILE64_SOURCE
-#endif
-#endif
-
 /* Turn on valgrind pacification in debug builds. */
 #ifndef NDEBUG
 #ifndef PACIFY_VALGRIND
@@ -25,34 +12,33 @@
 	Include the standard libc headers.
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stddef.h>
-#include <stdarg.h>
-#include <string.h>
-#include <math.h>
+#include <stddef.h> /* needed for size_t */
+#include <stdarg.h> /* needed for va_list vararg functions */
+#include <setjmp.h> /* needed for the try/catch macros */
 
-#include <assert.h>
-#include <errno.h>
-#include <limits.h> /* INT_MAX & co */
-#include <float.h> /* FLT_EPSILON, FLT_MAX & co */
-#include <fcntl.h> /* O_RDONLY & co */
-#include <time.h>
-
-#include <setjmp.h>
+#if defined(_MSC_VER) && (_MSC_VER < 1700) /* MSVC older than VS2012 */
+typedef signed char int8_t;
+typedef short int int16_t;
+typedef int int32_t;
+typedef __int64 int64_t;
+typedef unsigned char uint8_t;
+typedef unsigned short int uint16_t;
+typedef unsigned int uint32_t;
+typedef unsigned __int64 uint64_t;
+#else
+#include <stdint.h> /* needed for int64_t */
+#endif
 
 #include "mupdf/memento.h"
 #include "mupdf/fitz/track-usage.h"
 
 #define nelem(x) (sizeof(x)/sizeof((x)[0]))
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-#ifndef M_SQRT2
-#define M_SQRT2 1.41421356237309504880
-#endif
+#define FZ_PI 3.14159265f
+#define FZ_RADIAN 57.2957795f
+#define FZ_DEGREE 0.017453292f
+#define FZ_SQRT2 1.41421356f
+#define FZ_LN2 0.69314718f
 
 /*
 	Spot architectures where we have optimisations.
@@ -92,18 +78,24 @@
 #define fz_jmp_buf jmp_buf
 #endif
 
-#ifndef _MSC_VER
-/* For gettimeofday */
-#include <sys/time.h>
+/* these constants mirror the corresponding macros in stdio.h */
+#ifndef EOF
+#define EOF (-1)
+#endif
+#ifndef SEEK_SET
+#define SEEK_SET 0
+#endif
+#ifndef SEEK_CUR
+#define SEEK_CUR 1
+#endif
+#ifndef SEEK_END
+#define SEEK_END 2
 #endif
 
 #ifdef _MSC_VER /* Microsoft Visual C */
 
 /* MSVC up to VS2012 */
 #if _MSC_VER < 1800
-#define va_copy(a, oa) do { a=oa; } while (0)
-#define va_copy_end(a) do {} while(0)
-
 static __inline int signbit(double x)
 {
 	union
@@ -114,55 +106,11 @@ static __inline int signbit(double x)
 	u.d = x;
 	return (int)(u.i>>63);
 }
-
-#else
-#define va_copy_end(a) va_end(a)
 #endif
-
-#ifndef PATH_MAX
-#define PATH_MAX (1024)
-#endif
-
-typedef signed char int8_t;
-typedef short int int16_t;
-typedef int int32_t;
-typedef __int64 int64_t;
-
-typedef unsigned char uint8_t;
-typedef unsigned short int uint16_t;
-typedef unsigned int uint32_t;
-typedef unsigned __int64 uint64_t;
 
 #pragma warning( disable: 4244 ) /* conversion from X to Y, possible loss of data */
 #pragma warning( disable: 4701 ) /* Potentially uninitialized local variable 'name' used */
 #pragma warning( disable: 4996 ) /* 'function': was declared deprecated */
-
-#include <io.h>
-
-struct timeval;
-struct timezone;
-int gettimeofday(struct timeval *tv, struct timezone *tz);
-
-#if _MSC_VER < 1900 /* MSVC 2015 */
-#define snprintf msvc_snprintf
-#define vsnprintf msvc_vsnprintf
-static int msvc_vsnprintf(char *str, size_t size, const char *fmt, va_list ap)
-{
-	int n;
-	n = _vsnprintf(str, size, fmt, ap);
-	str[size-1] = 0;
-	return n;
-}
-static int msvc_snprintf(char *str, size_t size, const char *fmt, ...)
-{
-	int n;
-	va_list ap;
-	va_start(ap, fmt);
-	n = msvc_vsnprintf(str, size, fmt, ap);
-	va_end(ap);
-	return n;
-}
-#endif
 
 #if _MSC_VER <= 1700 /* MSVC 2012 */
 #define isnan(x) _isnan(x)
@@ -170,82 +118,23 @@ static int msvc_snprintf(char *str, size_t size, const char *fmt, ...)
 #endif
 
 #define hypotf _hypotf
-
-#define fz_fopen fz_fopen_utf8
-#define fz_remove fz_remove_utf8
+#define atoll _atoi64
 
 char *fz_utf8_from_wchar(const wchar_t *s);
 wchar_t *fz_wchar_from_utf8(const char *s);
 
-FILE *fz_fopen_utf8(const char *name, const char *mode);
+/* really a FILE* but we don't want to include stdio.h here */
+void *fz_fopen_utf8(const char *name, const char *mode);
 int fz_remove_utf8(const char *name);
 
 char **fz_argv_from_wargv(int argc, wchar_t **wargv);
 void fz_free_argv(int argc, char **argv);
 
-#define fseeko64 _fseeki64
-#define ftello64 _ftelli64
-#define atoll _atoi64
-
-#include <sys/stat.h>
-
-#define stat _stat
-
-#else /* Unix or close enough */
-
-#include <stdint.h>
-#include <unistd.h>
-#include <sys/stat.h>
-
-#ifndef O_BINARY
-#define O_BINARY 0
 #endif
 
-#define va_copy_end(a) va_end(a)
-
-#endif
-
-#ifdef FZ_LARGEFILE
-#ifndef fz_fopen
-#define fz_fopen fopen64
-#endif
-typedef int64_t fz_off_t;
-#define fz_fseek fseeko64
-#define fz_ftell ftello64
-#define fz_atoo_imp atoll
-#define FZ_OFF_MAX 0x7fffffffffffffffLL
-#else
-#ifndef fz_fopen
-#define fz_fopen fopen
-#endif
-#ifndef fz_remove
-#define fz_remove remove
-#endif
-#define fz_fseek fseek
-#define fz_ftell ftell
-typedef int fz_off_t;
-#define FZ_OFF_MAX INT_MAX
-#define fz_atoo_imp atoi
-#endif
-
-/* Portable way to format a size_t */
-#if defined(_WIN64)
-#define FMT_zu "%llu"
-#elif defined(_WIN32)
-#define FMT_zu "%u"
-#else
-#define FMT_zu "%zu"
-#endif
-
-#ifdef __ANDROID__
-#include <android/log.h>
-int fz_android_fprintf(FILE *file, const char *fmt, ...);
-#ifndef NDEBUG
-/* Capture fprintf for stdout/stderr to the android logging
- * stream. Only do this in debug builds as this implies a
- * delay */
-#define fprintf fz_android_fprintf
-#endif
+/* Cope with systems (such as Windows) with no S_ISDIR */
+#ifndef S_ISDIR
+#define S_ISDIR(mode) ((mode) & S_IFDIR)
 #endif
 
 /* inline is standard in C++. For some compilers we can enable it within C too. */
@@ -302,12 +191,6 @@ int fz_android_fprintf(FILE *file, const char *fmt, ...);
 /* ARM assembly specific defines */
 
 #ifdef ARCH_ARM
-#ifdef NDK_PROFILER
-extern void __gnu_mcount_nc(void);
-#define ENTER_PG "push {lr}\nbl __gnu_mcount_nc\n"
-#else
-#define ENTER_PG
-#endif
 
 /* If we're compiling as thumb code, then we need to tell the compiler
  * to enter and exit ARM mode around our assembly sections. If we move
@@ -318,19 +201,18 @@ extern void __gnu_mcount_nc(void);
  * and undefined by #pragma arm/#pragma thumb - but we can't define a
  * macro to track that. */
 #if defined(__thumb__) || defined(__thumb2__)
-#define ENTER_ARM ".balign 4\nmov r12,pc\nbx r12\n0:.arm\n" ENTER_PG
-#define ENTER_THUMB "9:.thumb\n" ENTER_PG
+#define ENTER_ARM ".balign 4\nmov r12,pc\nbx r12\n0:.arm\n"
+#define ENTER_THUMB "9:.thumb\n"
 #else
 #define ENTER_ARM
 #define ENTER_THUMB
 #endif
+
 #endif
 
 #ifdef CLUSTER
-#define LOCAL_TRIG_FNS
-#endif
-
-#ifdef LOCAL_TRIG_FNS
+/* Include this first so our defines don't clash with the system definitions */
+#include <math.h>
 /*
  * Trig functions
  */
@@ -409,27 +291,27 @@ static inline float my_sinf(float x)
 	float x2, xn;
 	int i;
 	/* Map x into the -PI to PI range. We could do this using:
-	 * x = fmodf(x, (float)(2.0 * M_PI));
+	 * x = fmodf(x, 2.0f * FZ_PI);
 	 * but that's C99, and seems to misbehave with negative numbers
 	 * on some platforms. */
-	x -= (float)M_PI;
-	i = x / (float)(2.0f * M_PI);
-	x -= i * (float)(2.0f * M_PI);
+	x -= FZ_PI;
+	i = x / (2.0f * FZ_PI);
+	x -= i * 2.0f * FZ_PI;
 	if (x < 0.0f)
-		x += (float)(2.0f * M_PI);
-	x -= (float)M_PI;
-	if (x <= (float)(-M_PI/2.0))
-		x = -(float)M_PI-x;
-	else if (x >= (float)(M_PI/2.0))
-		x = (float)M_PI-x;
-	x2 = x*x;
-	xn = x*x2/6.0f;
+		x += 2.0f * FZ_PI;
+	x -= FZ_PI;
+	if (x <= -FZ_PI / 2.0f)
+		x = -FZ_PI - x;
+	else if (x >= FZ_PI / 2.0f)
+		x = FZ_PI-x;
+	x2 = x * x;
+	xn = x * x2 / 6.0f;
 	x -= xn;
-	xn *= x2/20.0f;
+	xn *= x2 / 20.0f;
 	x += xn;
-	xn *= x2/42.0f;
+	xn *= x2 / 42.0f;
 	x -= xn;
-	xn *= x2/72.0f;
+	xn *= x2 / 72.0f;
 	x += xn;
 	return x;
 }
@@ -443,33 +325,31 @@ static inline float my_atan2f(float o, float a)
 		if (a > 0)
 			return 0.0f;
 		else
-			return (float)M_PI;
+			return FZ_PI;
 	}
 	if (o < 0)
 		o = -o, negate = 1;
 	if (a < 0)
 		a = -a, flip = 1;
 	if (o < a)
-		i = (int)(65536.0f*o/a + 0.5f);
+		i = 65536.0f * o / a + 0.5f;
 	else
-		i = (int)(65536.0f*a/o + 0.5f);
-	r = my_atan_table[i>>8];
-	s = my_atan_table[(i>>8)+1];
-	r += (s-r)*(i&255)/256.0f;
+		i = 65536.0f * a / o + 0.5f;
+	r = my_atan_table[i >> 8];
+	s = my_atan_table[(i >> 8) + 1];
+	r += (s - r) * (i & 255) / 256.0f;
 	if (o >= a)
-		r = (float)(M_PI/2.0f) - r;
+		r = FZ_PI / 2.0f - r;
 	if (flip)
-		r = (float)M_PI - r;
+		r = FZ_PI - r;
 	if (negate)
 		r = -r;
 	return r;
 }
 
 #define sinf(x) my_sinf(x)
-#define cosf(x) my_sinf(((float)(M_PI/2.0f)) + (x))
+#define cosf(x) my_sinf(FZ_PI / 2.0f + (x))
 #define atan2f(x,y) my_atan2f((x),(y))
 #endif
-
-int fz_strcasecmp(const char *a, const char *b);
 
 #endif

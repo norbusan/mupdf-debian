@@ -1,5 +1,9 @@
 #include "mupdf/fitz.h"
 
+#include <stdio.h>
+#include <string.h>
+#include <limits.h>
+
 #include <jpeglib.h>
 
 #ifdef SHARE_JPEG
@@ -112,6 +116,41 @@ static inline int read_value(const unsigned char *data, int bytes, int is_big_en
 	return value;
 }
 
+/* FIXME: We may need to worry about profiles spread out
+ * across multiple markers. */
+static fz_colorspace *extract_icc_profile(fz_context *ctx, jpeg_saved_marker_ptr init_marker)
+{
+	const unsigned char *data;
+	int size;
+	jpeg_saved_marker_ptr marker = init_marker;
+	fz_buffer *buff = NULL;
+	fz_colorspace *cs = NULL;
+
+	for (marker = init_marker; marker != NULL; marker = marker->next)
+	{
+		if (marker->marker == JPEG_APP0 + 2)
+		{
+			data = (const unsigned char *)marker->data + 14;
+			size = marker->data_length - 14;
+			break;
+		}
+	}
+	if (marker == NULL)
+		return NULL;
+
+	fz_try(ctx)
+	{
+		buff = fz_new_buffer_from_copied_data(ctx, data, size);
+		cs = fz_new_icc_colorspace(ctx, NULL, 0, buff);
+	}
+	fz_always(ctx)
+		fz_drop_buffer(ctx, buff);
+	fz_catch(ctx)
+		fz_warn(ctx, "could not load ICC profile in JPEG image");
+
+	return cs;
+}
+
 static int extract_exif_resolution(jpeg_saved_marker_ptr marker, int *xres, int *yres)
 {
 	int is_big_endian;
@@ -215,17 +254,18 @@ static int extract_app13_resolution(jpeg_saved_marker_ptr marker, int *xres, int
 }
 
 fz_pixmap *
-fz_load_jpeg(fz_context *ctx, unsigned char *rbuf, size_t rlen)
+fz_load_jpeg(fz_context *ctx, const unsigned char *rbuf, size_t rlen)
 {
 	struct jpeg_decompress_struct cinfo;
 	struct jpeg_error_mgr err;
 	struct jpeg_source_mgr src;
 	unsigned char *row[1], *sp, *dp;
-	fz_colorspace *colorspace;
+	fz_colorspace *colorspace, *icc;
 	unsigned int x;
 	int k, stride;
 	fz_pixmap *image = NULL;
 
+	fz_var(colorspace);
 	fz_var(image);
 	fz_var(row);
 
@@ -233,6 +273,8 @@ fz_load_jpeg(fz_context *ctx, unsigned char *rbuf, size_t rlen)
 
 	fz_try(ctx)
 	{
+		cinfo.mem = NULL;
+		cinfo.global_state = 0;
 		cinfo.client_data = ctx;
 		cinfo.err = jpeg_std_error(&err);
 		err.error_exit = error_exit;
@@ -257,16 +299,19 @@ fz_load_jpeg(fz_context *ctx, unsigned char *rbuf, size_t rlen)
 
 		jpeg_start_decompress(&cinfo);
 
-		if (cinfo.output_components == 1)
-			colorspace = fz_device_gray(ctx);
+		icc = extract_icc_profile(ctx, cinfo.marker_list);
+		if (icc != NULL)
+			colorspace = icc;
+		else if (cinfo.output_components == 1)
+			colorspace = fz_keep_colorspace(ctx, fz_device_gray(ctx));
 		else if (cinfo.output_components == 3)
-			colorspace = fz_device_rgb(ctx);
+			colorspace = fz_keep_colorspace(ctx, fz_device_rgb(ctx));
 		else if (cinfo.output_components == 4)
-			colorspace = fz_device_cmyk(ctx);
+			colorspace = fz_keep_colorspace(ctx, fz_device_cmyk(ctx));
 		else
 			fz_throw(ctx, FZ_ERROR_GENERIC, "bad number of components in jpeg: %d", cinfo.num_components);
 
-		image = fz_new_pixmap(ctx, colorspace, cinfo.output_width, cinfo.output_height, 0);
+		image = fz_new_pixmap(ctx, colorspace, cinfo.output_width, cinfo.output_height, NULL, 0);
 
 		if (extract_exif_resolution(cinfo.marker_list, &image->xres, &image->yres))
 			/* XPS prefers EXIF resolution to JFIF density */;
@@ -329,14 +374,17 @@ fz_load_jpeg(fz_context *ctx, unsigned char *rbuf, size_t rlen)
 }
 
 void
-fz_load_jpeg_info(fz_context *ctx, unsigned char *rbuf, size_t rlen, int *xp, int *yp, int *xresp, int *yresp, fz_colorspace **cspacep)
+fz_load_jpeg_info(fz_context *ctx, const unsigned char *rbuf, size_t rlen, int *xp, int *yp, int *xresp, int *yresp, fz_colorspace **cspacep)
 {
 	struct jpeg_decompress_struct cinfo;
 	struct jpeg_error_mgr err;
 	struct jpeg_source_mgr src;
+	fz_colorspace *icc;
 
 	fz_try(ctx)
 	{
+		cinfo.mem = NULL;
+		cinfo.global_state = 0;
 		cinfo.client_data = ctx;
 		cinfo.err = jpeg_std_error(&err);
 		err.error_exit = error_exit;
@@ -356,20 +404,24 @@ fz_load_jpeg_info(fz_context *ctx, unsigned char *rbuf, size_t rlen, int *xp, in
 
 		jpeg_save_markers(&cinfo, JPEG_APP0+1, 0xffff);
 		jpeg_save_markers(&cinfo, JPEG_APP0+13, 0xffff);
+		jpeg_save_markers(&cinfo, JPEG_APP0+2, 0xffff);
 
 		jpeg_read_header(&cinfo, 1);
 
-		if (cinfo.num_components == 1)
-			*cspacep = fz_device_gray(ctx);
-		else if (cinfo.num_components == 3)
-			*cspacep = fz_device_rgb(ctx);
-		else if (cinfo.num_components == 4)
-			*cspacep = fz_device_cmyk(ctx);
-		else
-			fz_throw(ctx, FZ_ERROR_GENERIC, "bad number of components in jpeg: %d", cinfo.num_components);
-
 		*xp = cinfo.image_width;
 		*yp = cinfo.image_height;
+
+		icc = extract_icc_profile(ctx, cinfo.marker_list);
+		if (icc != NULL)
+			*cspacep = icc;
+		else if (cinfo.num_components == 1)
+			*cspacep = fz_keep_colorspace(ctx, fz_device_gray(ctx));
+		else if (cinfo.num_components == 3)
+			*cspacep = fz_keep_colorspace(ctx, fz_device_rgb(ctx));
+		else if (cinfo.num_components == 4)
+			*cspacep = fz_keep_colorspace(ctx, fz_device_cmyk(ctx));
+		else
+			fz_throw(ctx, FZ_ERROR_GENERIC, "bad number of components in jpeg: %d", cinfo.num_components);
 
 		if (extract_exif_resolution(cinfo.marker_list, xresp, yresp))
 			/* XPS prefers EXIF resolution to JFIF density */;

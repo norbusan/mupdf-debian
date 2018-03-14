@@ -1,6 +1,10 @@
 #include "mupdf/fitz.h"
 #include "svg-imp.h"
 
+#include <string.h>
+#include <stdio.h> /* for sscanf */
+#include <math.h>
+
 /* default page size */
 #define DEF_WIDTH 12
 #define DEF_HEIGHT 792
@@ -35,13 +39,13 @@ static void svg_run_element(fz_context *ctx, fz_device *dev, svg_document *doc, 
 static void svg_fill(fz_context *ctx, fz_device *dev, svg_document *doc, fz_path *path, svg_state *state)
 {
 	float opacity = state->opacity * state->fill_opacity;
-	fz_fill_path(ctx, dev, path, state->fill_rule, &state->transform, fz_device_rgb(ctx), state->fill_color, opacity);
+	fz_fill_path(ctx, dev, path, state->fill_rule, &state->transform, fz_device_rgb(ctx), state->fill_color, opacity, NULL);
 }
 
 static void svg_stroke(fz_context *ctx, fz_device *dev, svg_document *doc, fz_path *path, svg_state *state)
 {
 	float opacity = state->opacity * state->stroke_opacity;
-	fz_stroke_path(ctx, dev, path, &state->stroke, &state->transform, fz_device_rgb(ctx), state->stroke_color, opacity);
+	fz_stroke_path(ctx, dev, path, &state->stroke, &state->transform, fz_device_rgb(ctx), state->stroke_color, opacity, NULL);
 }
 
 static void svg_draw_path(fz_context *ctx, fz_device *dev, svg_document *doc, fz_path *path, svg_state *state)
@@ -105,10 +109,10 @@ svg_run_rect(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *node, c
 		ry = rx;
 	if (ry_att && !rx_att)
 		rx = ry;
-	if (rx > w * 0.5)
-		rx = w * 0.5;
-	if (ry > h * 0.5)
-		ry = h * 0.5;
+	if (rx > w * 0.5f)
+		rx = w * 0.5f;
+	if (ry > h * 0.5f)
+		ry = h * 0.5f;
 
 	if (w <= 0 || h <= 0)
 		return;
@@ -318,9 +322,9 @@ svg_add_arc_segment(fz_context *ctx, fz_path *path, const fz_matrix *mtx, float 
 	fz_point p;
 
 	while (th1 < th0)
-		th1 += (float)M_PI * 2;
+		th1 += FZ_PI * 2;
 
-	d = (float)M_PI / 180; /* 1-degree precision */
+	d = FZ_PI / 180; /* 1-degree precision */
 
 	if (iscw)
 	{
@@ -332,7 +336,7 @@ svg_add_arc_segment(fz_context *ctx, fz_path *path, const fz_matrix *mtx, float 
 	}
 	else
 	{
-		th0 += (float)M_PI * 2;
+		th0 += FZ_PI * 2;
 		for (t = th0 - d; t > th1 + d/2; t -= d)
 		{
 			fz_transform_point_xy(&p, mtx, cosf(t), sinf(t));
@@ -448,9 +452,9 @@ svg_add_arc(fz_context *ctx, fz_path *path,
 		th1 = angle_between(coord1, coord2);
 		dth = angle_between(coord3, coord4);
 		if (dth < 0 && !is_clockwise)
-			dth += (((float)M_PI / 180) * 360);
+			dth += ((FZ_PI / 180) * 360);
 		if (dth > 0 && is_clockwise)
-			dth -= (((float)M_PI / 180) * 360);
+			dth -= ((FZ_PI / 180) * 360);
 	}
 
 	fz_pre_scale(fz_pre_rotate(fz_translate(&mtx, cx, cy), rotation_angle), rx, ry);
@@ -474,15 +478,15 @@ svg_parse_path_data(fz_context *ctx, svg_document *doc, const char *str)
 
 	/* saved control point for smooth curves */
 	int reset_smooth = 1;
-	float smooth_x = 0.0;
-	float smooth_y = 0.0;
+	float smooth_x = 0.0f;
+	float smooth_y = 0.0f;
 
 	cmd = 0;
 	nargs = 0;
 
 	fz_try(ctx)
 	{
-		fz_moveto(ctx, path, 0.0, 0.0); /* for the case of opening 'm' */
+		fz_moveto(ctx, path, 0.0f, 0.0f); /* for the case of opening 'm' */
 
 		while (*str)
 		{
@@ -513,8 +517,8 @@ svg_parse_path_data(fz_context *ctx, svg_document *doc, const char *str)
 
 			if (reset_smooth)
 			{
-				smooth_x = 0.0;
-				smooth_y = 0.0;
+				smooth_x = 0.0f;
+				smooth_y = 0.0f;
 			}
 
 			reset_smooth = 1;
@@ -973,7 +977,7 @@ svg_parse_common(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *st
 	}
 	else
 	{
-		stroke->miterlimit = 4.0;
+		stroke->miterlimit = 4.0f;
 	}
 }
 
@@ -1040,7 +1044,7 @@ svg_run_use(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *root, co
 		fz_xml *linked = fz_tree_lookup(ctx, doc->idmap, xlink_href_att + 1);
 		if (linked)
 		{
-			if (!strcmp(fz_xml_tag(linked), "symbol"))
+			if (fz_xml_is_tag(linked, "symbol"))
 				svg_run_use_symbol(ctx, dev, doc, root, linked, &local_state);
 			else
 				svg_run_element(ctx, dev, doc, linked, &local_state);
@@ -1105,8 +1109,7 @@ svg_run_element(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *root
 
 	else
 	{
-		/* debug print unrecognized tags */
-		fz_debug_xml(root, 0);
+		/* ignore unrecognized tags */
 	}
 }
 

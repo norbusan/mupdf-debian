@@ -10,6 +10,7 @@ FREETYPE_DIR := thirdparty/freetype
 HARFBUZZ_DIR := thirdparty/harfbuzz
 JBIG2DEC_DIR := thirdparty/jbig2dec
 JPEGXR_DIR := thirdparty/jpegxr
+LCMS2_DIR := thirdparty/lcms2
 LIBJPEG_DIR := thirdparty/libjpeg
 LURATECH_DIR := thirdparty/luratech
 MUJS_DIR := thirdparty/mujs
@@ -17,7 +18,7 @@ OPENJPEG_DIR := thirdparty/openjpeg/src/lib/openjp2
 ZLIB_DIR := thirdparty/zlib
 
 CURL_DIR := thirdparty/curl
-GLFW_DIR := thirdparty/glfw
+GLUT_DIR := thirdparty/freeglut
 
 # --- MuJS ---
 
@@ -164,8 +165,8 @@ $(HARFBUZZ_OUT):
 	$(MKDIR_CMD)
 $(HARFBUZZ_OUT)/%.o: $(HARFBUZZ_DIR)/src/%.cc | $(HARFBUZZ_OUT)
 	$(CC_CMD) -DHAVE_OT -DHAVE_UCDN -DHB_NO_MT $(FREETYPE_CFLAGS) \
-		-Dhb_malloc_impl=hb_malloc -Dhb_calloc_impl=hb_calloc \
-		-Dhb_free_impl=hb_free -Dhb_realloc_impl=hb_realloc \
+		-Dhb_malloc_impl=fz_hb_malloc -Dhb_calloc_impl=fz_hb_calloc \
+		-Dhb_free_impl=fz_hb_free -Dhb_realloc_impl=fz_hb_realloc \
 		-fno-rtti -fno-exceptions -fvisibility-inlines-hidden --std=c++0x
 
 HARFBUZZ_CFLAGS := -I$(HARFBUZZ_DIR)/src
@@ -532,6 +533,51 @@ ZLIB_CFLAGS := $(SYS_ZLIB_CFLAGS)
 ZLIB_LIBS := $(SYS_ZLIB_LIBS)
 endif
 
+# --- LCMS2 ---
+
+ifneq "$(wildcard $(LCMS2_DIR)/INSTALL)" ""
+
+LCMS2_OUT := $(OUT)/lcms2
+LCMS2_SRC := \
+	cmsalpha.c \
+	cmscam02.c \
+	cmscgats.c \
+	cmscnvrt.c \
+	cmserr.c \
+	cmsgamma.c \
+	cmsgmt.c \
+	cmshalf.c \
+	cmsintrp.c \
+	cmsio0.c \
+	cmsio1.c \
+	cmslut.c \
+	cmsmd5.c \
+	cmsmtrx.c \
+	cmsnamed.c \
+	cmsopt.c \
+	cmspack.c \
+	cmspcs.c \
+	cmsplugin.c \
+	cmsps2.c \
+	cmssamp.c \
+	cmssm.c \
+	cmstypes.c \
+	cmsvirt.c \
+	cmswtpnt.c \
+	cmsxform.c \
+
+LCMS2_OBJ := $(addprefix $(LCMS2_OUT)/, $(LCMS2_SRC:%.c=%.o))
+
+$(LCMS2_OUT):
+	$(MKDIR_CMD)
+$(LCMS2_OUT)/%.o: $(LCMS2_DIR)/src/%.c | $(LCMS2_OUT)
+	$(CC_CMD) -I$(LCMS2_DIR)/include
+
+LCMS2_CFLAGS := -I$(LCMS2_DIR)/include
+else
+LCMS2_CFLAGS := -DNO_ICC
+endif
+
 # --- cURL ---
 
 ifneq "$(wildcard $(CURL_DIR)/README)" ""
@@ -612,93 +658,84 @@ CURL_CFLAGS := $(SYS_CURL_CFLAGS)
 CURL_LIBS := $(SYS_CURL_LIBS)
 endif
 
-# --- GLFW ---
+# --- FreeGLUT ---
 
-ifneq "$(wildcard $(GLFW_DIR)/README.md)" ""
-
-GLFW_LIB := $(OUT)/libglfw.a
-GLFW_OUT := $(OUT)/thirdparty/glfw
+ifneq "$(wildcard $(GLUT_DIR)/README)" ""
 
 ifeq "$(OS)" "MACOS"
-
-GLFW_SRC := \
-	cocoa_time.c \
-	cocoa_init.m \
-	cocoa_monitor.m \
-	cocoa_window.m \
-	context.c \
-	init.c \
-	input.c \
-	iokit_joystick.m \
-	mach_time.m \
-	monitor.c \
-	nsgl_context.m \
-	posix_tls.c \
-	vulkan.c \
-	window.c
-
-$(GLFW_OUT)/%.o: $(GLFW_DIR)/src/%.m | $(GLFW_OUT)
-	$(CC_CMD) -D_GLFW_COCOA -D_GLFW_USE_MENUBAR -D_GLFW_USE_RETINA -Wno-deprecated-declarations
-$(GLFW_OUT)/%.o: $(GLFW_DIR)/src/%.c | $(GLFW_OUT)
-	$(CC_CMD) -D_GLFW_COCOA -D_GLFW_USE_MENUBAR -D_GLFW_USE_RETINA
-
-GLFW_OBJ := $(addprefix $(GLFW_OUT)/, $(GLFW_SRC))
-GLFW_OBJ := $(GLFW_OBJ:%.c=%.o)
-GLFW_OBJ := $(GLFW_OBJ:%.m=%.o)
-
-$(GLFW_LIB): $(GLFW_OBJ)
-GLFW_LIBS := -framework OpenGL -framework IOKit -framework CoreVideo -framework Cocoa
-
+GLUT_CFLAGS := $(SYS_GLUT_CFLAGS)
+GLUT_LIBS := $(SYS_GLUT_LIBS)
 else
 
-GLFW_SRC := \
-	context.c \
-	egl_context.c \
-	glx_context.c \
-	init.c \
-	input.c \
-	linux_joystick.c \
-	monitor.c \
-	posix_time.c \
-	posix_tls.c \
-	vulkan.c \
-	window.c \
-	x11_init.c \
-	x11_monitor.c \
-	x11_window.c \
-	xkb_unicode.c
+HAVE_GLUT := yes
 
-$(GLFW_OUT)/%.o: $(GLFW_DIR)/src/%.c | $(GLFW_OUT)
-	$(CC_CMD) -D_GLFW_X11
-$(GLFW_LIB): $(addprefix $(GLFW_OUT)/, $(GLFW_SRC:%.c=%.o))
-GLFW_LIBS := -lGL -ldl -lX11 -lXcursor -lXrandr -lXinerama -lpthread
+GLUT_LIB := $(OUT)/libfreeglut.a
+GLUT_OUT := $(OUT)/thirdparty/freeglut
+GLUT_SRC := \
+	fg_callbacks.c \
+	fg_cursor.c \
+	fg_display.c \
+	fg_ext.c \
+	fg_font.c \
+	fg_font_data.c \
+	fg_gamemode.c \
+	fg_geometry.c \
+	fg_gl2.c \
+	fg_init.c \
+	fg_input_devices.c \
+	fg_joystick.c \
+	fg_main.c \
+	fg_menu.c \
+	fg_misc.c \
+	fg_overlay.c \
+	fg_spaceball.c \
+	fg_state.c \
+	fg_stroke_mono_roman.c \
+	fg_stroke_roman.c \
+	fg_structure.c \
+	fg_teapot.c \
+	fg_videoresize.c \
+	fg_window.c
+
+GLUT_X11_SRC := \
+	fg_cursor_x11.c \
+	fg_display_x11_glx.c \
+	fg_ext_x11.c \
+	fg_gamemode_x11.c \
+	fg_glutfont_definitions_x11.c \
+	fg_init_x11.c \
+	fg_input_devices_x11.c \
+	fg_joystick_x11.c \
+	fg_main_x11.c \
+	fg_menu_x11.c \
+	fg_spaceball_x11.c \
+	fg_state_x11.c \
+	fg_state_x11_glx.c \
+	fg_structure_x11.c \
+	fg_window_x11.c \
+	fg_window_x11_glx.c \
+	fg_xinput_x11.c
+
+GLUT_OBJ := $(addprefix $(GLUT_OUT)/, $(GLUT_SRC:%.c=%.o))
+GLUT_OBJ += $(addprefix $(GLUT_OUT)/, $(GLUT_X11_SRC:%.c=%.o))
+
+$(GLUT_LIB): $(GLUT_OBJ)
+$(GLUT_OUT):
+	$(MKDIR_CMD)
+$(GLUT_OUT)/%.o: $(GLUT_DIR)/src/%.c | $(GLUT_OUT)
+	$(CC_CMD) -I$(GLUT_DIR)/include -I$(GLUT_DIR)/src -Wno-unused-function -Wno-unused-const-variable \
+		-DHAVE_UNISTD_H -DHAVE_STDINT_H -DHAVE_X11_EXTENSIONS_XRANDR_H
+$(GLUT_OUT)/%.o: $(GLUT_DIR)/src/x11/%.c | $(GLUT_OUT)
+	$(CC_CMD) -I$(GLUT_DIR)/include -I$(GLUT_DIR)/src -Wno-unused-function \
+		-DHAVE_UNISTD_H -DHAVE_STDINT_H -DHAVE_X11_EXTENSIONS_XRANDR_H
+
+GLUT_CFLAGS := -I$(GLUT_DIR)/include
+GLUT_LIBS := -lGL -lX11 -lXrandr
 
 endif
-
-GLFW_CFLAGS := -I$(GLFW_DIR)/include
-$(GLFW_OUT):
-	$(MKDIR_CMD)
-
-GLFW_SRC_UNUSED := \
-	mir_init.c \
-	mir_monitor.c \
-	mir_window.c \
-	wgl_context.c \
-	win32_init.c \
-	win32_joystick.c \
-	win32_monitor.c \
-	win32_time.c \
-	win32_tls.c \
-	win32_window.c \
-	wl_init.c \
-	wl_monitor.c \
-	wl_window.c \
-
-HAVE_GLFW := yes
-
-else ifeq "$(HAVE_GLFW)" "yes"
-GLFW_CFLAGS := $(SYS_GLFW_CFLAGS)
-GLFW_LIBS := $(SYS_GLFW_LIBS)
+else
+GLUT_CFLAGS := $(SYS_GLUT_CFLAGS)
+GLUT_LIBS := $(SYS_GLUT_LIBS)
 endif
 
 # --- X11 ---
@@ -717,7 +754,9 @@ endif
 
 # --- pthread ---
 
-#ifeq "$(HAVE_PTHREAD)" "yes"
-PTHREAD_CFLAGS := $(SYS_PTHREAD_CFLAGS)
-PTHREAD_LIBS := $(SYS_PTHREAD_LIBS)
-#endif
+ifneq "$(threading)" "no"
+ifeq "$(HAVE_PTHREAD)" "yes"
+THREADING_CFLAGS := $(SYS_PTHREAD_CFLAGS) -DHAVE_PTHREAD
+THREADING_LIBS := $(SYS_PTHREAD_LIBS)
+endif
+endif

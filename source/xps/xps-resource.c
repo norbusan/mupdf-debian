@@ -1,6 +1,8 @@
 #include "mupdf/fitz.h"
 #include "xps-imp.h"
 
+#include <string.h>
+
 static fz_xml *
 xps_lookup_resource(fz_context *ctx, xps_document *doc, xps_resource *dict, char *name, char **urip)
 {
@@ -59,7 +61,7 @@ xps_parse_remote_resource_dictionary(fz_context *ctx, xps_document *doc, char *b
 	char part_uri[1024];
 	xps_resource *dict;
 	xps_part *part;
-	fz_xml *xml;
+	fz_xml *xml = NULL;
 	char *s;
 
 	/* External resource dictionaries MUST NOT reference other resource dictionaries */
@@ -82,7 +84,7 @@ xps_parse_remote_resource_dictionary(fz_context *ctx, xps_document *doc, char *b
 	if (!xml)
 		return NULL;
 
-	if (strcmp(fz_xml_tag(xml), "ResourceDictionary"))
+	if (!fz_xml_is_tag(xml, "ResourceDictionary"))
 	{
 		fz_drop_xml(ctx, xml);
 		fz_throw(ctx, FZ_ERROR_GENERIC, "expected ResourceDictionary element");
@@ -150,23 +152,5 @@ xps_drop_resource_dictionary(fz_context *ctx, xps_document *doc, xps_resource *d
 		fz_free(ctx, dict->base_uri);
 		fz_free(ctx, dict);
 		dict = next;
-	}
-}
-
-void
-xps_print_resource_dictionary(fz_context *ctx, xps_document *doc, xps_resource *dict)
-{
-	while (dict)
-	{
-		if (dict->base_uri)
-			printf("URI = '%s'\n", dict->base_uri);
-		printf("KEY = '%s' VAL = %p\n", dict->name, dict->data);
-		if (dict->parent)
-		{
-			printf("PARENT = {\n");
-			xps_print_resource_dictionary(ctx, doc, dict->parent);
-			printf("}\n");
-		}
-		dict = dict->next;
 	}
 }

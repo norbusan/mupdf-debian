@@ -1,6 +1,9 @@
 #include "mupdf/fitz.h"
 #include "xps-imp.h"
 
+#include <math.h>
+#include <string.h>
+
 #define TILE
 
 /*
@@ -296,28 +299,33 @@ xps_parse_canvas(fz_context *ctx, xps_document *doc, const fz_matrix *ctm, const
 			opacity_mask_tag = fz_xml_down(node);
 	}
 
-	opacity_mask_uri = base_uri;
-	xps_resolve_resource_reference(ctx, doc, dict, &transform_att, &transform_tag, NULL);
-	xps_resolve_resource_reference(ctx, doc, dict, &clip_att, &clip_tag, NULL);
-	xps_resolve_resource_reference(ctx, doc, dict, &opacity_mask_att, &opacity_mask_tag, &opacity_mask_uri);
+	fz_try(ctx)
+	{
+		opacity_mask_uri = base_uri;
+		xps_resolve_resource_reference(ctx, doc, dict, &transform_att, &transform_tag, NULL);
+		xps_resolve_resource_reference(ctx, doc, dict, &clip_att, &clip_tag, NULL);
+		xps_resolve_resource_reference(ctx, doc, dict, &opacity_mask_att, &opacity_mask_tag, &opacity_mask_uri);
 
-	xps_parse_transform(ctx, doc, transform_att, transform_tag, &local_ctm, ctm);
+		xps_parse_transform(ctx, doc, transform_att, transform_tag, &local_ctm, ctm);
 
-	if (clip_att || clip_tag)
-		xps_clip(ctx, doc, &local_ctm, dict, clip_att, clip_tag);
+		if (clip_att || clip_tag)
+			xps_clip(ctx, doc, &local_ctm, dict, clip_att, clip_tag);
 
-	xps_begin_opacity(ctx, doc, &local_ctm, area, opacity_mask_uri, dict, opacity_att, opacity_mask_tag);
+		xps_begin_opacity(ctx, doc, &local_ctm, area, opacity_mask_uri, dict, opacity_att, opacity_mask_tag);
 
-	for (node = fz_xml_down(root); node; node = fz_xml_next(node))
-		xps_parse_element(ctx, doc, &local_ctm, area, base_uri, dict, node);
+		for (node = fz_xml_down(root); node; node = fz_xml_next(node))
+			xps_parse_element(ctx, doc, &local_ctm, area, base_uri, dict, node);
 
-	xps_end_opacity(ctx, doc, opacity_mask_uri, dict, opacity_att, opacity_mask_tag);
+		xps_end_opacity(ctx, doc, opacity_mask_uri, dict, opacity_att, opacity_mask_tag);
 
-	if (clip_att || clip_tag)
-		fz_pop_clip(ctx, dev);
-
-	if (new_dict)
+		if (clip_att || clip_tag)
+			fz_pop_clip(ctx, dev);
+	}
+	fz_always(ctx)
 		xps_drop_resource_dictionary(ctx, doc, new_dict);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+
 }
 
 void
@@ -346,25 +354,30 @@ xps_parse_fixed_page(fz_context *ctx, xps_document *doc, const fz_matrix *ctm, x
 	area = fz_unit_rect;
 	fz_transform_rect(&area, fz_scale(&scm, page->fix->width, page->fix->height));
 
-	for (node = fz_xml_down(page->root); node; node = fz_xml_next(node))
+	fz_try(ctx)
 	{
-		if (fz_xml_is_tag(node, "FixedPage.Resources") && fz_xml_down(node))
+		for (node = fz_xml_down(page->root); node; node = fz_xml_next(node))
 		{
-			if (dict)
-				fz_warn(ctx, "ignoring follow-up resource dictionaries");
-			else
-				dict = xps_parse_resource_dictionary(ctx, doc, base_uri, fz_xml_down(node));
+			if (fz_xml_is_tag(node, "FixedPage.Resources") && fz_xml_down(node))
+			{
+				if (dict)
+					fz_warn(ctx, "ignoring follow-up resource dictionaries");
+				else
+					dict = xps_parse_resource_dictionary(ctx, doc, base_uri, fz_xml_down(node));
+			}
+			xps_parse_element(ctx, doc, ctm, &area, base_uri, dict, node);
 		}
-		xps_parse_element(ctx, doc, ctm, &area, base_uri, dict, node);
 	}
-
-	if (dict)
+	fz_always(ctx)
 		xps_drop_resource_dictionary(ctx, doc, dict);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
 }
 
 void
-xps_run_page(fz_context *ctx, xps_page *page, fz_device *dev, const fz_matrix *ctm, fz_cookie *cookie)
+xps_run_page(fz_context *ctx, fz_page *page_, fz_device *dev, const fz_matrix *ctm, fz_cookie *cookie)
 {
+	xps_page *page = (xps_page*)page_;
 	xps_document *doc = page->doc;
 	fz_matrix page_ctm = *ctm;
 

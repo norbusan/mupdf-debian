@@ -8,6 +8,7 @@
 #include "mupdf/fitz/transition.h"
 #include "mupdf/fitz/link.h"
 #include "mupdf/fitz/outline.h"
+#include "mupdf/fitz/separation.h"
 
 /*
 	Document interface
@@ -98,6 +99,11 @@ typedef fz_page *(fz_document_load_page_fn)(fz_context *ctx, fz_document *doc, i
 typedef int (fz_document_lookup_metadata_fn)(fz_context *ctx, fz_document *doc, const char *key, char *buf, int size);
 
 /*
+	fz_document_output_intent_fn: Return output intent color space if it exists
+*/
+typedef fz_colorspace* (fz_document_output_intent_fn)(fz_context *ctx, fz_document *doc);
+
+/*
 	fz_document_make_bookmark_fn: Type for a function to make
 	a bookmark. See fz_make_bookmark for more information.
 */
@@ -161,23 +167,22 @@ typedef void (fz_page_control_separation_fn)(fz_context *ctx, fz_page *page, int
 /*
 	fz_page_separation_disabled_fn: Type for a function to detect
 	whether a given separation is enabled or disabled on a page.
-	See fz_separation_disabled for more information.
+	See FZ_SEPARATION_DISABLED for more information.
 */
 typedef int (fz_page_separation_disabled_fn)(fz_context *ctx, fz_page *page, int separation);
 
 /*
-	fz_page_count_separations_fn: Type for a function to count
-	the number of separations on a page. See fz_count_separations
+	fz_page_separations_fn: Type for a function to retrieve
+	details of separations on a page. See fz_get_separations
 	for more information.
 */
-typedef int (fz_page_count_separations_fn)(fz_context *ctx, fz_page *page);
+typedef fz_separations *(fz_page_separations_fn)(fz_context *ctx, fz_page *page);
 
 /*
-	fz_page_get_separation_fn: Type for a function to retrieve
-	details of a separation on a page. See fz_get_separation
-	for more information.
+	fz_page_uses_overprint_fn: Type for a function to retrieve
+	whether or not a given page uses overprint.
 */
-typedef const char *(fz_page_get_separation_fn)(fz_context *ctx, fz_page *page, int separation, uint32_t *rgb, uint32_t *cmyk);
+typedef int (fz_page_uses_overprint_fn)(fz_context *ctx, fz_page *page);
 
 typedef void (fz_annot_drop_fn)(fz_context *ctx, fz_annot *annot);
 typedef fz_annot *(fz_annot_next_fn)(fz_context *ctx, fz_annot *annot);
@@ -212,8 +217,8 @@ struct fz_page_s
 	fz_page_page_presentation_fn *page_presentation;
 	fz_page_control_separation_fn *control_separation;
 	fz_page_separation_disabled_fn *separation_disabled;
-	fz_page_count_separations_fn *count_separations;
-	fz_page_get_separation_fn *get_separation;
+	fz_page_separations_fn *separations;
+	fz_page_uses_overprint_fn *overprint;
 };
 
 /*
@@ -237,6 +242,7 @@ struct fz_document_s
 	fz_document_count_pages_fn *count_pages;
 	fz_document_load_page_fn *load_page;
 	fz_document_lookup_metadata_fn *lookup_metadata;
+	fz_document_output_intent_fn *get_output_intent;
 	int did_layout;
 	int is_reflowable;
 };
@@ -280,6 +286,8 @@ struct fz_document_handler_s
 	fz_document_recognize_fn *recognize;
 	fz_document_open_fn *open;
 	fz_document_open_with_stream_fn *open_with_stream;
+	const char **extensions;
+	const char **mimetypes;
 };
 
 /*
@@ -296,6 +304,15 @@ void fz_register_document_handler(fz_context *ctx, const fz_document_handler *ha
 	this build.
 */
 void fz_register_document_handlers(fz_context *ctx);
+
+/*
+	fz_recognize_document: Given a magic find a document
+	handler that can handle a document of this type.
+
+	magic: Can be a file extension (including initial period) or
+	a mimetype.
+*/
+const fz_document_handler *fz_recognize_document(fz_context *ctx, const char *magic);
 
 /*
 	fz_open_document: Open a PDF, XPS or CBZ document.
@@ -330,8 +347,6 @@ void *fz_new_document_of_size(fz_context *ctx, int size);
 
 /*
 	fz_keep_document: Keep a reference to an open document.
-
-	Does not throw exceptions.
 */
 fz_document *fz_keep_document(fz_context *ctx, fz_document *doc);
 
@@ -341,16 +356,12 @@ fz_document *fz_keep_document(fz_context *ctx, fz_document *doc);
 	The resource store in the context associated with fz_document
 	is emptied, and any allocations for the document are freed when
 	the last reference is dropped.
-
-	Does not throw exceptions.
 */
 void fz_drop_document(fz_context *ctx, fz_document *doc);
 
 /*
 	fz_needs_password: Check if a document is encrypted with a
 	non-blank password.
-
-	Does not throw exceptions.
 */
 int fz_needs_password(fz_context *ctx, fz_document *doc);
 
@@ -370,8 +381,6 @@ int fz_needs_password(fz_context *ctx, fz_document *doc);
 		Bit 0 => No password required
 		Bit 1 => User password authenticated
 		Bit 2 => Owner password authenticated
-
-	Does not throw exceptions.
 */
 int fz_authenticate_password(fz_context *ctx, fz_document *doc, const char *password);
 
@@ -459,7 +468,6 @@ fz_page *fz_new_page_of_size(fz_context *ctx, int size);
 /*
 	fz_bound_page: Determine the size of a page at 72 dpi.
 
-	Does not throw exceptions.
 */
 fz_rect *fz_bound_page(fz_context *ctx, fz_page *page, fz_rect *rect);
 
@@ -531,15 +539,11 @@ void fz_run_annot(fz_context *ctx, fz_annot *annot, fz_device *dev, const fz_mat
 
 /*
 	fz_keep_page: Keep a reference to a loaded page.
-
-	Does not throw exceptions.
 */
 fz_page *fz_keep_page(fz_context *ctx, fz_page *page);
 
 /*
 	fz_drop_page: Free a loaded page.
-
-	Does not throw exceptions.
 */
 void fz_drop_page(fz_context *ctx, fz_page *page);
 
@@ -598,31 +602,25 @@ int fz_lookup_metadata(fz_context *ctx, fz_document *doc, const char *key, char 
 #define FZ_META_INFO_TITLE "info:Title"
 
 /*
-	Get the number of separations on a page (including CMYK). This will
-	be 0, unless the format specifically supports separations (such as
-	gproof files).
+	Find the output intent colorspace if the document has defined one.
 */
-int fz_count_separations_on_page(fz_context *ctx, fz_page *page);
+fz_colorspace *fz_document_output_intent(fz_context *ctx, fz_document *doc);
 
 /*
-	Enable/Disable a given separation on a given page. This will only
-	affect future renderings of pages from a format that supports
-	separations (such as gproof files).
+	fz_page_separations: Get the separations details for a page.
+	This will be NULL, unless the format specifically supports
+	separations (such as gproof, or PDF files). May be NULL even
+	so, if there are no separations on a page.
+
+	Returns a reference that must be dropped.
 */
-void fz_control_separation_on_page(fz_context *ctx, fz_page *page, int sep, int disable);
+fz_separations *fz_page_separations(fz_context *ctx, fz_page *page);
 
 /*
-	Returns whether a given separation on a given page is disabled. This will only
-	work from a format that supports separations (such as gproof files).
- */
-int fz_separation_disabled_on_page (fz_context *ctx, fz_page *, int sep);
-
-/*
-	Get the name and equivalent RGBA, CMYK colors of a given separation
-	on a given page. This will only work for formats that support
-	gproof files.
+	fz_page_uses_overprint: Find out whether a given page requests
+	overprint.
 */
-const char *fz_get_separation_on_page(fz_context *ctx, fz_page *page, int sep, uint32_t *rgba, uint32_t *cmyk);
+int fz_page_uses_overprint(fz_context *ctx, fz_page *page);
 
 /*
 	fz_save_gproof: Given a currently open document, create a

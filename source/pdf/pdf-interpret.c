@@ -1,4 +1,9 @@
+#include "mupdf/fitz.h"
+#include "mupdf/pdf.h"
 #include "pdf-imp.h"
+
+#include <string.h>
+#include <math.h>
 
 /* Maximum number of errors before aborting */
 #define MAX_SYNTAX_ERRORS 100
@@ -196,6 +201,24 @@ pdf_process_extgstate(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, pdf_ob
 			fz_rethrow(ctx);
 	}
 
+	/* overprint and color management */
+
+	obj = pdf_dict_get(ctx, dict, PDF_NAME_OP);
+	if (pdf_is_bool(ctx, obj) && proc->op_gs_OP)
+		proc->op_gs_OP(ctx, proc, pdf_to_bool(ctx, obj));
+
+	obj = pdf_dict_get(ctx, dict, PDF_NAME_op);
+	if (pdf_is_bool(ctx, obj) && proc->op_gs_op)
+		proc->op_gs_op(ctx, proc, pdf_to_bool(ctx, obj));
+
+	obj = pdf_dict_get(ctx, dict, PDF_NAME_OPM);
+	if (pdf_is_int(ctx, obj) && proc->op_gs_OPM)
+		proc->op_gs_OPM(ctx, proc, pdf_to_int(ctx, obj));
+
+	obj = pdf_dict_get(ctx, dict, PDF_NAME_UseBlackPtComp);
+	if (pdf_is_name(ctx, obj) && proc->op_gs_UseBlackPtComp)
+		proc->op_gs_UseBlackPtComp(ctx, proc, obj);
+
 	/* transfer functions */
 
 	obj = pdf_dict_get(ctx, dict, PDF_NAME_TR2);
@@ -249,10 +272,7 @@ pdf_process_extgstate(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, pdf_ob
 			{
 				colorspace = pdf_xobject_colorspace(ctx, xobj);
 				if (colorspace)
-				{
 					colorspace_n = fz_colorspace_n(ctx, colorspace);
-					fz_drop_colorspace(ctx, colorspace);
-				}
 
 				/* Default background color is black. */
 				for (k = 0; k < colorspace_n; k++)
@@ -261,7 +281,8 @@ pdf_process_extgstate(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, pdf_ob
 				 * a test for subtractive color spaces, but this will have
 				 * to do for now. */
 				if (colorspace == fz_device_cmyk(ctx))
-					softmask_bc[3] = 1.0;
+					softmask_bc[3] = 1.0f;
+				fz_drop_colorspace(ctx, colorspace);
 
 				bc = pdf_dict_get(ctx, obj, PDF_NAME_BC);
 				if (pdf_is_array(ctx, bc))
@@ -389,7 +410,7 @@ pdf_process_CS(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, int stroke)
 			csobj = pdf_dict_gets(ctx, csres, csi->name);
 			if (!csobj)
 				fz_throw(ctx, FZ_ERROR_SYNTAX, "cannot find ColorSpace resource '%s'", csi->name);
-			cs = pdf_load_colorspace(ctx, csi->doc, csobj);
+			cs = pdf_load_colorspace(ctx, csobj);
 		}
 
 		fz_try(ctx)
@@ -490,11 +511,8 @@ resolve_properties(fz_context *ctx, pdf_csi *csi, pdf_obj *obj)
 static void
 pdf_process_BDC(fz_context *ctx, pdf_processor *proc, pdf_csi *csi)
 {
-	pdf_obj *raw = csi->obj;
-	pdf_obj *cooked = resolve_properties(ctx, csi, raw);
-
 	if (proc->op_BDC)
-		proc->op_BDC(ctx, proc, csi->name, raw, cooked);
+		proc->op_BDC(ctx, proc, csi->name, csi->obj, resolve_properties(ctx, csi, csi->obj));
 
 	/* Already hidden, no need to look further */
 	if (proc->hidden > 0)
@@ -507,15 +525,7 @@ pdf_process_BDC(fz_context *ctx, pdf_processor *proc, pdf_csi *csi)
 	if (strcmp(csi->name, "OC"))
 		return;
 
-	/* No Properties array, or name not found, means visible. */
-	if (!cooked)
-		return;
-
-	/* Wrong type of property */
-	if (!pdf_name_eq(ctx, pdf_dict_get(ctx, cooked, PDF_NAME_Type), PDF_NAME_OCG))
-		return;
-
-	if (pdf_is_hidden_ocg(ctx, csi->doc->ocg, csi->rdb, proc->usage, cooked))
+	if (pdf_is_hidden_ocg(ctx, csi->doc->ocg, csi->rdb, proc->usage, csi->obj))
 		++proc->hidden;
 }
 
@@ -843,7 +853,7 @@ pdf_process_stream(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream
 						pdf_array_push_drop(ctx, csi->obj, pdf_new_real(ctx, doc, buf->f));
 						break;
 					case PDF_TOK_INT:
-						pdf_array_push_drop(ctx, csi->obj, pdf_new_int_offset(ctx, doc, buf->i));
+						pdf_array_push_drop(ctx, csi->obj, pdf_new_int(ctx, doc, buf->i));
 						break;
 					case PDF_TOK_STRING:
 						pdf_array_push_drop(ctx, csi->obj, pdf_new_string(ctx, doc, buf->scratch, buf->len));
@@ -1068,6 +1078,10 @@ pdf_process_annot(fz_context *ctx, pdf_processor *proc, pdf_document *doc, pdf_p
 	if (flags & (PDF_ANNOT_IS_INVISIBLE | PDF_ANNOT_IS_HIDDEN))
 		return;
 
+	/* popup annotations should never be drawn */
+	if (pdf_annot_type(ctx, annot) == PDF_ANNOT_POPUP)
+		return;
+
 	if (proc->usage)
 	{
 		if (!strcmp(proc->usage, "Print") && !(flags & PDF_ANNOT_IS_PRINT))
@@ -1127,4 +1141,112 @@ pdf_process_glyph(fz_context *ctx, pdf_processor *proc, pdf_document *doc, pdf_o
 	{
 		fz_rethrow(ctx);
 	}
+}
+
+void
+pdf_tos_save(fz_context *ctx, pdf_text_object_state *tos, fz_matrix save[2])
+{
+	save[0] = tos->tm;
+	save[1] = tos->tlm;
+}
+
+void
+pdf_tos_restore(fz_context *ctx, pdf_text_object_state *tos, fz_matrix save[2])
+{
+	tos->tm = save[0];
+	tos->tlm = save[1];
+}
+
+fz_text *
+pdf_tos_get_text(fz_context *ctx, pdf_text_object_state *tos)
+{
+	fz_text *text = tos->text;
+
+	tos->text = NULL;
+
+	return text;
+}
+
+void
+pdf_tos_reset(fz_context *ctx, pdf_text_object_state *tos, int render)
+{
+	tos->text = fz_new_text(ctx);
+	tos->text_mode = render;
+	tos->text_bbox = fz_empty_rect;
+}
+
+int
+pdf_tos_make_trm(fz_context *ctx, pdf_text_object_state *tos, pdf_text_state *text, pdf_font_desc *fontdesc, int cid, fz_matrix *trm)
+{
+	fz_matrix tsm;
+
+	tsm.a = text->size * text->scale;
+	tsm.b = 0;
+	tsm.c = 0;
+	tsm.d = text->size;
+	tsm.e = 0;
+	tsm.f = text->rise;
+
+	if (fontdesc->wmode == 0)
+	{
+		pdf_hmtx h = pdf_lookup_hmtx(ctx, fontdesc, cid);
+		float w0 = h.w * 0.001f;
+		tos->char_tx = (w0 * text->size + text->char_space) * text->scale;
+		tos->char_ty = 0;
+	}
+
+	if (fontdesc->wmode == 1)
+	{
+		pdf_vmtx v = pdf_lookup_vmtx(ctx, fontdesc, cid);
+		float w1 = v.w * 0.001f;
+		tsm.e -= v.x * fabsf(text->size) * 0.001f;
+		tsm.f -= v.y * text->size * 0.001f;
+		tos->char_tx = 0;
+		tos->char_ty = w1 * text->size + text->char_space;
+	}
+
+	fz_concat(trm, &tsm, &tos->tm);
+
+	tos->cid = cid;
+	tos->gid = pdf_font_cid_to_gid(ctx, fontdesc, cid);
+	tos->fontdesc = fontdesc;
+
+	/* Compensate for the glyph cache limited positioning precision */
+	fz_expand_rect(fz_bound_glyph(ctx, fontdesc->font, tos->gid, trm, &tos->char_bbox), 1);
+
+	return tos->gid;
+}
+
+void
+pdf_tos_move_after_char(fz_context *ctx, pdf_text_object_state *tos)
+{
+	fz_union_rect(&tos->text_bbox, &tos->char_bbox);
+
+	fz_pre_translate(&tos->tm, tos->char_tx, tos->char_ty);
+}
+
+void
+pdf_tos_translate(pdf_text_object_state *tos, float tx, float ty)
+{
+	fz_pre_translate(&tos->tlm, tx, ty);
+	tos->tm = tos->tlm;
+}
+
+void
+pdf_tos_set_matrix(pdf_text_object_state *tos, float a, float b, float c, float d, float e, float f)
+{
+	tos->tm.a = a;
+	tos->tm.b = b;
+	tos->tm.c = c;
+	tos->tm.d = d;
+	tos->tm.e = e;
+	tos->tm.f = f;
+	tos->tlm = tos->tm;
+}
+
+void
+pdf_tos_newline(pdf_text_object_state *tos, float leading)
+{
+	fz_pre_translate(&tos->tlm, 0, -leading);
+	tos->tm = tos->tlm;
 }

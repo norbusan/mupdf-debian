@@ -1,4 +1,9 @@
 #include "mupdf/fitz.h"
+#include "fitz-imp.h"
+
+#include <assert.h>
+#include <limits.h>
+#include <stdio.h>
 
 typedef struct fz_item_s fz_item;
 
@@ -144,6 +149,8 @@ do_reap(fz_context *ctx)
 		}
 
 		/* Store whether to drop this value or not in 'prev' */
+		if (item->val->refs > 0)
+			(void)Memento_dropRef(item->val);
 		item->prev = (item->val->refs > 0 && --item->val->refs == 0) ? item : NULL;
 
 		/* Store it in our removal chain - just singly linked */
@@ -167,7 +174,7 @@ do_reap(fz_context *ctx)
 	}
 }
 
-int fz_drop_key_storable(fz_context *ctx, const fz_key_storable *sc)
+void fz_drop_key_storable(fz_context *ctx, const fz_key_storable *sc)
 {
 	/* Explicitly drop const to allow us to use const
 	 * sanely throughout the code. */
@@ -176,13 +183,12 @@ int fz_drop_key_storable(fz_context *ctx, const fz_key_storable *sc)
 	int unlock = 1;
 
 	if (s == NULL)
-		return 0;
+		return;
 
-	if (s->storable.refs > 0)
-		(void)Memento_dropRef(s);
 	fz_lock(ctx, FZ_LOCK_ALLOC);
 	if (s->storable.refs > 0)
 	{
+		(void)Memento_dropRef(s);
 		drop = --s->storable.refs == 0;
 		if (!drop && s->storable.refs == s->store_key_refs)
 		{
@@ -210,7 +216,6 @@ int fz_drop_key_storable(fz_context *ctx, const fz_key_storable *sc)
 	 */
 	if (drop)
 		s->storable.drop(ctx, &s->storable);
-	return drop;
 }
 
 void *fz_keep_key_storable_key(fz_context *ctx, const fz_key_storable *sc)
@@ -222,11 +227,10 @@ void *fz_keep_key_storable_key(fz_context *ctx, const fz_key_storable *sc)
 	if (s == NULL)
 		return NULL;
 
-	if (s->storable.refs > 0)
-		(void)Memento_takeRef(s);
 	fz_lock(ctx, FZ_LOCK_ALLOC);
 	if (s->storable.refs > 0)
 	{
+		(void)Memento_takeRef(s);
 		++s->storable.refs;
 		++s->store_key_refs;
 	}
@@ -234,7 +238,7 @@ void *fz_keep_key_storable_key(fz_context *ctx, const fz_key_storable *sc)
 	return s;
 }
 
-int fz_drop_key_storable_key(fz_context *ctx, const fz_key_storable *sc)
+void fz_drop_key_storable_key(fz_context *ctx, const fz_key_storable *sc)
 {
 	/* Explicitly drop const to allow us to use const
 	 * sanely throughout the code. */
@@ -242,12 +246,11 @@ int fz_drop_key_storable_key(fz_context *ctx, const fz_key_storable *sc)
 	int drop;
 
 	if (s == NULL)
-		return 0;
+		return;
 
-	if (s->storable.refs > 0)
-		(void)Memento_dropRef(s);
 	fz_lock(ctx, FZ_LOCK_ALLOC);
 	assert(s->store_key_refs > 0 && s->storable.refs >= s->store_key_refs);
+	(void)Memento_dropRef(s);
 	drop = --s->storable.refs == 0;
 	--s->store_key_refs;
 	fz_unlock(ctx, FZ_LOCK_ALLOC);
@@ -260,7 +263,6 @@ int fz_drop_key_storable_key(fz_context *ctx, const fz_key_storable *sc)
 	 */
 	if (drop)
 		s->storable.drop(ctx, &s->storable);
-	return drop;
 }
 
 static void
@@ -281,6 +283,8 @@ evict(fz_context *ctx, fz_item *item)
 		store->head = item->next;
 
 	/* Drop a reference to the value (freeing if required) */
+	if (item->val->refs > 0)
+		(void)Memento_dropRef(item->val);
 	drop = (item->val->refs > 0 && --item->val->refs == 0);
 
 	/* Remove from the hash table */
@@ -346,14 +350,20 @@ ensure_space(fz_context *ctx, size_t tofree)
 			 * not be cached. */
 			count += item->size;
 			if (prev)
+			{
+				(void)Memento_takeRef(prev->val);
 				prev->val->refs++;
+			}
 			evict(ctx, item); /* Drops then retakes lock */
 			/* So the store has 1 reference to prev, as do we, so
 			 * no other evict process can have thrown prev away in
 			 * the meantime. So we are safe to just decrement its
 			 * reference count here. */
 			if (prev)
+			{
+				(void)Memento_dropRef(prev->val);
 				--prev->val->refs;
+			}
 
 			if (count >= tofree)
 				return count;
@@ -439,7 +449,7 @@ fz_store_item(fz_context *ctx, void *key, void *val_, size_t itemsize, const fz_
 	 * to check whether we have one there already. */
 	if (use_hash)
 	{
-		fz_item *existing;
+		fz_item *existing = NULL;
 
 		fz_try(ctx)
 		{
@@ -461,7 +471,10 @@ fz_store_item(fz_context *ctx, void *key, void *val_, size_t itemsize, const fz_
 			 * to the existing one, and drop our current one. */
 			touch(store, existing);
 			if (existing->val->refs > 0)
+			{
+				(void)Memento_takeRef(existing->val);
 				existing->val->refs++;
+			}
 			fz_unlock(ctx, FZ_LOCK_ALLOC);
 			fz_free(ctx, item);
 			type->drop_key(ctx, key);
@@ -471,7 +484,10 @@ fz_store_item(fz_context *ctx, void *key, void *val_, size_t itemsize, const fz_
 
 	/* Now bump the ref */
 	if (val->refs > 0)
+	{
+		(void)Memento_takeRef(val);
 		val->refs++;
+	}
 
 	/* If we haven't got an infinite store, check for space within it */
 	if (store->max != FZ_STORE_UNLIMITED)
@@ -563,7 +579,10 @@ fz_find_item(fz_context *ctx, fz_store_drop_fn *drop, void *key, const fz_store_
 		touch(store, item);
 		/* And bump the refcount before returning */
 		if (item->val->refs > 0)
+		{
+			(void)Memento_takeRef(item->val);
 			item->val->refs++;
+		}
 		fz_unlock(ctx, FZ_LOCK_ALLOC);
 		return (void *)item->val;
 	}
@@ -618,6 +637,8 @@ fz_remove_item(fz_context *ctx, fz_store_drop_fn *drop, void *key, const fz_stor
 			else
 				store->head = item->next;
 		}
+		if (item->val->refs > 0)
+			(void)Memento_dropRef(item->val);
 		dodrop = (item->val->refs > 0 && --item->val->refs == 0);
 		fz_unlock(ctx, FZ_LOCK_ALLOC);
 		if (dodrop)
@@ -640,9 +661,7 @@ fz_empty_store(fz_context *ctx)
 	fz_lock(ctx, FZ_LOCK_ALLOC);
 	/* Run through all the items in the store */
 	while (store->head)
-	{
 		evict(ctx, store->head); /* Drops then retakes lock */
-	}
 	fz_unlock(ctx, FZ_LOCK_ALLOC);
 }
 
@@ -669,43 +688,60 @@ fz_drop_store_context(fz_context *ctx)
 }
 
 static void
-print_item(fz_context *ctx, fz_output *out, void *item_)
+fz_debug_store_item(fz_context *ctx, void *state, void *key_, int keylen, void *item_)
 {
-	fz_item *item = (fz_item *)item_;
-	fz_write_printf(ctx, out, " val=%p item=%p\n", item->val, item);
+	unsigned char *key = key_;
+	fz_item *item = item_;
+	int i;
+	char buf[256];
+	fz_unlock(ctx, FZ_LOCK_ALLOC);
+	item->type->format_key(ctx, buf, sizeof buf, item->key);
+	fz_lock(ctx, FZ_LOCK_ALLOC);
+	printf("hash[");
+	for (i=0; i < keylen; ++i)
+		printf("%02x", key[i]);
+	printf("][refs=%d][size=%d] key=%s val=%p\n", item->val->refs, (int)item->size, buf, item->val);
 }
 
-void
-fz_print_store_locked(fz_context *ctx, fz_output *out)
+static void
+fz_debug_store_locked(fz_context *ctx)
 {
 	fz_item *item, *next;
+	char buf[256];
 	fz_store *store = ctx->store;
 
-	fz_write_printf(ctx, out, "-- resource store contents --\n");
+	printf("-- resource store contents --\n");
 
 	for (item = store->head; item; item = next)
 	{
 		next = item->next;
 		if (next)
+		{
+			(void)Memento_takeRef(next->val);
 			next->val->refs++;
-		fz_write_printf(ctx, out, "store[*][refs=%d][size=%d] ", item->val->refs, item->size);
+		}
 		fz_unlock(ctx, FZ_LOCK_ALLOC);
-		item->type->print(ctx, out, item->key);
-		fz_write_printf(ctx, out, " = %p\n", item->val);
+		item->type->format_key(ctx, buf, sizeof buf, item->key);
 		fz_lock(ctx, FZ_LOCK_ALLOC);
+		printf("store[*][refs=%d][size=%d] key=%s val=%p\n",
+				item->val->refs, (int)item->size, buf, item->val);
 		if (next)
+		{
+			(void)Memento_dropRef(next->val);
 			next->val->refs--;
+		}
 	}
-	fz_write_printf(ctx, out, "-- resource store hash contents --\n");
-	fz_print_hash_details(ctx, out, store->hash, print_item, 1);
-	fz_write_printf(ctx, out, "-- end --\n");
+
+	printf("-- resource store hash contents --\n");
+	fz_hash_for_each(ctx, store->hash, NULL, fz_debug_store_item);
+	printf("-- end --\n");
 }
 
 void
-fz_print_store(fz_context *ctx, fz_output *out)
+fz_debug_store(fz_context *ctx)
 {
 	fz_lock(ctx, FZ_LOCK_ALLOC);
-	fz_print_store_locked(ctx, out);
+	fz_debug_store_locked(ctx);
 	fz_unlock(ctx, FZ_LOCK_ALLOC);
 }
 
@@ -750,8 +786,8 @@ int fz_store_scavenge(fz_context *ctx, size_t size, int *phase)
 		return 0;
 
 #ifdef DEBUG_SCAVENGING
-	printf("Scavenging: store=" FMT_zu " size=" FMT_zu " phase=%d\n", store->size, size, *phase);
-	fz_print_store_locked(ctx, stderr);
+	printf("Scavenging: store=" FZ_FMT_zu " size=" FZ_FMT_zu " phase=%d\n", store->size, size, *phase);
+	fz_debug_store_locked(ctx);
 	Memento_stats();
 #endif
 	do
@@ -778,8 +814,8 @@ int fz_store_scavenge(fz_context *ctx, size_t size, int *phase)
 		if (scavenge(ctx, tofree))
 		{
 #ifdef DEBUG_SCAVENGING
-			printf("scavenged: store=" FMT_zu "\n", store->size);
-			fz_print_store(ctx, stderr);
+			printf("scavenged: store=" FZ_FMT_zu "\n", store->size);
+			fz_debug_store(ctx);
 			Memento_stats();
 #endif
 			return 1;
@@ -789,7 +825,7 @@ int fz_store_scavenge(fz_context *ctx, size_t size, int *phase)
 
 #ifdef DEBUG_SCAVENGING
 	printf("scavenging failed\n");
-	fz_print_store(ctx, stderr);
+	fz_debug_store(ctx);
 	Memento_listBlocks();
 #endif
 	return 0;
@@ -810,7 +846,7 @@ fz_shrink_store(fz_context *ctx, unsigned int percent)
 		return 0;
 
 #ifdef DEBUG_SCAVENGING
-	fprintf(stderr, "fz_shrink_store: " FMT_zu "\n", store->size/(1024*1024));
+	printf("fz_shrink_store: " FZ_FMT_zu "\n", store->size/(1024*1024));
 #endif
 	fz_lock(ctx, FZ_LOCK_ALLOC);
 
@@ -821,7 +857,7 @@ fz_shrink_store(fz_context *ctx, unsigned int percent)
 	success = (store->size <= new_size) ? 1 : 0;
 	fz_unlock(ctx, FZ_LOCK_ALLOC);
 #ifdef DEBUG_SCAVENGING
-	fprintf(stderr, "fz_shrink_store after: " FMT_zu "\n", store->size/(1024*1024));
+	printf("fz_shrink_store after: " FZ_FMT_zu "\n", store->size/(1024*1024));
 #endif
 
 	return success;
@@ -872,6 +908,8 @@ void fz_filter_store(fz_context *ctx, fz_store_filter_fn *fn, void *arg, const f
 		}
 
 		/* Store whether to drop this value or not in 'prev' */
+		if (item->val->refs > 0)
+			(void)Memento_dropRef(item->val);
 		item->prev = (item->val->refs > 0 && --item->val->refs == 0) ? item : NULL;
 
 		/* Store it in our removal chain - just singly linked */
@@ -886,7 +924,7 @@ void fz_filter_store(fz_context *ctx, fz_store_filter_fn *fn, void *arg, const f
 		remove = item->next;
 
 		/* Drop a reference to the value (freeing if required) */
-		if (item->prev)
+		if (item->prev) /* See above for our abuse of prev here */
 			item->val->drop(ctx, item->val);
 
 		/* Always drops the key and drop the item */

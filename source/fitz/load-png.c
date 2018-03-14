@@ -2,6 +2,8 @@
 
 #include <zlib.h>
 
+#include <string.h>
+
 struct info
 {
 	unsigned int width, height, depth, n;
@@ -12,14 +14,15 @@ struct info
 	int transparency;
 	int trns[3];
 	int xres, yres;
+	fz_colorspace *cs;
 };
 
-static inline unsigned int getuint(unsigned char *p)
+static inline unsigned int getuint(const unsigned char *p)
 {
 	return p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
 }
 
-static inline int getcomp(unsigned char *line, int x, int bpc)
+static inline int getcomp(const unsigned char *line, int x, int bpc)
 {
 	switch (bpc)
 	{
@@ -58,12 +61,12 @@ static const unsigned char png_signature[8] =
 	137, 80, 78, 71, 13, 10, 26, 10
 };
 
-static void *zalloc(void *opaque, unsigned int items, unsigned int size)
+static void *zalloc_png(void *opaque, unsigned int items, unsigned int size)
 {
-	return fz_malloc_array(opaque, items, size);
+	return fz_malloc_array_no_throw(opaque, items, size);
 }
 
-static void zfree(void *opaque, void *address)
+static void zfree_png(void *opaque, void *address)
 {
 	fz_free(opaque, address);
 }
@@ -218,7 +221,7 @@ png_deinterlace(fz_context *ctx, struct info *info, unsigned int *passw, unsigne
 }
 
 static void
-png_read_ihdr(fz_context *ctx, struct info *info, unsigned char *p, unsigned int size)
+png_read_ihdr(fz_context *ctx, struct info *info, const unsigned char *p, unsigned int size)
 {
 	int color, compression, filter;
 
@@ -279,7 +282,7 @@ png_read_ihdr(fz_context *ctx, struct info *info, unsigned char *p, unsigned int
 }
 
 static void
-png_read_plte(fz_context *ctx, struct info *info, unsigned char *p, unsigned int size)
+png_read_plte(fz_context *ctx, struct info *info, const unsigned char *p, unsigned int size)
 {
 	int n = size / 3;
 	int i;
@@ -307,7 +310,7 @@ png_read_plte(fz_context *ctx, struct info *info, unsigned char *p, unsigned int
 }
 
 static void
-png_read_trns(fz_context *ctx, struct info *info, unsigned char *p, unsigned int size)
+png_read_trns(fz_context *ctx, struct info *info, const unsigned char *p, unsigned int size)
 {
 	unsigned int i;
 
@@ -336,11 +339,38 @@ png_read_trns(fz_context *ctx, struct info *info, unsigned char *p, unsigned int
 }
 
 static void
-png_read_idat(fz_context *ctx, struct info *info, unsigned char *p, unsigned int size, z_stream *stm)
+png_read_icc(fz_context *ctx, struct info *info, const unsigned char *p, unsigned int size)
+{
+	fz_stream *stm = NULL;
+	fz_colorspace *cs = NULL;
+	size_t m = fz_mini(80, size);
+	size_t n = strnlen((const char *)p, m);
+	if (n + 2 > m)
+	{
+		fz_warn(ctx, "invalid ICC profile name");
+		return;
+	}
+
+	stm = fz_open_memory(ctx, p + n + 2, size - n - 2);
+	stm = fz_open_flated(ctx, stm, 15);
+	fz_try(ctx)
+		cs = fz_new_icc_colorspace_from_stream(ctx, (const char *)p, stm);
+	fz_always(ctx)
+		fz_drop_stream(ctx, stm);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+
+	/* drop old one in case we have multiple ICC profiles */
+	fz_drop_colorspace(ctx, info->cs);
+	info->cs = cs;
+}
+
+static void
+png_read_idat(fz_context *ctx, struct info *info, const unsigned char *p, unsigned int size, z_stream *stm)
 {
 	int code;
 
-	stm->next_in = p;
+	stm->next_in = (Bytef*)p;
 	stm->avail_in = size;
 
 	code = inflate(stm, Z_SYNC_FLUSH);
@@ -355,7 +385,7 @@ png_read_idat(fz_context *ctx, struct info *info, unsigned char *p, unsigned int
 }
 
 static void
-png_read_phys(fz_context *ctx, struct info *info, unsigned char *p, unsigned int size)
+png_read_phys(fz_context *ctx, struct info *info, const unsigned char *p, unsigned int size)
 {
 	if (size != 9)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "pHYs chunk is the wrong size");
@@ -367,7 +397,7 @@ png_read_phys(fz_context *ctx, struct info *info, unsigned char *p, unsigned int
 }
 
 static void
-png_read_image(fz_context *ctx, struct info *info, unsigned char *p, size_t total, int only_metadata)
+png_read_image(fz_context *ctx, struct info *info, const unsigned char *p, size_t total, int only_metadata)
 {
 	unsigned int passw[7], passh[7], passofs[8];
 	unsigned int code, size;
@@ -415,8 +445,8 @@ png_read_image(fz_context *ctx, struct info *info, unsigned char *p, size_t tota
 
 		info->samples = fz_malloc(ctx, info->size);
 
-		stm.zalloc = zalloc;
-		stm.zfree = zfree;
+		stm.zalloc = zalloc_png;
+		stm.zfree = zfree_png;
 		stm.opaque = ctx;
 
 		stm.next_out = info->samples;
@@ -448,6 +478,8 @@ png_read_image(fz_context *ctx, struct info *info, unsigned char *p, size_t tota
 				png_read_phys(ctx, info, p + 8, size);
 			if (!memcmp(p + 4, "IDAT", 4) && !only_metadata)
 				png_read_idat(ctx, info, p + 8, size, &stm);
+			if (!memcmp(p + 4, "iCCP", 4))
+				png_read_icc(ctx, info, p + 8, size);
 			if (!memcmp(p + 4, "IEND", 4))
 				break;
 
@@ -495,12 +527,20 @@ png_read_image(fz_context *ctx, struct info *info, unsigned char *p, size_t tota
 			fz_rethrow(ctx);
 		}
 	}
+
+	if (info->cs == NULL)
+	{
+		if (info->n == 3 || info->n == 4 || info->indexed)
+			info->cs = fz_keep_colorspace(ctx, fz_device_rgb(ctx));
+		else
+			info->cs = fz_keep_colorspace(ctx, fz_device_gray(ctx));
+	}
 }
 
 static fz_pixmap *
 png_expand_palette(fz_context *ctx, struct info *info, fz_pixmap *src)
 {
-	fz_pixmap *dst = fz_new_pixmap(ctx, fz_device_rgb(ctx), src->w, src->h, 1);
+	fz_pixmap *dst = fz_new_pixmap(ctx, info->cs, src->w, src->h, NULL, info->transparency);
 	unsigned char *sp = src->samples;
 	unsigned char *dp = dst->samples;
 	unsigned int x, y;
@@ -518,8 +558,9 @@ png_expand_palette(fz_context *ctx, struct info *info, fz_pixmap *src)
 			*dp++ = info->palette[v];
 			*dp++ = info->palette[v + 1];
 			*dp++ = info->palette[v + 2];
-			*dp++ = info->palette[v + 3];
-			sp += 2;
+			if (info->transparency)
+				*dp++ = info->palette[v + 3];
+			++sp;
 		}
 		sp += sstride;
 		dp += dstride;
@@ -554,76 +595,63 @@ png_mask_transparency(struct info *info, fz_pixmap *dst)
 }
 
 fz_pixmap *
-fz_load_png(fz_context *ctx, unsigned char *p, size_t total)
+fz_load_png(fz_context *ctx, const unsigned char *p, size_t total)
 {
-	fz_pixmap *image;
-	fz_colorspace *colorspace;
+	fz_pixmap *image = NULL;
 	struct info png;
 	int stride;
+	int alpha;
+
+	fz_var(image);
 
 	png_read_image(ctx, &png, p, total, 0);
 
-	if (png.n == 3 || png.n == 4)
-		colorspace = fz_device_rgb(ctx);
-	else
-		colorspace = fz_device_gray(ctx);
-
 	stride = (png.width * png.n * png.depth + 7) / 8;
+	alpha = (png.n == 2 || png.n == 4 || png.transparency);
 
 	fz_try(ctx)
 	{
-		image = fz_new_pixmap(ctx, colorspace, png.width, png.height, 1);
+		if (png.indexed)
+		{
+			image = fz_new_pixmap(ctx, NULL, png.width, png.height, NULL, 1);
+			fz_unpack_tile(ctx, image, png.samples, png.n, png.depth, stride, 1);
+			image = png_expand_palette(ctx, &png, image);
+		}
+		else
+		{
+			image = fz_new_pixmap(ctx, png.cs, png.width, png.height, NULL, alpha);
+			fz_unpack_tile(ctx, image, png.samples, png.n, png.depth, stride, 0);
+			if (png.transparency)
+				png_mask_transparency(&png, image);
+		}
+		if (alpha)
+			fz_premultiply_pixmap(ctx, image);
+		fz_set_pixmap_resolution(ctx, image, png.xres, png.yres);
+	}
+	fz_always(ctx)
+	{
+		fz_drop_colorspace(ctx, png.cs);
+		fz_free(ctx, png.samples);
 	}
 	fz_catch(ctx)
 	{
-		fz_free(ctx, png.samples);
+		fz_drop_pixmap(ctx, image);
 		fz_rethrow(ctx);
 	}
-
-	image->xres = png.xres;
-	image->yres = png.yres;
-
-	fz_unpack_tile(ctx, image, png.samples, png.n, png.depth, stride, png.indexed);
-
-	if (png.indexed)
-	{
-		fz_try(ctx)
-		{
-			image = png_expand_palette(ctx, &png, image);
-		}
-		fz_catch(ctx)
-		{
-			fz_free(ctx, png.samples);
-			fz_drop_pixmap(ctx, image);
-			fz_rethrow(ctx);
-		}
-	}
-	else if (png.transparency)
-		png_mask_transparency(&png, image);
-
-	if (png.transparency || png.n == 2 || png.n == 4)
-		fz_premultiply_pixmap(ctx, image);
-
-	fz_free(ctx, png.samples);
 
 	return image;
 }
 
 void
-fz_load_png_info(fz_context *ctx, unsigned char *p, size_t total, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
+fz_load_png_info(fz_context *ctx, const unsigned char *p, size_t total, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
 {
 	struct info png;
 
 	png_read_image(ctx, &png, p, total, 1);
 
-	if (png.n == 3 || png.n == 4)
-		*cspacep = fz_device_rgb(ctx);
-	else
-		*cspacep = fz_device_gray(ctx);
-
+	*cspacep = png.cs;
 	*wp = png.width;
 	*hp = png.height;
 	*xresp = png.xres;
 	*yresp = png.xres;
-	fz_free(ctx, png.samples);
 }

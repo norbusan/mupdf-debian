@@ -1,3 +1,4 @@
+#include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
 
 typedef struct pdf_output_processor_s pdf_output_processor;
@@ -61,6 +62,26 @@ pdf_out_ri(fz_context *ctx, pdf_processor *proc, const char *intent)
 	fz_output *out = ((pdf_output_processor*)proc)->out;
 	if (!((pdf_output_processor*)proc)->extgstate)
 		fz_write_printf(ctx, out, "/%s ri\n", intent);
+}
+
+static void
+pdf_out_gs_OP(fz_context *ctx, pdf_processor *proc, int b)
+{
+}
+
+static void
+pdf_out_gs_op(fz_context *ctx, pdf_processor *proc, int b)
+{
+}
+
+static void
+pdf_out_gs_OPM(fz_context *ctx, pdf_processor *proc, int i)
+{
+}
+
+static void
+pdf_out_gs_UseBlackPtComp(fz_context *ctx, pdf_processor *proc, pdf_obj *name)
+{
 }
 
 static void
@@ -768,17 +789,25 @@ pdf_out_EX(fz_context *ctx, pdf_processor *proc)
 }
 
 static void
+pdf_close_output_processor(fz_context *ctx, pdf_processor *proc)
+{
+	fz_output *out = ((pdf_output_processor*)proc)->out;
+	fz_close_output(ctx, out);
+}
+
+static void
 pdf_drop_output_processor(fz_context *ctx, pdf_processor *proc)
 {
 	fz_output *out = ((pdf_output_processor*)proc)->out;
 	fz_drop_output(ctx, out);
 }
 
-static pdf_processor *
+pdf_processor *
 pdf_new_output_processor(fz_context *ctx, fz_output *out, int ahxencode)
 {
 	pdf_output_processor *proc = pdf_new_processor(ctx, sizeof *proc);
 	{
+		proc->super.close_processor = pdf_close_output_processor;
 		proc->super.drop_processor = pdf_drop_output_processor;
 
 		/* general graphics state */
@@ -890,6 +919,12 @@ pdf_new_output_processor(fz_context *ctx, fz_output *out, int ahxencode)
 		/* compatibility */
 		proc->super.op_BX = pdf_out_BX;
 		proc->super.op_EX = pdf_out_EX;
+
+		/* extgstate */
+		proc->super.op_gs_OP = pdf_out_gs_OP;
+		proc->super.op_gs_op = pdf_out_gs_op;
+		proc->super.op_gs_OPM = pdf_out_gs_OPM;
+		proc->super.op_gs_UseBlackPtComp = pdf_out_gs_UseBlackPtComp;
 	}
 
 	proc->out = out;
@@ -901,7 +936,7 @@ pdf_new_output_processor(fz_context *ctx, fz_output *out, int ahxencode)
 pdf_processor *
 pdf_new_buffer_processor(fz_context *ctx, fz_buffer *buffer, int ahxencode)
 {
-	pdf_processor *proc;
+	pdf_processor *proc = NULL;
 	fz_output *out = fz_new_output_with_buffer(ctx, buffer);
 	fz_try(ctx)
 	{

@@ -801,6 +801,10 @@
 			>
 		</File>
 		<File
+			RelativePath="..\..\source\tools\mutrace.c"
+			>
+		</File>
+		<File
 			RelativePath="..\..\source\tools\pdfclean.c"
 			>
 		</File>
@@ -834,6 +838,10 @@
 		</File>
 		<File
 			RelativePath="..\..\source\tools\pdfshow.c"
+			>
+		</File>
+		<File
+			RelativePath="..\..\source\tools\pdfsign.c"
 			>
 		</File>
 	</Files>

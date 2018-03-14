@@ -2,6 +2,10 @@ package com.artifex.mupdf.fitz;
 
 public class Rect
 {
+	static {
+		Context.init();
+	}
+
 	public float x0;
 	public float y0;
 	public float x1;
@@ -29,6 +33,8 @@ public class Rect
 	{
 		this(r.x0, r.y0, r.x1, r.y1);
 	}
+
+	public native void adjustForStroke(StrokeState state, Matrix ctm);
 
 	public String toString()
 	{
