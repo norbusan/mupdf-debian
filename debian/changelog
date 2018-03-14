@@ -1,3 +1,14 @@
+mupdf (1.12.0+ds1-1) unstable; urgency=high
+
+  * New upstream version 1.12.0+ds1
+  * Exclude thirdparty/{freeglut,lcms2} from upstream source
+  * Refresh patches
+  * Add freeglut3-dev build-dep
+  * d/mupdf.docs: Include droid fonts NOTICE file
+  * d/patches: Fix CVE-2018-6544 / CVE-2018-1000051 (Closes: #891245)
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Wed, 14 Mar 2018 21:26:44 +0900
+
 mupdf (1.11+ds1-2) unstable; urgency=high
 
   * Acknowledge NMU. Thanks, Salvatore.
