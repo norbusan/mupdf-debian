@@ -1,3 +1,26 @@
+mupdf (1.9a+ds1-4+deb9u3) stretch-security; urgency=high
+
+  * Non-maintainer upload by the Security Team.
+  * CVE-2018-6544, CVE-2018-1000051
+    add patches to fix use after free (Closes: #891245)
+
+ -- Thorsten Alteholz <debian@alteholz.de>  Sat, 24 Mar 2018 19:03:02 +0100
+
+mupdf (1.9a+ds1-4+deb9u2) stretch-security; urgency=high
+
+  * Non-maintainer upload by the Security Team.
+  * A compiler optimization was removing the fix for CVE-2017-15587 
+
+ -- Luciano Bello <luciano@debian.org>  Fri, 10 Nov 2017 14:58:10 -0500
+
+mupdf (1.9a+ds1-4+deb9u1) stable-security; urgency=high
+
+  * Non-maintainer upload by the Security Team.
+  * Fix CVE-2017-14685, CVE-2017-14686, CVE-2017-14687, and CVE-2017-15587
+    (Closes: #877379, #879055)
+
+ -- Luciano Bello <luciano@debian.org>  Sun, 22 Oct 2017 20:10:29 -0400
+
 mupdf (1.9a+ds1-4) unstable; urgency=high
 
   * Fix patch for CVE-2017-5991: The original patch was incomplete.
