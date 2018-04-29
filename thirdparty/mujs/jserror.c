@@ -31,7 +31,6 @@ static int jsB_stacktrace(js_State *J, int skip)
 
 static void Ep_toString(js_State *J)
 {
-	char buf[256];
 	const char *name = "Error";
 	const char *message = "";
 
@@ -43,11 +42,17 @@ static void Ep_toString(js_State *J)
 	if (js_hasproperty(J, 0, "message"))
 		message = js_tostring(J, -1);
 
-	snprintf(buf, sizeof buf, "%s: %s", name, message);
-	js_pushstring(J, buf);
-
-	if (js_hasproperty(J, 0, "stackTrace"))
+	if (name[0] == 0)
+		js_pushstring(J, message);
+	else if (message[0] == 0)
+		js_pushstring(J, name);
+	else {
+		js_pushstring(J, name);
+		js_pushstring(J, ": ");
 		js_concat(J);
+		js_pushstring(J, message);
+		js_concat(J);
+	}
 }
 
 static int jsB_ErrorX(js_State *J, js_Object *prototype)

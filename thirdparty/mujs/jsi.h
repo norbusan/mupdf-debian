@@ -11,6 +11,7 @@
 #include <setjmp.h>
 #include <math.h>
 #include <float.h>
+#include <limits.h>
 
 /* Microsoft Visual C */
 #ifdef _MSC_VER
@@ -72,6 +73,7 @@ typedef struct js_StackTrace js_StackTrace;
 #define JS_ENVLIMIT 64		/* environment stack size */
 #define JS_TRYLIMIT 64		/* exception stack size */
 #define JS_GCLIMIT 10000	/* run gc cycle every N allocations */
+#define JS_ASTLIMIT 100		/* max nested expressions */
 
 /* instruction size -- change to int if you get integer overflow syntax errors */
 typedef unsigned short js_Instruction;
@@ -86,7 +88,7 @@ void jsS_freestrings(js_State *J);
 /* Portable strtod and printf float formatting */
 
 void js_fmtexp(char *p, int e);
-void js_dtoa(double f, char *digits, int *exp, int *neg, int *ndigits);
+int js_grisu2(double v, char *buffer, int *K);
 double js_strtod(const char *as, char **aas);
 
 /* Private stack functions */
@@ -111,8 +113,6 @@ void js_rot3pop2(js_State *J);
 void js_dup1rot3(js_State *J);
 void js_dup1rot4(js_State *J);
 
-void js_pushundefinedthis(js_State *J); /* push 'global' if non-strict, undefined if strict */
-
 void js_RegExp_prototype_exec(js_State *J, js_Regexp *re, const char *text);
 
 void js_trap(js_State *J, int pc); /* dump stack and environment to stdout */
@@ -133,6 +133,7 @@ struct js_Jumpbuf
 	int envtop;
 	int tracetop;
 	int top, bot;
+	int strict;
 	js_Instruction *pc;
 };
 
@@ -141,6 +142,14 @@ void *js_savetrypc(js_State *J, js_Instruction *pc);
 #define js_trypc(J, PC) \
 	setjmp(js_savetrypc(J, PC))
 
+/* String buffer */
+
+typedef struct js_Buffer { int n, m; char s[64]; } js_Buffer;
+
+void js_putc(js_State *J, js_Buffer **sbp, int c);
+void js_puts(js_State *J, js_Buffer **sb, const char *s);
+void js_putm(js_State *J, js_Buffer **sb, const char *s, const char *e);
+
 /* State struct */
 
 struct js_State
@@ -148,10 +157,12 @@ struct js_State
 	void *actx;
 	void *uctx;
 	js_Alloc alloc;
+	js_Report report;
 	js_Panic panic;
 
 	js_StringNode *strings;
 
+	int default_strict;
 	int strict;
 
 	/* parser input source */
@@ -167,6 +178,7 @@ struct js_State
 	int newline;
 
 	/* parser state */
+	int astdepth;
 	int astline;
 	int lookahead;
 	const char *text;

@@ -468,7 +468,7 @@ static void init_box(fz_context *ctx, fz_html_box *box, fz_bidi_direction markup
 {
 	box->type = BOX_BLOCK;
 	box->x = box->y = 0;
-	box->w = box->h = 0;
+	box->w = box->b = 0;
 
 	box->up = NULL;
 	box->last = NULL;
@@ -550,6 +550,43 @@ static fz_html_box *insert_block_box(fz_context *ctx, fz_html_box *box, fz_html_
 	return top;
 }
 
+static fz_html_box *insert_table_box(fz_context *ctx, fz_html_box *box, fz_html_box *top)
+{
+	top = insert_block_box(ctx, box, top);
+	box->type = BOX_TABLE;
+	return top;
+}
+
+static fz_html_box *insert_table_row_box(fz_context *ctx, fz_html_box *box, fz_html_box *top)
+{
+	fz_html_box *table = top;
+	while (table && table->type != BOX_TABLE)
+		table = table->up;
+	if (table)
+	{
+		insert_box(ctx, box, BOX_TABLE_ROW, table);
+		return table;
+	}
+	fz_warn(ctx, "table-row not inside table element");
+	insert_block_box(ctx, box, top);
+	return top;
+}
+
+static fz_html_box *insert_table_cell_box(fz_context *ctx, fz_html_box *box, fz_html_box *top)
+{
+	fz_html_box *tr = top;
+	while (tr && tr->type != BOX_TABLE_ROW)
+		tr = tr->up;
+	if (tr)
+	{
+		insert_box(ctx, box, BOX_TABLE_CELL, tr);
+		return tr;
+	}
+	fz_warn(ctx, "table-cell not inside table-row element");
+	insert_block_box(ctx, box, top);
+	return top;
+}
+
 static fz_html_box *insert_break_box(fz_context *ctx, fz_html_box *box, fz_html_box *top)
 {
 	if (top->type == BOX_BLOCK)
@@ -573,8 +610,15 @@ static fz_html_box *insert_break_box(fz_context *ctx, fz_html_box *box, fz_html_
 
 static void insert_inline_box(fz_context *ctx, fz_html_box *box, fz_html_box *top, int markup_dir, struct genstate *g)
 {
-	if (top->type == BOX_BLOCK)
+	if (top->type == BOX_FLOW || top->type == BOX_INLINE)
 	{
+		insert_box(ctx, box, BOX_INLINE, top);
+	}
+	else
+	{
+		while (top->type != BOX_BLOCK && top->type != BOX_TABLE_CELL)
+			top = top->up;
+
 		if (top->last && top->last->type == BOX_FLOW)
 		{
 			insert_box(ctx, box, BOX_INLINE, top->last);
@@ -587,14 +631,6 @@ static void insert_inline_box(fz_context *ctx, fz_html_box *box, fz_html_box *to
 			insert_box(ctx, box, BOX_INLINE, flow);
 			g->at_bol = 1;
 		}
-	}
-	else if (top->type == BOX_FLOW)
-	{
-		insert_box(ctx, box, BOX_INLINE, top);
-	}
-	else if (top->type == BOX_INLINE)
-	{
-		insert_box(ctx, box, BOX_INLINE, top);
 	}
 }
 
@@ -736,6 +772,18 @@ generate_boxes(fz_context *ctx, fz_xml *node, fz_html_box *top,
 							box->href = fz_pool_strdup(ctx, g->pool, href);
 					}
 				}
+				else if (display == DIS_TABLE)
+				{
+					top = insert_table_box(ctx, box, top);
+				}
+				else if (display == DIS_TABLE_ROW)
+				{
+					top = insert_table_row_box(ctx, box, top);
+				}
+				else if (display == DIS_TABLE_CELL)
+				{
+					top = insert_table_cell_box(ctx, box, top);
+				}
 				else
 				{
 					fz_warn(ctx, "unknown box display type");
@@ -795,9 +843,9 @@ static void measure_image(fz_context *ctx, fz_html_flow *node, float max_w, floa
 	float image_h = node->content.image->h * 72 / 96;
 	node->x = 0;
 	node->y = 0;
-	if (image_w > max_w)
+	if (max_w > 0 && image_w > max_w)
 		xs = max_w / image_w;
-	if (image_h > max_h)
+	if (max_h > 0 && image_h > max_h)
 		ys = max_h / image_h;
 	s = fz_min(xs, ys);
 	node->w = image_w * s;
@@ -1061,7 +1109,7 @@ static float measure_line(fz_html_flow *node, fz_html_flow *end, float *baseline
 static void layout_line(fz_context *ctx, float indent, float page_w, float line_w, int align, fz_html_flow *start, fz_html_flow *end, fz_html_box *box, float baseline, float line_h)
 {
 	float x = box->x + indent;
-	float y = box->y + box->h;
+	float y = box->b;
 	float slop = page_w - line_w;
 	float justify = 0;
 	float va;
@@ -1208,12 +1256,15 @@ static void find_accumulated_margins(fz_context *ctx, fz_html_box *box, float *w
 static void flush_line(fz_context *ctx, fz_html_box *box, float page_h, float page_w, float line_w, int align, float indent, fz_html_flow *a, fz_html_flow *b)
 {
 	float avail, line_h, baseline;
-	avail = page_h - fmodf(box->y + box->h, page_h);
 	line_h = measure_line(a, b, &baseline);
-	if (line_h > avail)
-		box->h += avail;
+	if (page_h > 0)
+	{
+		avail = page_h - fmodf(box->b, page_h);
+		if (line_h > avail)
+			box->b += avail;
+	}
 	layout_line(ctx, indent, page_w, line_w, align, a, b, box, baseline, line_h);
-	box->h += line_h;
+	box->b += line_h;
 }
 
 static void layout_flow_inline(fz_context *ctx, fz_html_box *box, fz_html_box *top)
@@ -1247,9 +1298,9 @@ static void layout_flow(fz_context *ctx, fz_html_box *box, fz_html_box *top, flo
 	}
 
 	box->x = top->x;
-	box->y = top->y + top->h;
+	box->y = top->b;
 	box->w = top->w;
-	box->h = 0;
+	box->b = box->y;
 
 	if (!box->flow_head)
 		return;
@@ -1348,26 +1399,88 @@ static void layout_flow(fz_context *ctx, fz_html_box *box, fz_html_box *top, flo
 	}
 }
 
-static int layout_block_page_break(fz_context *ctx, fz_html_box *box, float page_h, float vertical, int page_break)
+static int layout_block_page_break(fz_context *ctx, float *yp, float page_h, float vertical, int page_break)
 {
+	if (page_h <= 0)
+		return 0;
 	if (page_break == PB_ALWAYS || page_break == PB_LEFT || page_break == PB_RIGHT)
 	{
-		float avail = page_h - fmodf(box->y + box->h - vertical, page_h);
-		int number = (box->y + box->h + (page_h * 0.1f)) / page_h;
+		float avail = page_h - fmodf(*yp - vertical, page_h);
+		int number = (*yp + (page_h * 0.1f)) / page_h;
 		if (avail > 0 && avail < page_h)
 		{
-			box->h += avail - vertical;
+			*yp += avail - vertical;
 			if (page_break == PB_LEFT && (number & 1) == 0) /* right side pages are even */
-				box->h += page_h;
+				*yp += page_h;
 			if (page_break == PB_RIGHT && (number & 1) == 1) /* left side pages are odd */
-				box->h += page_h;
+				*yp += page_h;
 			return 1;
 		}
 	}
 	return 0;
 }
 
-static float layout_block(fz_context *ctx, fz_html_box *box, fz_html_box *top, float page_h, float vertical, hb_buffer_t *hb_buf)
+static float layout_block(fz_context *ctx, fz_html_box *box, float em, float top_x, float *top_b, float top_w,
+		float page_h, float vertical, hb_buffer_t *hb_buf);
+
+static void layout_table(fz_context *ctx, fz_html_box *box, fz_html_box *top, float page_h, hb_buffer_t *hb_buf)
+{
+	fz_html_box *row, *cell, *child;
+	int col, ncol = 0;
+
+	box->em = fz_from_css_number(box->style.font_size, top->em, top->em, top->em);
+	box->x = top->x;
+	box->w = fz_from_css_number(box->style.width, box->em, top->w, top->w);
+	box->y = box->b = top->b;
+
+	for (row = box->down; row; row = row->next)
+	{
+		col = 0;
+		for (cell = row->down; cell; cell = cell->next)
+			++col;
+		if (col > ncol)
+			ncol = col;
+	}
+
+	for (row = box->down; row; row = row->next)
+	{
+		col = 0;
+
+		row->em = fz_from_css_number(row->style.font_size, box->em, box->em, box->em);
+		row->x = box->x;
+		row->w = box->w;
+		row->y = row->b = box->b;
+
+		for (cell = row->down; cell; cell = cell->next)
+		{
+			float colw = row->w / ncol; // TODO: proper calculation
+
+			cell->em = fz_from_css_number(cell->style.font_size, row->em, row->em, row->em);
+			cell->y = cell->b = row->y;
+			cell->x = row->x + col * colw;
+			cell->w = colw;
+
+			for (child = cell->down; child; child = child->next)
+			{
+				if (child->type == BOX_BLOCK)
+					layout_block(ctx, child, cell->em, cell->x, &cell->b, cell->w, page_h, 0, hb_buf);
+				else if (child->type == BOX_FLOW)
+					layout_flow(ctx, child, cell, page_h, hb_buf);
+				cell->b = child->b;
+			}
+
+			if (cell->b > row->b)
+				row->b = cell->b;
+
+			++col;
+		}
+
+		box->b = row->b;
+	}
+}
+
+static float layout_block(fz_context *ctx, fz_html_box *box, float em, float top_x, float *top_b, float top_w,
+		float page_h, float vertical, hb_buffer_t *hb_buf)
 {
 	fz_html_box *child;
 	float auto_width;
@@ -1378,30 +1491,30 @@ static float layout_block(fz_context *ctx, fz_html_box *box, fz_html_box *top, f
 	float *border = box->border;
 	float *padding = box->padding;
 
-	float em = box->em = fz_from_css_number(style->font_size, top->em, top->em, top->em);
+	em = box->em = fz_from_css_number(style->font_size, em, em, em);
 
-	margin[0] = fz_from_css_number(style->margin[0], em, top->w, 0);
-	margin[1] = fz_from_css_number(style->margin[1], em, top->w, 0);
-	margin[2] = fz_from_css_number(style->margin[2], em, top->w, 0);
-	margin[3] = fz_from_css_number(style->margin[3], em, top->w, 0);
+	margin[0] = fz_from_css_number(style->margin[0], em, top_w, 0);
+	margin[1] = fz_from_css_number(style->margin[1], em, top_w, 0);
+	margin[2] = fz_from_css_number(style->margin[2], em, top_w, 0);
+	margin[3] = fz_from_css_number(style->margin[3], em, top_w, 0);
 
-	padding[0] = fz_from_css_number(style->padding[0], em, top->w, 0);
-	padding[1] = fz_from_css_number(style->padding[1], em, top->w, 0);
-	padding[2] = fz_from_css_number(style->padding[2], em, top->w, 0);
-	padding[3] = fz_from_css_number(style->padding[3], em, top->w, 0);
+	padding[0] = fz_from_css_number(style->padding[0], em, top_w, 0);
+	padding[1] = fz_from_css_number(style->padding[1], em, top_w, 0);
+	padding[2] = fz_from_css_number(style->padding[2], em, top_w, 0);
+	padding[3] = fz_from_css_number(style->padding[3], em, top_w, 0);
 
-	border[0] = style->border_style_0 ? fz_from_css_number(style->border_width[0], em, top->w, 0) : 0;
-	border[1] = style->border_style_1 ? fz_from_css_number(style->border_width[1], em, top->w, 0) : 0;
-	border[2] = style->border_style_2 ? fz_from_css_number(style->border_width[2], em, top->w, 0) : 0;
-	border[3] = style->border_style_3 ? fz_from_css_number(style->border_width[3], em, top->w, 0) : 0;
+	border[0] = style->border_style_0 ? fz_from_css_number(style->border_width[0], em, top_w, 0) : 0;
+	border[1] = style->border_style_1 ? fz_from_css_number(style->border_width[1], em, top_w, 0) : 0;
+	border[2] = style->border_style_2 ? fz_from_css_number(style->border_width[2], em, top_w, 0) : 0;
+	border[3] = style->border_style_3 ? fz_from_css_number(style->border_width[3], em, top_w, 0) : 0;
 
 	/* TODO: remove 'vertical' margin adjustments across automatic page breaks */
 
-	if (layout_block_page_break(ctx, top, page_h, vertical, style->page_break_before))
+	if (layout_block_page_break(ctx, top_b, page_h, vertical, style->page_break_before))
 		vertical = 0;
 
-	box->x = top->x + margin[L] + border[L] + padding[L];
-	auto_width = top->w - (margin[L] + margin[R] + border[L] + border[R] + padding[L] + padding[R]);
+	box->x = top_x + margin[L] + border[L] + padding[L];
+	auto_width = top_w - (margin[L] + margin[R] + border[L] + border[R] + padding[L] + padding[R]);
 	box->w = fz_from_css_number(style->width, em, auto_width, auto_width);
 
 	if (margin[T] > vertical)
@@ -1414,15 +1527,14 @@ static float layout_block(fz_context *ctx, fz_html_box *box, fz_html_box *top, f
 	else
 		vertical = 0;
 
-	box->y = top->y + top->h + margin[T] + border[T] + padding[T];
-	box->h = 0;
+	box->y = box->b = *top_b + margin[T] + border[T] + padding[T];
 
 	first = 1;
 	for (child = box->down; child; child = child->next)
 	{
 		if (child->type == BOX_BLOCK)
 		{
-			vertical = layout_block(ctx, child, box, page_h, vertical, hb_buf);
+			vertical = layout_block(ctx, child, em, box->x, &box->b, box->w, page_h, vertical, hb_buf);
 			if (first)
 			{
 				/* move collapsed parent/child top margins to parent */
@@ -1431,23 +1543,26 @@ static float layout_block(fz_context *ctx, fz_html_box *box, fz_html_box *top, f
 				child->margin[T] = 0;
 				first = 0;
 			}
-			box->h += child->h +
-				child->padding[T] + child->padding[B] +
-				child->border[T] + child->border[B] +
-				child->margin[T] + child->margin[B];
+			box->b = child->b + child->padding[B] + child->border[B] + child->margin[B];
+		}
+		else if (child->type == BOX_TABLE)
+		{
+			layout_table(ctx, child, box, page_h, hb_buf);
+			first = 0;
+			box->b = child->b + child->padding[B] + child->border[B] + child->margin[B];
 		}
 		else if (child->type == BOX_BREAK)
 		{
-			box->h += fz_from_css_number_scale(style->line_height, em);
+			box->b += fz_from_css_number_scale(style->line_height, em);
 			vertical = 0;
 			first = 0;
 		}
 		else if (child->type == BOX_FLOW)
 		{
 			layout_flow(ctx, child, box, page_h, hb_buf);
-			if (child->h > 0)
+			if (child->b > child->y)
 			{
-				box->h += child->h;
+				box->b = child->b;
 				vertical = 0;
 				first = 0;
 			}
@@ -1455,19 +1570,19 @@ static float layout_block(fz_context *ctx, fz_html_box *box, fz_html_box *top, f
 	}
 
 	/* reserve space for the list mark */
-	if (box->list_item && box->h == 0)
+	if (box->list_item && box->y == box->b)
 	{
-		box->h += fz_from_css_number_scale(style->line_height, em);
+		box->b += fz_from_css_number_scale(style->line_height, em);
 		vertical = 0;
 	}
 
-	if (layout_block_page_break(ctx, box, page_h, 0, style->page_break_after))
+	if (layout_block_page_break(ctx, &box->b, page_h, 0, style->page_break_after))
 	{
 		vertical = 0;
 		margin[B] = 0;
 	}
 
-	if (box->h == 0)
+	if (box->y == box->b)
 	{
 		if (margin[B] > vertical)
 			margin[B] -= vertical;
@@ -1476,7 +1591,7 @@ static float layout_block(fz_context *ctx, fz_html_box *box, fz_html_box *top, f
 	}
 	else
 	{
-		box->h -= vertical;
+		box->b -= vertical;
 		vertical = fz_max(margin[B], vertical);
 		margin[B] = vertical;
 	}
@@ -1840,7 +1955,7 @@ static void draw_block_box(fz_context *ctx, fz_html_box *box, float page_top, fl
 	x0 = box->x - padding[L];
 	y0 = box->y - padding[T];
 	x1 = box->x + box->w + padding[R];
-	y1 = box->y + box->h + padding[B];
+	y1 = box->b + padding[B];
 
 	if (y0 > page_bot || y1 < page_top)
 		return;
@@ -1866,6 +1981,9 @@ static void draw_block_box(fz_context *ctx, fz_html_box *box, float page_top, fl
 	{
 		switch (box->type)
 		{
+		case BOX_TABLE:
+		case BOX_TABLE_ROW:
+		case BOX_TABLE_CELL:
 		case BOX_BLOCK: draw_block_box(ctx, box, page_top, page_bot, dev, ctm, hb_buf); break;
 		case BOX_FLOW: draw_flow_box(ctx, box, page_top, page_bot, dev, ctm, hb_buf); break;
 		}
@@ -2409,9 +2527,12 @@ fz_debug_html_box(fz_context *ctx, fz_html_box *box, int level)
 		case BOX_BREAK: printf("break"); break;
 		case BOX_FLOW: printf("flow"); break;
 		case BOX_INLINE: printf("inline"); break;
+		case BOX_TABLE: printf("table"); break;
+		case BOX_TABLE_ROW: printf("table-row"); break;
+		case BOX_TABLE_CELL: printf("table-cell"); break;
 		}
 
-		printf(" em=%g x=%g y=%g w=%g h=%g\n", box->em, box->x, box->y, box->w, box->h);
+		printf(" em=%g x=%g y=%g w=%g b=%g\n", box->em, box->x, box->y, box->w, box->b);
 
 		indent(level);
 		printf("{\n");
@@ -2470,7 +2591,19 @@ fz_layout_html(fz_context *ctx, fz_html *html, float w, float h, float em)
 	html->page_margin[R] = fz_from_css_number(html->root->style.margin[R], em, em, 0);
 
 	html->page_w = w - html->page_margin[L] - html->page_margin[R];
-	html->page_h = h - html->page_margin[T] - html->page_margin[B];
+	if (html->page_w <= 72)
+		html->page_w = 72; /* enforce a minimum page size! */
+	if (h > 0)
+	{
+		html->page_h = h - html->page_margin[T] - html->page_margin[B];
+		if (html->page_h <= 72)
+			html->page_h = 72; /* enforce a minimum page size! */
+	}
+	else
+	{
+		/* h 0 means no pagination */
+		html->page_h = 0;
+	}
 
 	fz_hb_lock(ctx);
 
@@ -2482,12 +2615,12 @@ fz_layout_html(fz_context *ctx, fz_html *html, float w, float h, float em)
 
 		box->em = em;
 		box->w = html->page_w;
-		box->h = 0;
+		box->b = box->y;
 
 		if (box->down)
 		{
-			layout_block(ctx, box->down, box, html->page_h, 0, hb_buf);
-			box->h = box->down->h;
+			layout_block(ctx, box->down, box->em, box->x, &box->b, box->w, html->page_h, 0, hb_buf);
+			box->b = box->down->b;
 		}
 	}
 	fz_always(ctx)
@@ -2501,6 +2634,9 @@ fz_layout_html(fz_context *ctx, fz_html *html, float w, float h, float em)
 	{
 		fz_rethrow(ctx);
 	}
+
+	if (h == 0)
+		html->page_h = box->b;
 
 #ifndef NDEBUG
 	if (fz_atoi(getenv("FZ_DEBUG_HTML")))
@@ -2672,7 +2808,8 @@ detect_directionality(fz_context *ctx, fz_pool *pool, fz_html_box *box)
 fz_html *
 fz_parse_html(fz_context *ctx, fz_html_font_set *set, fz_archive *zip, const char *base_uri, fz_buffer *buf, const char *user_css)
 {
-	fz_xml *xml;
+	fz_xml_doc *xml;
+	fz_xml *root;
 	fz_html *html = NULL;
 
 	fz_css_match match;
@@ -2689,6 +2826,7 @@ fz_parse_html(fz_context *ctx, fz_html_font_set *set, fz_archive *zip, const cha
 	g.last_brk_cls = UCDN_LINEBREAK_CLASS_OP;
 
 	xml = fz_parse_xml(ctx, buf, 1);
+	root = fz_xml_root(xml);
 
 	fz_try(ctx)
 		g.css = fz_new_css(ctx);
@@ -2698,22 +2836,27 @@ fz_parse_html(fz_context *ctx, fz_html_font_set *set, fz_archive *zip, const cha
 		fz_rethrow(ctx);
 	}
 
+#ifndef NDEBUG
+	if (fz_atoi(getenv("FZ_DEBUG_XML")))
+		fz_debug_xml(root, 0);
+#endif
+
 	fz_try(ctx)
 	{
-		if (fz_xml_find(xml, "FictionBook"))
+		if (fz_xml_find(root, "FictionBook"))
 		{
 			g.is_fb2 = 1;
 			fz_parse_css(ctx, g.css, fb2_default_css, "<default:fb2>");
 			if (fz_use_document_css(ctx))
-				fb2_load_css(ctx, g.zip, g.base_uri, g.css, xml);
-			g.images = load_fb2_images(ctx, xml);
+				fb2_load_css(ctx, g.zip, g.base_uri, g.css, root);
+			g.images = load_fb2_images(ctx, root);
 		}
 		else
 		{
 			g.is_fb2 = 0;
 			fz_parse_css(ctx, g.css, html_default_css, "<default:html>");
 			if (fz_use_document_css(ctx))
-				html_load_css(ctx, g.zip, g.base_uri, g.css, xml);
+				html_load_css(ctx, g.zip, g.base_uri, g.css, root);
 			g.images = NULL;
 		}
 
@@ -2743,7 +2886,7 @@ fz_parse_html(fz_context *ctx, fz_html_font_set *set, fz_archive *zip, const cha
 		fz_apply_css_style(ctx, g.set, &html->root->style, &match);
 		// TODO: transfer page margins out of this hacky box
 
-		generate_boxes(ctx, xml, html->root, &match, 0, DEFAULT_DIR, FZ_LANG_UNSET, &g);
+		generate_boxes(ctx, root, html->root, &match, 0, DEFAULT_DIR, FZ_LANG_UNSET, &g);
 
 		detect_directionality(ctx, g.pool, html->root);
 	}

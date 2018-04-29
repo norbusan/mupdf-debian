@@ -6,15 +6,12 @@
 
 /* Scan file for objects and reconstruct xref table */
 
-/* Define in PDF 1.7 to be 8388607, but mupdf is more lenient. */
-#define MAX_OBJECT_NUMBER (10 << 20)
-
 struct entry
 {
 	int num;
 	int gen;
-	int ofs;
-	int stm_ofs;
+	int64_t ofs;
+	int64_t stm_ofs;
 	int stm_len;
 };
 
@@ -436,7 +433,7 @@ pdf_repair_xref(fz_context *ctx, pdf_document *doc)
 					break;
 				}
 
-				if (num <= 0 || num > MAX_OBJECT_NUMBER)
+				if (num <= 0 || num > PDF_MAX_OBJECT_NUMBER)
 				{
 					fz_warn(ctx, "ignoring object with invalid object number (%d %d R)", num, gen);
 					goto have_next_token;
@@ -518,11 +515,12 @@ pdf_repair_xref(fz_context *ctx, pdf_document *doc)
 			}
 
 			else if (tok == PDF_TOK_EOF)
+			{
 				break;
+			}
+
 			else
 			{
-				if (tok == PDF_TOK_ERROR)
-					fz_read_byte(ctx, doc->file);
 				num = 0;
 				gen = 0;
 			}

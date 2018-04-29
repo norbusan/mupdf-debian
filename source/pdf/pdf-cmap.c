@@ -445,8 +445,12 @@ do_check(cmap_splay *node, void *arg)
 {
 	cmap_splay *tree = arg;
 	unsigned int num = node - tree;
-	assert(node->left == EMPTY || tree[node->left].parent == num);
-	assert(node->right == EMPTY || tree[node->right].parent == num);
+	assert(!node->many || node->low == node->high);
+	assert(node->low <= node->high);
+	assert((node->left == EMPTY) || (tree[node->left].parent == num &&
+		tree[node->left].high < node->low));
+	assert(node->right == EMPTY || (tree[node->right].parent == num &&
+		node->high < tree[node->right].low));
 }
 
 static void
@@ -520,7 +524,8 @@ add_range(fz_context *ctx, pdf_cmap *cmap, unsigned int low, unsigned int high, 
 					/* case 3, reduces to case 5 */
 					int new_high = tree[current].high;
 					tree[current].high = low-1;
-					add_range(ctx, cmap, high+1, new_high, tree[current].out + high + 1 - tree[current].low, 0, many);
+					add_range(ctx, cmap, high+1, new_high, tree[current].out + high + 1 - tree[current].low, 0, tree[current].many);
+					tree = cmap->tree;
 				}
 				/* Now look for where to move to next (left for case 0, right for case 5) */
 				if (tree[current].low > high) {

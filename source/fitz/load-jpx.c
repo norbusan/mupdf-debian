@@ -445,13 +445,6 @@ fz_load_jpx_info(fz_context *ctx, const unsigned char *data, size_t size, int *w
 
 #else /* HAVE_LURATECH */
 
-#define OPJ_STATIC
-#define OPJ_HAVE_INTTYPES_H
-#if !defined(_MSC_VER) || _MSC_VER >= 1600
-#define OPJ_HAVE_STDINT_H
-#endif
-#define USE_JPIP
-
 #include <openjpeg.h>
 
 struct fz_jpxd_s
@@ -923,7 +916,7 @@ fz_load_jpx_info(fz_context *ctx, const unsigned char *data, size_t size, int *w
 	fz_catch(ctx)
 		fz_rethrow(ctx);
 
-	*cspacep = state.cs;
+	*cspacep = fz_keep_colorspace(ctx, state.cs);
 	*wp = state.width;
 	*hp = state.height;
 	*xresp = state.xres;
@@ -935,13 +928,13 @@ fz_load_jpx_info(fz_context *ctx, const unsigned char *data, size_t size, int *w
 #else /* FZ_ENABLE_JPX */
 
 fz_pixmap *
-fz_load_jpx(fz_context *ctx, unsigned char *data, size_t size, fz_colorspace *defcs)
+fz_load_jpx(fz_context *ctx, const unsigned char *data, size_t size, fz_colorspace *defcs)
 {
 	fz_throw(ctx, FZ_ERROR_GENERIC, "JPX support disabled");
 }
 
 void
-fz_load_jpx_info(fz_context *ctx, unsigned char *data, size_t size, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
+fz_load_jpx_info(fz_context *ctx, const unsigned char *data, size_t size, int *wp, int *hp, int *xresp, int *yresp, fz_colorspace **cspacep)
 {
 	fz_throw(ctx, FZ_ERROR_GENERIC, "JPX support disabled");
 }

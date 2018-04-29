@@ -1,5 +1,6 @@
 #include "pdfapp.h"
 #include "curl_stream.h"
+#include "mupdf/helpers/pkcs7-check.h"
 
 #include <string.h>
 #include <limits.h>
@@ -130,7 +131,7 @@ void pdfapp_init(fz_context *ctx, pdfapp_t *app)
 
 	app->transition.duration = 0.25f;
 	app->transition.type = FZ_TRANSITION_FADE;
-#if defined(_WIN32) || defined(_WIN64)
+#ifdef _WIN32
 	app->colorspace = fz_device_bgr(ctx);
 #else
 	app->colorspace = fz_device_rgb(ctx);
@@ -807,7 +808,7 @@ static void pdfapp_updatepage(pdfapp_t *app)
 
 	for (pannot = pdf_first_annot(app->ctx, (pdf_page*)app->page); pannot; pannot = pdf_next_annot(app->ctx, pannot))
 	{
-		if (pdf_annot_is_dirty(app->ctx, pannot))
+		if (pannot->has_new_ap)
 		{
 			fz_annot *annot = (fz_annot*)pannot;
 			fz_rect bounds;
@@ -825,6 +826,7 @@ static void pdfapp_updatepage(pdfapp_t *app)
 				fz_drop_device(app->ctx, idev);
 			fz_catch(app->ctx)
 				fz_rethrow(app->ctx);
+			pannot->has_new_ap = 0;
 		}
 	}
 
@@ -1683,6 +1685,8 @@ void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int sta
 
 						fz_var(opts);
 						fz_var(vals);
+						fz_var(nopts);
+						fz_var(nvals);
 
 						fz_try(ctx)
 						{
@@ -1702,7 +1706,12 @@ void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int sta
 						}
 						fz_always(ctx)
 						{
+							int i;
+							for (i=0; i < nopts; ++i)
+								fz_free(ctx, opts[i]);
 							fz_free(ctx, opts);
+							for (i=0; i < nvals; ++i)
+								fz_free(ctx, vals[i]);
 							fz_free(ctx, vals);
 						}
 						fz_catch(ctx)
@@ -1718,7 +1727,7 @@ void pdfapp_onmouse(pdfapp_t *app, int x, int y, int btn, int modifiers, int sta
 						char ebuf[256];
 
 						ebuf[0] = 0;
-						if (pdf_check_signature(ctx, idoc, widget, app->docpath, ebuf, sizeof(ebuf)))
+						if (pdf_check_signature(ctx, idoc, widget, ebuf, sizeof(ebuf)))
 						{
 							winwarn(app, "Signature is valid");
 						}
@@ -1914,13 +1923,12 @@ void pdfapp_oncopy(pdfapp_t *app, unsigned short *ucsbuf, int ucslen)
 	fz_stext_block *block;
 	fz_stext_line *line;
 	fz_stext_char *ch;
-
-	int x0 = app->selr.x0;
-	int x1 = app->selr.x1;
-	int y0 = app->selr.y0;
-	int y1 = app->selr.y1;
+	fz_rect sel;
 
 	pdfapp_viewctm(&ctm, app);
+	fz_invert_matrix(&ctm, &ctm);
+	sel = app->selr;
+	fz_transform_rect(&sel, &ctm);
 
 	p = 0;
 	need_newline = 0;
@@ -1938,12 +1946,12 @@ void pdfapp_oncopy(pdfapp_t *app, unsigned short *ucsbuf, int ucslen)
 				int c = ch->c;
 				if (c < 32)
 					c = 0xFFFD;
-				if (ch->bbox.x1 >= x0 && ch->bbox.x0 <= x1 && ch->bbox.y1 >= y0 && ch->bbox.y0 <= y1)
+				if (ch->bbox.x1 >= sel.x0 && ch->bbox.x0 <= sel.x1 && ch->bbox.y1 >= sel.y0 && ch->bbox.y0 <= sel.y1)
 				{
 					saw_text = 1;
 					if (need_newline)
 					{
-#if defined(_WIN32) || defined(_WIN64)
+#ifdef _WIN32
 						if (p < ucslen - 1)
 							ucsbuf[p++] = '\r';
 #endif

@@ -217,7 +217,6 @@ typedef struct worker_t {
 static char *output = NULL;
 static fz_output *out = NULL;
 static int output_pagenum = 0;
-static int output_append = 0;
 static int output_file_per_page = 0;
 
 static char *format = NULL;
@@ -364,7 +363,6 @@ static void usage(void)
 #endif
 		"\t-N\tdisable ICC workflow (\"N\"o color management)\n"
 		"\t-O -\tControl spot/overprint rendering\n"
-		"\t\t 0 = No spot rendering\n"
 #ifdef FZ_ENABLE_SPOT_RENDERING
 		"\t\t 0 = No spot rendering\n"
 		"\t\t 1 = Overprint simulation (default)\n"
@@ -848,7 +846,7 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 				else if (output_format == OUT_PSD)
 					bander = fz_new_psd_band_writer(ctx, out);
 				else if (output_format == OUT_TGA)
-					bander = fz_new_tga_band_writer(ctx, out, colorspace == fz_device_bgr(ctx));
+					bander = fz_new_tga_band_writer(ctx, out, fz_colorspace_is_bgr(ctx, colorspace));
 				else if (output_format == OUT_PWG)
 				{
 					if (out_cs == CS_MONO)
@@ -1145,11 +1143,13 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 		char text_buffer[512];
 
 		bgprint_flush();
-		fz_close_output(ctx, out);
-		fz_drop_output(ctx, out);
+		if (out)
+		{
+			fz_close_output(ctx, out);
+			fz_drop_output(ctx, out);
+		}
 		fz_snprintf(text_buffer, sizeof(text_buffer), output, pagenum);
-		out = fz_new_output_with_path(ctx, text_buffer, output_append);
-		output_append = 1;
+		out = fz_new_output_with_path(ctx, text_buffer, 0);
 	}
 
 	if (bgprint.active)
@@ -1798,17 +1798,17 @@ int mudraw_main(int argc, char **argv)
 					case CS_MONO:
 					case CS_GRAY:
 					case CS_GRAY_ALPHA:
-						if (fz_colorspace_n(ctx, colorspace) == 1)
+						if (fz_colorspace_is_gray(ctx, colorspace))
 							okay = 1;
 						break;
 					case CS_RGB:
 					case CS_RGB_ALPHA:
-						if (fz_colorspace_n(ctx, colorspace) == 3)
+						if (fz_colorspace_is_rgb(ctx, colorspace))
 							okay = 1;
 						break;
 					case CS_CMYK:
 					case CS_CMYK_ALPHA:
-						if (fz_colorspace_n(ctx, colorspace) == 4)
+						if (fz_colorspace_is_cmyk(ctx, colorspace))
 							okay = 1;
 						break;
 					}

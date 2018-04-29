@@ -98,7 +98,7 @@ fz_predict_tiff(fz_predict *state, unsigned char *out, unsigned char *in)
 }
 
 static void
-fz_predict_png(fz_predict *state, unsigned char *out, unsigned char *in, size_t len, int predictor)
+fz_predict_png(fz_context *ctx, fz_predict *state, unsigned char *out, unsigned char *in, size_t len, int predictor)
 {
 	int bpp = state->bpp;
 	size_t i;
@@ -109,6 +109,9 @@ fz_predict_png(fz_predict *state, unsigned char *out, unsigned char *in, size_t 
 
 	switch (predictor)
 	{
+	default:
+		fz_warn(ctx, "unknown png predictor %d, treating as none", predictor);
+		/* fallthrough */
 	case 0:
 		memcpy(out, in, len);
 		break;
@@ -188,7 +191,7 @@ next_predict(fz_context *ctx, fz_stream *stm, size_t len)
 			fz_predict_tiff(state, state->out, state->in);
 		else
 		{
-			fz_predict_png(state, state->out, state->in + 1, n - 1, state->in[0]);
+			fz_predict_png(ctx, state, state->out, state->in + 1, n - 1, state->in[0]);
 			memcpy(state->ref, state->out, state->stride);
 		}
 
@@ -223,9 +226,7 @@ close_predict(fz_context *ctx, void *state_)
 fz_stream *
 fz_open_predict(fz_context *ctx, fz_stream *chain, int predictor, int columns, int colors, int bpc)
 {
-	fz_predict *state = NULL;
-
-	fz_var(state);
+	fz_predict *state;
 
 	if (predictor < 1)
 		predictor = 1;
@@ -236,33 +237,29 @@ fz_open_predict(fz_context *ctx, fz_stream *chain, int predictor, int columns, i
 	if (bpc < 1)
 		bpc = 8;
 
+	if (bpc != 1 && bpc != 2 && bpc != 4 && bpc != 8 && bpc != 16)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "invalid number of bits per component: %d", bpc);
+	if (colors > FZ_MAX_COLORS)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "too many color components (%d > %d)", colors, FZ_MAX_COLORS);
+	if (columns >= INT_MAX / (bpc * colors))
+		fz_throw(ctx, FZ_ERROR_GENERIC, "too many columns lead to an integer overflow (%d)", columns);
+
+	if (predictor != 1 && predictor != 2 &&
+			predictor != 10 && predictor != 11 &&
+			predictor != 12 && predictor != 13 &&
+			predictor != 14 && predictor != 15)
+	{
+		fz_warn(ctx, "invalid predictor: %d", predictor);
+		predictor = 1;
+	}
+
+	state = fz_malloc_struct(ctx, fz_predict);
 	fz_try(ctx)
 	{
-		if (bpc != 1 && bpc != 2 && bpc != 4 && bpc != 8 && bpc != 16)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "invalid number of bits per component: %d", bpc);
-		if (colors > FZ_MAX_COLORS)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "too many color components (%d > %d)", colors, FZ_MAX_COLORS);
-		if (columns >= INT_MAX / (bpc * colors))
-			fz_throw(ctx, FZ_ERROR_GENERIC, "too many columns lead to an integer overflow (%d)", columns);
-
-		state = fz_malloc_struct(ctx, fz_predict);
-		state->in = NULL;
-		state->out = NULL;
-		state->chain = chain;
-
 		state->predictor = predictor;
 		state->columns = columns;
 		state->colors = colors;
 		state->bpc = bpc;
-
-		if (state->predictor != 1 && state->predictor != 2 &&
-			state->predictor != 10 && state->predictor != 11 &&
-			state->predictor != 12 && state->predictor != 13 &&
-			state->predictor != 14 && state->predictor != 15)
-		{
-			fz_warn(ctx, "invalid predictor: %d", state->predictor);
-			state->predictor = 1;
-		}
 
 		state->stride = (state->bpc * state->colors * state->columns + 7) / 8;
 		state->bpp = (state->bpc * state->colors + 7) / 8;
@@ -274,16 +271,14 @@ fz_open_predict(fz_context *ctx, fz_stream *chain, int predictor, int columns, i
 		state->wp = state->out;
 
 		memset(state->ref, 0, state->stride);
+
+		state->chain = fz_keep_stream(ctx, chain);
 	}
 	fz_catch(ctx)
 	{
-		if (state)
-		{
-			fz_free(ctx, state->in);
-			fz_free(ctx, state->out);
-		}
+		fz_free(ctx, state->in);
+		fz_free(ctx, state->out);
 		fz_free(ctx, state);
-		fz_drop_stream(ctx, chain);
 		fz_rethrow(ctx);
 	}
 

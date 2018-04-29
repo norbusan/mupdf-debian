@@ -2,11 +2,13 @@
 
 #include <zlib.h>
 
+#include <limits.h>
 #include <string.h>
 
 struct info
 {
 	unsigned int width, height, depth, n;
+	enum fz_colorspace_type type;
 	int interlace, indexed;
 	unsigned int size;
 	unsigned char *samples;
@@ -256,15 +258,16 @@ png_read_ihdr(fz_context *ctx, struct info *info, const unsigned char *p, unsign
 
 	info->indexed = 0;
 	if (color == 0) /* gray */
-		info->n = 1;
+		info->n = 1, info->type = FZ_COLORSPACE_GRAY;
 	else if (color == 2) /* rgb */
-		info->n = 3;
+		info->n = 3, info->type = FZ_COLORSPACE_RGB;
 	else if (color == 4) /* gray alpha */
-		info->n = 2;
+		info->n = 2, info->type = FZ_COLORSPACE_GRAY;
 	else if (color == 6) /* rgb alpha */
-		info->n = 4;
+		info->n = 4, info->type = FZ_COLORSPACE_RGB;
 	else if (color == 3) /* indexed */
 	{
+		info->type = FZ_COLORSPACE_RGB; /* after colorspace expansion it will be */
 		info->indexed = 1;
 		info->n = 1;
 	}
@@ -341,7 +344,7 @@ png_read_trns(fz_context *ctx, struct info *info, const unsigned char *p, unsign
 static void
 png_read_icc(fz_context *ctx, struct info *info, const unsigned char *p, unsigned int size)
 {
-	fz_stream *stm = NULL;
+	fz_stream *mstm = NULL, *zstm = NULL;
 	fz_colorspace *cs = NULL;
 	size_t m = fz_mini(80, size);
 	size_t n = strnlen((const char *)p, m);
@@ -351,18 +354,25 @@ png_read_icc(fz_context *ctx, struct info *info, const unsigned char *p, unsigne
 		return;
 	}
 
-	stm = fz_open_memory(ctx, p + n + 2, size - n - 2);
-	stm = fz_open_flated(ctx, stm, 15);
-	fz_try(ctx)
-		cs = fz_new_icc_colorspace_from_stream(ctx, (const char *)p, stm);
-	fz_always(ctx)
-		fz_drop_stream(ctx, stm);
-	fz_catch(ctx)
-		fz_rethrow(ctx);
+	fz_var(mstm);
+	fz_var(zstm);
 
-	/* drop old one in case we have multiple ICC profiles */
-	fz_drop_colorspace(ctx, info->cs);
-	info->cs = cs;
+	fz_try(ctx)
+	{
+		mstm = fz_open_memory(ctx, p + n + 2, size - n - 2);
+		zstm = fz_open_flated(ctx, mstm, 15);
+		cs = fz_new_icc_colorspace_from_stream(ctx, (const char *)p, zstm);
+		/* drop old one in case we have multiple ICC profiles */
+		fz_drop_colorspace(ctx, info->cs);
+		info->cs = cs;
+	}
+	fz_always(ctx)
+	{
+		fz_drop_stream(ctx, mstm);
+		fz_drop_stream(ctx, zstm);
+	}
+	fz_catch(ctx)
+		fz_warn(ctx, "cannot read embedded ICC profile");
 }
 
 static void
@@ -500,6 +510,7 @@ png_read_image(fz_context *ctx, struct info *info, const unsigned char *p, size_
 		{
 			inflateEnd(&stm);
 			fz_free(ctx, info->samples);
+			info->samples = NULL;
 		}
 		fz_rethrow(ctx);
 	}
@@ -510,6 +521,7 @@ png_read_image(fz_context *ctx, struct info *info, const unsigned char *p, size_
 		if (code != Z_OK)
 		{
 			fz_free(ctx, info->samples);
+			info->samples = NULL;
 			fz_throw(ctx, FZ_ERROR_GENERIC, "zlib error: %s", stm.msg);
 		}
 
@@ -524,8 +536,16 @@ png_read_image(fz_context *ctx, struct info *info, const unsigned char *p, size_
 		fz_catch(ctx)
 		{
 			fz_free(ctx, info->samples);
+			info->samples = NULL;
 			fz_rethrow(ctx);
 		}
+	}
+
+	if (info->cs && fz_colorspace_type(ctx, info->cs) != info->type)
+	{
+		fz_warn(ctx, "embedded ICC profile does not match PNG colorspace");
+		fz_drop_colorspace(ctx, info->cs);
+		info->cs = NULL;
 	}
 
 	if (info->cs == NULL)
@@ -604,13 +624,13 @@ fz_load_png(fz_context *ctx, const unsigned char *p, size_t total)
 
 	fz_var(image);
 
-	png_read_image(ctx, &png, p, total, 0);
-
-	stride = (png.width * png.n * png.depth + 7) / 8;
-	alpha = (png.n == 2 || png.n == 4 || png.transparency);
-
 	fz_try(ctx)
 	{
+		png_read_image(ctx, &png, p, total, 0);
+
+		stride = (png.width * png.n * png.depth + 7) / 8;
+		alpha = (png.n == 2 || png.n == 4 || png.transparency);
+
 		if (png.indexed)
 		{
 			image = fz_new_pixmap(ctx, NULL, png.width, png.height, NULL, 1);
@@ -647,7 +667,13 @@ fz_load_png_info(fz_context *ctx, const unsigned char *p, size_t total, int *wp,
 {
 	struct info png;
 
-	png_read_image(ctx, &png, p, total, 1);
+	fz_try(ctx)
+		png_read_image(ctx, &png, p, total, 1);
+	fz_catch(ctx)
+	{
+		fz_drop_colorspace(ctx, png.cs);
+		fz_rethrow(ctx);
+	}
 
 	*cspacep = png.cs;
 	*wp = png.width;

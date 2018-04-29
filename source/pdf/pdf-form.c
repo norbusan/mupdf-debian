@@ -54,7 +54,6 @@ static void pdf_field_mark_dirty(fz_context *ctx, pdf_document *doc, pdf_obj *fi
 
 static void update_field_value(fz_context *ctx, pdf_document *doc, pdf_obj *obj, const char *text)
 {
-	pdf_obj *sobj;
 	pdf_obj *grp;
 
 	if (!text)
@@ -66,8 +65,7 @@ static void update_field_value(fz_context *ctx, pdf_document *doc, pdf_obj *obj,
 	if (grp)
 		obj = grp;
 
-	sobj = pdf_new_string(ctx, doc, text, strlen(text));
-	pdf_dict_put_drop(ctx, obj, PDF_NAME_V, sobj);
+	pdf_dict_put_text_string(ctx, obj, PDF_NAME_V, text);
 
 	pdf_field_mark_dirty(ctx, doc, obj);
 }
@@ -531,7 +529,7 @@ static void toggle_check_box(fz_context *ctx, pdf_document *doc, pdf_obj *obj)
 
 	if (val && grp)
 	{
-		pdf_obj *v = pdf_new_string(ctx, doc, val, strlen(val));
+		pdf_obj *v = pdf_new_text_string(ctx, doc, val);
 		pdf_dict_put_drop(ctx, grp, PDF_NAME_V, v);
 		recalculate(ctx, doc);
 	}
@@ -643,26 +641,9 @@ void pdf_update_page(fz_context *ctx, pdf_page *page)
 {
 	pdf_annot *annot;
 
-	/* Mark all dirty annots as clean */
-	for (annot = page->annots; annot; annot = annot->next)
-		pdf_clean_annot(ctx, annot);
-
-	/* Flag all dirty annots */
 	for (annot = page->annots; annot; annot = annot->next)
 	{
-		pdf_xobject *ap = pdf_keep_xobject(ctx, annot->ap);
-		int ap_iteration = annot->ap_iteration;
-
-		fz_try(ctx)
-		{
-			pdf_update_annot(ctx, annot);
-			if ((ap != annot->ap || ap_iteration != annot->ap_iteration))
-				pdf_dirty_annot(ctx, annot);
-		}
-		fz_always(ctx)
-			pdf_drop_xobject(ctx, ap);
-		fz_catch(ctx)
-			fz_rethrow(ctx);
+		pdf_update_annot(ctx, annot);
 	}
 }
 
@@ -703,7 +684,7 @@ pdf_widget *pdf_create_widget(fz_context *ctx, pdf_document *doc, pdf_page *page
 	fz_try(ctx)
 	{
 		pdf_set_field_type(ctx, doc, annot->obj, type);
-		pdf_dict_put_drop(ctx, annot->obj, PDF_NAME_T, pdf_new_string(ctx, doc, fieldname, strlen(fieldname)));
+		pdf_dict_put_string(ctx, annot->obj, PDF_NAME_T, fieldname, strlen(fieldname));
 
 		if (type == PDF_WIDGET_TYPE_SIGNATURE)
 		{
@@ -870,7 +851,7 @@ void pdf_field_set_button_caption(fz_context *ctx, pdf_document *doc, pdf_obj *f
 {
 	if (pdf_field_type(ctx, doc, field) == PDF_WIDGET_TYPE_PUSHBUTTON)
 	{
-		pdf_obj *val = pdf_new_string(ctx, doc, text, strlen(text));
+		pdf_obj *val = pdf_new_text_string(ctx, doc, text);
 		pdf_dict_putl_drop(ctx, field, val, PDF_NAME_MK, PDF_NAME_CA, NULL);
 		pdf_field_mark_dirty(ctx, doc, field);
 	}
@@ -1168,11 +1149,11 @@ int pdf_choice_widget_options(fz_context *ctx, pdf_document *doc, pdf_widget *tw
 			/* If it is a two element array, the second item is the one that we want if we want the listing value. */
 			if (m == 2)
 				if (exportval)
-					opts[i] = pdf_to_str_buf(ctx, pdf_array_get(ctx, pdf_array_get(ctx, optarr, i), 0));
+					opts[i] = pdf_to_utf8(ctx, pdf_array_get(ctx, pdf_array_get(ctx, optarr, i), 0));
 				else
-					opts[i] = pdf_to_str_buf(ctx, pdf_array_get(ctx, pdf_array_get(ctx, optarr, i), 1));
+					opts[i] = pdf_to_utf8(ctx, pdf_array_get(ctx, pdf_array_get(ctx, optarr, i), 1));
 			else
-				opts[i] = pdf_to_str_buf(ctx, pdf_array_get(ctx, optarr, i));
+				opts[i] = pdf_to_utf8(ctx, pdf_array_get(ctx, optarr, i));
 		}
 	}
 	return n;
@@ -1208,7 +1189,7 @@ int pdf_choice_widget_value(fz_context *ctx, pdf_document *doc, pdf_widget *tw, 
 	if (pdf_is_string(ctx, optarr))
 	{
 		if (opts)
-			opts[0] = pdf_to_str_buf(ctx, optarr);
+			opts[0] = pdf_to_utf8(ctx, optarr);
 
 		return 1;
 	}
@@ -1225,7 +1206,7 @@ int pdf_choice_widget_value(fz_context *ctx, pdf_document *doc, pdf_widget *tw, 
 				if (pdf_is_array(ctx, elem))
 					elem = pdf_array_get(ctx, elem, 1);
 
-				opts[i] = pdf_to_str_buf(ctx, elem);
+				opts[i] = pdf_to_utf8(ctx, elem);
 			}
 		}
 
@@ -1251,7 +1232,7 @@ void pdf_choice_widget_set_value(fz_context *ctx, pdf_document *doc, pdf_widget 
 
 			for (i = 0; i < n; i++)
 			{
-				opt = pdf_new_string(ctx, doc, opts[i], strlen(opts[i]));
+				opt = pdf_new_text_string(ctx, doc, opts[i]);
 				pdf_array_push_drop(ctx, optarr, opt);
 			}
 
@@ -1259,7 +1240,7 @@ void pdf_choice_widget_set_value(fz_context *ctx, pdf_document *doc, pdf_widget 
 		}
 		else
 		{
-			opt = pdf_new_string(ctx, doc, opts[0], strlen(opts[0]));
+			opt = pdf_new_text_string(ctx, doc, opts[0]);
 			pdf_dict_put_drop(ctx, annot->obj, PDF_NAME_V, opt);
 		}
 
@@ -1277,7 +1258,7 @@ void pdf_choice_widget_set_value(fz_context *ctx, pdf_document *doc, pdf_widget 
 	}
 }
 
-int pdf_signature_widget_byte_range(fz_context *ctx, pdf_document *doc, pdf_widget *widget, int (*byte_range)[2])
+int pdf_signature_widget_byte_range(fz_context *ctx, pdf_document *doc, pdf_widget *widget, fz_range *byte_range)
 {
 	pdf_annot *annot = (pdf_annot *)widget;
 	pdf_obj *br = pdf_dict_getl(ctx, annot->obj, PDF_NAME_V, PDF_NAME_ByteRange, NULL);
@@ -1287,12 +1268,42 @@ int pdf_signature_widget_byte_range(fz_context *ctx, pdf_document *doc, pdf_widg
 	{
 		for (i = 0; i < n; i++)
 		{
-			byte_range[i][0] = pdf_to_int(ctx, pdf_array_get(ctx, br, 2*i));
-			byte_range[i][1] = pdf_to_int(ctx, pdf_array_get(ctx, br, 2*i+1));
+			byte_range[i].offset = pdf_to_int(ctx, pdf_array_get(ctx, br, 2*i));
+			byte_range[i].len = pdf_to_int(ctx, pdf_array_get(ctx, br, 2*i+1));
 		}
 	}
 
 	return n;
+}
+
+fz_stream *pdf_signature_widget_hash_bytes(fz_context *ctx, pdf_document *doc, pdf_widget *widget)
+{
+	fz_range *byte_range = NULL;
+	int byte_range_len;
+	fz_stream *bytes = NULL;
+
+	fz_var(byte_range);
+	fz_try(ctx)
+	{
+		byte_range_len = pdf_signature_widget_byte_range(ctx, doc, widget, NULL);
+		if (byte_range_len)
+		{
+			byte_range = fz_calloc(ctx, byte_range_len, sizeof(*byte_range));
+			pdf_signature_widget_byte_range(ctx, doc, widget, byte_range);
+		}
+
+		bytes = fz_open_null_n(ctx, doc->file, byte_range, byte_range_len);
+	}
+	fz_always(ctx)
+	{
+		fz_free(ctx, byte_range);
+	}
+	fz_catch(ctx)
+	{
+		fz_rethrow(ctx);
+	}
+
+	return bytes;
 }
 
 int pdf_signature_widget_contents(fz_context *ctx, pdf_document *doc, pdf_widget *widget, char **contents)
@@ -1304,7 +1315,7 @@ int pdf_signature_widget_contents(fz_context *ctx, pdf_document *doc, pdf_widget
 	return pdf_to_str_len(ctx, c);
 }
 
-void pdf_signature_set_value(fz_context *ctx, pdf_document *doc, pdf_obj *field, pdf_signer *signer)
+void pdf_signature_set_value(fz_context *ctx, pdf_document *doc, pdf_obj *field, pdf_pkcs7_signer *signer)
 {
 	pdf_obj *v = NULL;
 	pdf_obj *indv;
@@ -1340,8 +1351,8 @@ void pdf_signature_set_value(fz_context *ctx, pdf_document *doc, pdf_obj *field,
 	contents = pdf_new_string(ctx, doc, buf, sizeof(buf));
 	pdf_dict_put_drop(ctx, v, PDF_NAME_Contents, contents);
 
-	pdf_dict_put_drop(ctx, v, PDF_NAME_Filter, PDF_NAME_Adobe_PPKLite);
-	pdf_dict_put_drop(ctx, v, PDF_NAME_SubFilter, PDF_NAME_adbe_pkcs7_detached);
+	pdf_dict_put(ctx, v, PDF_NAME_Filter, PDF_NAME_Adobe_PPKLite);
+	pdf_dict_put(ctx, v, PDF_NAME_SubFilter, PDF_NAME_adbe_pkcs7_detached);
 
 	/* Record details within the document structure so that contents
 	 * and byte_range can be updated with their correct values at

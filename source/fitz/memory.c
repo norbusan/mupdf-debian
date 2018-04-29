@@ -1,6 +1,7 @@
 #include "mupdf/fitz.h"
 #include "fitz-imp.h"
 
+#include <limits.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -283,7 +284,7 @@ int fz_lock_taken[FZ_LOCK_DEBUG_CONTEXT_MAX][FZ_LOCK_MAX] = { { 0 } };
  * when threads are involved. */
 static int ms_clock(void)
 {
-#if defined(_WIN32) || defined(_WIN64)
+#ifdef _WIN32
 	return (int)GetTickCount();
 #else
 	struct timeval tp;
@@ -354,7 +355,12 @@ static int find_context(fz_context *ctx)
 void
 fz_assert_lock_held(fz_context *ctx, int lock)
 {
-	int idx = find_context(ctx);
+	int idx;
+
+	if (ctx->locks.lock != fz_lock_default)
+		return;
+
+	idx = find_context(ctx);
 	if (idx < 0)
 		return;
 
@@ -365,7 +371,12 @@ fz_assert_lock_held(fz_context *ctx, int lock)
 void
 fz_assert_lock_not_held(fz_context *ctx, int lock)
 {
-	int idx = find_context(ctx);
+	int idx;
+
+	if (ctx->locks.lock != fz_lock_default)
+		return;
+
+	idx = find_context(ctx);
 	if (idx < 0)
 		return;
 
@@ -375,8 +386,12 @@ fz_assert_lock_not_held(fz_context *ctx, int lock)
 
 void fz_lock_debug_lock(fz_context *ctx, int lock)
 {
-	int i;
-	int idx = find_context(ctx);
+	int i, idx;
+
+	if (ctx->locks.lock != fz_lock_default)
+		return;
+
+	idx = find_context(ctx);
 	if (idx < 0)
 		return;
 
@@ -393,13 +408,18 @@ void fz_lock_debug_lock(fz_context *ctx, int lock)
 	}
 	fz_locks_debug[idx][lock] = 1;
 #ifdef FITZ_DEBUG_LOCKING_TIMES
-	fz_lock_taken[idx][lock] = clock();
+	fz_lock_taken[idx][lock] = ms_clock();
 #endif
 }
 
 void fz_lock_debug_unlock(fz_context *ctx, int lock)
 {
-	int idx = find_context(ctx);
+	int idx;
+
+	if (ctx->locks.lock != fz_lock_default)
+		return;
+
+	idx = find_context(ctx);
 	if (idx < 0)
 		return;
 
@@ -409,7 +429,7 @@ void fz_lock_debug_unlock(fz_context *ctx, int lock)
 	}
 	fz_locks_debug[idx][lock] = 0;
 #ifdef FITZ_DEBUG_LOCKING_TIMES
-	fz_lock_time[idx][lock] += clock() - fz_lock_taken[idx][lock];
+	fz_lock_time[idx][lock] += ms_clock() - fz_lock_taken[idx][lock];
 #endif
 }
 

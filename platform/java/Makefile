@@ -27,10 +27,10 @@ default: $(MUPDF_JAVA) libmupdf.jar
 
 MUPDF_CORE := ../../build/java/libmupdf.a ../../build/java/libmupdfthird.a
 ifeq "$(OS)" "Linux"
-$(MUPDF_CORE) :
+$(MUPDF_CORE) : .FORCE
 	$(MAKE) -C ../.. OUT=build/java XCFLAGS=-fPIC FREETYPE_DIR=/foo ZLIB_DIR=/foo libs
 else
-$(MUPDF_CORE) :
+$(MUPDF_CORE) : .FORCE
 	$(MAKE) -C ../.. OUT=build/java XCFLAGS=-fPIC libs
 endif
 
@@ -65,10 +65,10 @@ $(MUPDF_JAVA) : mupdf_native.o $(MUPDF_CORE)
 	$(CC) -shared -o $(MUPDF_JAVA) $^ $(JAVA_LIBS)
 
 run: $(MUPDF_JAVA) $(EXAMPLE_JAVA_OBJECTS)
-	LD_LIBRARY_PATH=. java -classpath .:src example.Viewer
+	LD_LIBRARY_PATH=$$LD_LIBRARY_PATH:. java -classpath .:src example.Viewer
 
 gdb: $(MUPDF_JAVA) $(EXAMPLE_JAVA_OBJECTS)
-	LD_LIBRARY_PATH=. gdb --args java -classpath .:src example.Viewer
+	LD_LIBRARY_PATH=$$LD_LIBRARY_PATH:. gdb --args java -classpath .:src example.Viewer
 
 clean:
 	rm -f src/com/artifex/mupdf/fitz/*.class
@@ -80,3 +80,4 @@ nuke: clean
 	$(MAKE) -C ../.. OUT=build/java clean
 
 .NOTPARALLEL : # disable -j option (it breaks since javac compiles all class files in one command)
+.PHONY: .FORCE

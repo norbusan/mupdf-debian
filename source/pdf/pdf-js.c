@@ -228,7 +228,7 @@ static pdf_obj *load_color(pdf_js *js, int idx)
 			c = js_tonumber(J, -1);
 			js_pop(J, 1);
 
-			pdf_array_push_drop(ctx, color, pdf_new_real(ctx, doc, c));
+			pdf_array_push_real(ctx, color, c);
 		}
 	}
 	fz_catch(ctx)
@@ -510,7 +510,7 @@ static void declare_dom(pdf_js *js)
 	/* Create the 'app' object */
 	js_newobject(J);
 	{
-#if defined(_WIN32) || defined(_WIN64)
+#ifdef _WIN32
 		js_pushstring(J, "WIN");
 #elif defined(__APPLE__)
 		js_pushstring(J, "MAC");

@@ -1,6 +1,12 @@
 #ifndef mujs_h
 #define mujs_h
 
+#include <setjmp.h> /* required for setjmp in fz_try macro */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* noreturn is a GCC extension */
 #ifdef __GNUC__
 #define JS_NORETURN __attribute__((noreturn))
@@ -33,11 +39,13 @@ typedef void (*js_Finalize)(js_State *J, void *p);
 typedef int (*js_HasProperty)(js_State *J, void *p, const char *name);
 typedef int (*js_Put)(js_State *J, void *p, const char *name);
 typedef int (*js_Delete)(js_State *J, void *p, const char *name);
+typedef void (*js_Report)(js_State *J, const char *message);
 
 /* Basic functions */
 js_State *js_newstate(js_Alloc alloc, void *actx, int flags);
 void js_setcontext(js_State *J, void *uctx);
 void *js_getcontext(js_State *J);
+void js_setreport(js_State *J, js_Report report);
 js_Panic js_atpanic(js_State *J, js_Panic panic);
 void js_freestate(js_State *J);
 void js_gc(js_State *J, int report);
@@ -76,6 +84,8 @@ enum {
 	JS_DONTENUM = 2,
 	JS_DONTCONF = 4,
 };
+
+void js_report(js_State *J, const char *message);
 
 void js_newerror(js_State *J, const char *message);
 void js_newevalerror(js_State *J, const char *message);
@@ -145,7 +155,7 @@ void js_newstring(js_State *J, const char *v);
 void js_newcfunction(js_State *J, js_CFunction fun, const char *name, int length);
 void js_newcconstructor(js_State *J, js_CFunction fun, js_CFunction con, const char *name, int length);
 void js_newuserdata(js_State *J, const char *tag, void *data, js_Finalize finalize);
-void js_newuserdatax(js_State *J, const char *tag, void *data, js_HasProperty has, js_Put put, js_Delete delete, js_Finalize finalize);
+void js_newuserdatax(js_State *J, const char *tag, void *data, js_HasProperty has, js_Put put, js_Delete del, js_Finalize finalize);
 void js_newregexp(js_State *J, const char *pattern, int flags);
 
 void js_pushiterator(js_State *J, int idx, int own);
@@ -169,6 +179,8 @@ int js_toboolean(js_State *J, int idx);
 double js_tonumber(js_State *J, int idx);
 const char *js_tostring(js_State *J, int idx);
 void *js_touserdata(js_State *J, int idx, const char *tag);
+
+const char *js_trystring(js_State *J, int idx, const char *error);
 
 int js_tointeger(js_State *J, int idx);
 int js_toint32(js_State *J, int idx);
@@ -198,5 +210,9 @@ int js_compare(js_State *J, int *okay);
 int js_equal(js_State *J);
 int js_strictequal(js_State *J);
 int js_instanceof(js_State *J);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

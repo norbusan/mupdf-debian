@@ -502,7 +502,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="libeay32.lib"
+				AdditionalDependencies="libcrypto.lib"
 				AdditionalLibraryDirectories="..\..\thirdparty\openssl\lib"
 				GenerateDebugInformation="true"
 				TargetMachine="1"

@@ -2,6 +2,7 @@
 #include "mupdf/pdf.h"
 
 #include <float.h>
+#include <limits.h>
 #include <math.h>
 
 #include <ft2build.h>
@@ -125,6 +126,7 @@ void pdf_parse_da(fz_context *ctx, char *da, pdf_da_info *di)
 				if (!strcmp(lbuf.scratch, "Tf"))
 				{
 					di->font_size = stack[0];
+					fz_free(ctx, di->font_name);
 					di->font_name = name;
 					name = NULL;
 				}
@@ -166,12 +168,22 @@ void pdf_parse_da(fz_context *ctx, char *da, pdf_da_info *di)
 static void get_font_info(fz_context *ctx, pdf_document *doc, pdf_obj *dr, char *da, font_info *font_rec)
 {
 	pdf_font_desc *font;
+	pdf_obj *fontobj;
 
 	pdf_parse_da(ctx, da, &font_rec->da_rec);
 	if (font_rec->da_rec.font_name == NULL)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "No font name in default appearance");
 
-	font_rec->font = font = pdf_load_font(ctx, doc, dr, pdf_dict_gets(ctx, pdf_dict_get(ctx, dr, PDF_NAME_Font), font_rec->da_rec.font_name), 0);
+	fontobj = pdf_dict_gets(ctx, pdf_dict_get(ctx, dr, PDF_NAME_Font), font_rec->da_rec.font_name);
+	if (!fontobj)
+	{
+		fz_font *helv = fz_new_base14_font(ctx, "Helvetica");
+		fz_warn(ctx, "form resource dictionary is missing the default appearance font");
+		fontobj = pdf_add_simple_font(ctx, doc, helv, PDF_SIMPLE_ENCODING_LATIN);
+		pdf_dict_puts_drop(ctx, pdf_dict_get(ctx, dr, PDF_NAME_Font), font_rec->da_rec.font_name, fontobj);
+		fz_drop_font(ctx, helv);
+	}
+	font_rec->font = font = pdf_load_font(ctx, doc, dr, fontobj, 0);
 	font_rec->lineheight = 1.0f;
 	if (font && font->ascent != 0.0f && font->descent != 0.0f)
 		font_rec->lineheight = (font->ascent - font->descent) / 1000.0f;
@@ -776,13 +788,13 @@ static fz_buffer *create_text_appearance(fz_context *ctx, pdf_document *doc, con
 	return fzbuf;
 }
 
-static int get_matrix(fz_context *ctx, pdf_document *doc, pdf_xobject *form, int q, fz_matrix *mt)
+static int get_matrix(fz_context *ctx, pdf_document *doc, pdf_obj *form, int q, fz_matrix *mt)
 {
 	int found = 0;
 	pdf_lexbuf lbuf;
 	fz_stream *str;
 
-	str = pdf_open_stream(ctx, form->obj);
+	str = pdf_open_stream(ctx, form);
 
 	pdf_lexbuf_init(ctx, &lbuf, PDF_LEXBUF_SMALL);
 
@@ -828,7 +840,7 @@ static int get_matrix(fz_context *ctx, pdf_document *doc, pdf_xobject *form, int
 		if (found)
 		{
 			fz_rect bbox;
-			pdf_to_rect(ctx, pdf_dict_get(ctx, form->obj, PDF_NAME_BBox), &bbox);
+			pdf_to_rect(ctx, pdf_dict_get(ctx, form, PDF_NAME_BBox), &bbox);
 
 			switch (q)
 			{
@@ -965,18 +977,16 @@ static void copy_resources(fz_context *ctx, pdf_obj *dst, pdf_obj *src)
 	}
 }
 
-static pdf_xobject *load_or_create_form(fz_context *ctx, pdf_document *doc, pdf_obj *obj, fz_rect *rect)
+static pdf_obj *load_or_create_form(fz_context *ctx, pdf_document *doc, pdf_obj *obj, fz_rect *rect)
 {
 	pdf_obj *ap = NULL;
 	fz_matrix mat;
 	int rot;
 	pdf_obj *formobj = NULL;
-	pdf_xobject *form = NULL;
 	fz_buffer *fzbuf = NULL;
 	int create_form = 0;
 
 	fz_var(formobj);
-	fz_var(form);
 	fz_var(fzbuf);
 	fz_try(ctx)
 	{
@@ -1002,14 +1012,13 @@ static pdf_xobject *load_or_create_form(fz_context *ctx, pdf_document *doc, pdf_
 			create_form = 1;
 		}
 
-		form = pdf_load_xobject(ctx, doc, formobj);
 		if (create_form)
 		{
 			fzbuf = fz_new_buffer(ctx, 1);
-			pdf_update_xobject_contents(ctx, doc, form, fzbuf);
+			pdf_update_stream(ctx, doc, formobj, fzbuf, 0);
 		}
 
-		copy_resources(ctx, pdf_xobject_resources(ctx, form), pdf_get_inheritable(ctx, doc, obj, PDF_NAME_DR));
+		copy_resources(ctx, pdf_xobject_resources(ctx, formobj), pdf_get_inheritable(ctx, doc, obj, PDF_NAME_DR));
 	}
 	fz_always(ctx)
 	{
@@ -1017,14 +1026,13 @@ static pdf_xobject *load_or_create_form(fz_context *ctx, pdf_document *doc, pdf_
 	}
 	fz_catch(ctx)
 	{
-		pdf_drop_xobject(ctx, form);
 		fz_rethrow(ctx);
 	}
 
-	return form;
+	return pdf_keep_obj(ctx, formobj);
 }
 
-static void update_marked_content(fz_context *ctx, pdf_document *doc, pdf_xobject *form, fz_buffer *fzbuf)
+static void update_marked_content(fz_context *ctx, pdf_document *doc, pdf_obj *form, fz_buffer *fzbuf)
 {
 	pdf_token tok;
 	pdf_lexbuf lbuf;
@@ -1045,7 +1053,7 @@ static void update_marked_content(fz_context *ctx, pdf_document *doc, pdf_xobjec
 		int first = 1;
 
 		newbuf = fz_new_buffer(ctx, 0);
-		str_outer = pdf_open_stream(ctx, form->obj);
+		str_outer = pdf_open_stream(ctx, form);
 		len = fz_buffer_storage(ctx, fzbuf, &buf);
 		str_inner = fz_open_memory(ctx, buf, len);
 
@@ -1136,8 +1144,8 @@ static float get_border_width(fz_context *ctx, pdf_obj *obj)
 void pdf_update_text_appearance(fz_context *ctx, pdf_document *doc, pdf_obj *obj, char *eventValue)
 {
 	text_widget_info info;
-	pdf_xobject *form = NULL;
 	fz_buffer *fzbuf = NULL;
+	pdf_obj *form = NULL;
 	fz_matrix tm;
 	fz_rect rect, form_bbox;
 	int has_tm;
@@ -1146,8 +1154,8 @@ void pdf_update_text_appearance(fz_context *ctx, pdf_document *doc, pdf_obj *obj
 	memset(&info, 0, sizeof(info));
 
 	fz_var(info);
-	fz_var(form);
 	fz_var(fzbuf);
+	fz_var(form);
 	fz_var(text);
 	fz_try(ctx)
 	{
@@ -1167,8 +1175,8 @@ void pdf_update_text_appearance(fz_context *ctx, pdf_document *doc, pdf_obj *obj
 	}
 	fz_always(ctx)
 	{
+		pdf_drop_obj(ctx, form);
 		fz_free(ctx, text);
-		pdf_drop_xobject(ctx, form);
 		fz_drop_buffer(ctx, fzbuf);
 		font_info_fin(ctx, &info.font_rec);
 	}
@@ -1181,7 +1189,7 @@ void pdf_update_text_appearance(fz_context *ctx, pdf_document *doc, pdf_obj *obj
 void pdf_update_listbox_appearance(fz_context *ctx, pdf_document *doc, pdf_obj *obj)
 {
 	text_widget_info info;
-	pdf_xobject *form = NULL;
+	pdf_obj *form = NULL;
 	fz_buffer *fzbuf = NULL;
 	fz_matrix tm;
 	fz_rect clip_rect;
@@ -1365,7 +1373,7 @@ void pdf_update_listbox_appearance(fz_context *ctx, pdf_document *doc, pdf_obj *
 		fz_free(ctx, opts);
 		fz_free(ctx, vals);
 		fz_free(ctx, sel_indices);
-		pdf_drop_xobject(ctx, form);
+		pdf_drop_obj(ctx, form);
 		fz_drop_buffer(ctx, fzbuf);
 		font_info_fin(ctx, &info.font_rec);
 	}
@@ -1378,7 +1386,7 @@ void pdf_update_listbox_appearance(fz_context *ctx, pdf_document *doc, pdf_obj *
 void pdf_update_combobox_appearance(fz_context *ctx, pdf_document *doc, pdf_obj *obj)
 {
 	text_widget_info info;
-	pdf_xobject *form = NULL;
+	pdf_obj *form = NULL;
 	fz_buffer *fzbuf = NULL;
 	fz_matrix tm;
 	fz_rect rect, form_bbox;
@@ -1415,7 +1423,7 @@ void pdf_update_combobox_appearance(fz_context *ctx, pdf_document *doc, pdf_obj 
 	}
 	fz_always(ctx)
 	{
-		pdf_drop_xobject(ctx, form);
+		pdf_drop_obj(ctx, form);
 		fz_drop_buffer(ctx, fzbuf);
 		font_info_fin(ctx, &info.font_rec);
 	}
@@ -1428,7 +1436,7 @@ void pdf_update_combobox_appearance(fz_context *ctx, pdf_document *doc, pdf_obj 
 void pdf_update_pushbutton_appearance(fz_context *ctx, pdf_document *doc, pdf_obj *obj)
 {
 	fz_rect rect = fz_empty_rect;
-	pdf_xobject *form = NULL;
+	pdf_obj *form = NULL;
 	fz_buffer *fzbuf = NULL;
 	pdf_obj *tobj = NULL;
 	font_info font_rec;
@@ -1521,7 +1529,7 @@ void pdf_update_pushbutton_appearance(fz_context *ctx, pdf_document *doc, pdf_ob
 	{
 		font_info_fin(ctx, &font_rec);
 		fz_drop_buffer(ctx, fzbuf);
-		pdf_drop_xobject(ctx, form);
+		pdf_drop_obj(ctx, form);
 	}
 	fz_catch(ctx)
 	{
@@ -1529,7 +1537,7 @@ void pdf_update_pushbutton_appearance(fz_context *ctx, pdf_document *doc, pdf_ob
 	}
 }
 
-void pdf_update_text_markup_appearance(fz_context *ctx, pdf_document *doc, pdf_annot *annot, fz_annot_type type)
+void pdf_update_text_markup_appearance(fz_context *ctx, pdf_document *doc, pdf_annot *annot, enum pdf_annot_type type)
 {
 	float color[3];
 	float alpha;
@@ -1583,7 +1591,6 @@ void pdf_set_annot_appearance(fz_context *ctx, pdf_document *doc, pdf_annot *ann
 {
 	pdf_obj *obj = annot->obj;
 	fz_device *dev = NULL;
-	pdf_xobject *xobj = NULL;
 	fz_matrix page_ctm, inv_page_ctm;
 
 	pdf_obj *resources;
@@ -1638,14 +1645,8 @@ void pdf_set_annot_appearance(fz_context *ctx, pdf_document *doc, pdf_annot *ann
 		fz_rethrow(ctx);
 
 	/* Mark the appearance as changed - required for partial update */
-	xobj = pdf_load_xobject(ctx, doc, ap_obj);
-	if (xobj)
-	{
-		xobj->iteration++;
-		pdf_drop_xobject(ctx, xobj);
-	}
-
-	pdf_dirty_annot(ctx, annot);
+	annot->has_new_ap = 1;
+	annot->needs_new_ap = 0;
 }
 
 static fz_point *
@@ -2146,7 +2147,7 @@ void pdf_update_text_annot_appearance(fz_context *ctx, pdf_document *doc, pdf_an
 
 		/* Drop the cached xobject from the annotation structure to
 		 * force a redraw on next pdf_update_page call */
-		pdf_drop_xobject(ctx, annot->ap);
+		pdf_drop_obj(ctx, annot->ap);
 		annot->ap = NULL;
 	}
 	fz_always(ctx)
@@ -2170,7 +2171,6 @@ void pdf_update_free_text_annot_appearance(fz_context *ctx, pdf_document *doc, p
 	fz_device *dev = NULL;
 	font_info font_rec;
 	fz_text *text = NULL;
-	fz_colorspace *cs = NULL;
 	fz_matrix page_ctm;
 
 	pdf_page_transform(ctx, annot->page, NULL, &page_ctm);
@@ -2184,11 +2184,11 @@ void pdf_update_free_text_annot_appearance(fz_context *ctx, pdf_document *doc, p
 	fz_var(dlist);
 	fz_var(dev);
 	fz_var(text);
-	fz_var(cs);
 	fz_try(ctx)
 	{
 		char *contents = pdf_to_str_buf(ctx, pdf_dict_get(ctx, obj, PDF_NAME_Contents));
 		char *da = pdf_to_str_buf(ctx, pdf_dict_get(ctx, obj, PDF_NAME_DA));
+		fz_colorspace *cs;
 		fz_point pos;
 		fz_rect rect;
 
@@ -2223,7 +2223,6 @@ void pdf_update_free_text_annot_appearance(fz_context *ctx, pdf_document *doc, p
 		fz_drop_display_list(ctx, dlist);
 		font_info_fin(ctx, &font_rec);
 		fz_drop_text(ctx, text);
-		fz_drop_colorspace(ctx, cs);
 	}
 	fz_catch(ctx)
 	{
@@ -2359,7 +2358,6 @@ void pdf_set_signature_appearance(fz_context *ctx, pdf_document *doc, pdf_annot 
 	fz_device *dev = NULL;
 	font_info font_rec;
 	fz_text *text = NULL;
-	fz_colorspace *cs = NULL;
 	fz_path *path = NULL;
 	fz_buffer *fzbuf = NULL;
 	fz_matrix page_ctm;
@@ -2375,7 +2373,6 @@ void pdf_set_signature_appearance(fz_context *ctx, pdf_document *doc, pdf_annot 
 	fz_var(dlist);
 	fz_var(dev);
 	fz_var(text);
-	fz_var(cs);
 	fz_var(fzbuf);
 	fz_try(ctx)
 	{
@@ -2384,6 +2381,7 @@ void pdf_set_signature_appearance(fz_context *ctx, pdf_document *doc, pdf_annot 
 		fz_rect logo_bounds;
 		fz_matrix logo_tm;
 		fz_rect rect;
+		fz_colorspace *cs = fz_device_rgb(ctx); /* Borrowed reference */
 
 		pdf_to_rect(ctx, pdf_dict_get(ctx, annot->obj, PDF_NAME_Rect), &annot_rect);
 		rect = annot_rect;
@@ -2396,7 +2394,6 @@ void pdf_set_signature_appearance(fz_context *ctx, pdf_document *doc, pdf_annot 
 		fz_bound_path(ctx, path, NULL, &fz_identity, &logo_bounds);
 		center_rect_within_rect(&logo_bounds, &rect, &logo_tm);
 		fz_concat(&logo_tm, &logo_tm, &page_ctm);
-		cs = fz_device_rgb(ctx); /* Borrowed reference */
 		fz_fill_path(ctx, dev, path, 0, &logo_tm, cs, logo_color, 1.0f, NULL);
 
 		get_font_info(ctx, doc, dr, da, &font_rec);
@@ -2434,7 +2431,7 @@ void pdf_set_signature_appearance(fz_context *ctx, pdf_document *doc, pdf_annot 
 
 		/* Drop the cached xobject from the annotation structure to
 		 * force a redraw on next pdf_update_page call */
-		pdf_drop_xobject(ctx, annot->ap);
+		pdf_drop_obj(ctx, annot->ap);
 		annot->ap = NULL;
 
 		insert_signature_appearance_layers(ctx, doc, annot);
@@ -2454,14 +2451,15 @@ void pdf_set_signature_appearance(fz_context *ctx, pdf_document *doc, pdf_annot 
 	}
 }
 
-void pdf_update_appearance(fz_context *ctx, pdf_document *doc, pdf_annot *annot)
+void pdf_update_appearance(fz_context *ctx, pdf_annot *annot)
 {
+	pdf_document *doc = annot->page->doc;
 	pdf_obj *obj = annot->obj;
 	pdf_obj *ap = pdf_dict_get(ctx, obj, PDF_NAME_AP);
 
-	if (!ap || !pdf_dict_get(ctx, ap, PDF_NAME_N) || pdf_obj_is_dirty(ctx, obj))
+	if (!ap || !pdf_dict_get(ctx, ap, PDF_NAME_N) || pdf_obj_is_dirty(ctx, obj) || annot->needs_new_ap)
 	{
-		fz_annot_type type = pdf_annot_type(ctx, annot);
+		enum pdf_annot_type type = pdf_annot_type(ctx, annot);
 		switch (type)
 		{
 		case PDF_ANNOT_WIDGET:
@@ -2511,6 +2509,7 @@ void pdf_update_appearance(fz_context *ctx, pdf_document *doc, pdf_annot *annot)
 				pdf_update_combobox_appearance(ctx, doc, obj);
 				break;
 			}
+			annot->has_new_ap = 1;
 			break;
 		case PDF_ANNOT_TEXT:
 			pdf_update_text_annot_appearance(ctx, doc, annot);
@@ -2540,8 +2539,7 @@ pdf_update_annot(fz_context *ctx, pdf_annot *annot)
 	pdf_document *doc = annot->page->doc;
 	pdf_obj *obj, *ap, *as, *n;
 
-	if (doc->update_appearance)
-		doc->update_appearance(ctx, doc, annot);
+	pdf_update_appearance(ctx, annot);
 
 	obj = annot->obj;
 
@@ -2553,12 +2551,8 @@ pdf_update_annot(fz_context *ctx, pdf_annot *annot)
 		pdf_hotspot *hp = &doc->hotspot;
 
 		n = NULL;
-
 		if (hp->num == pdf_to_num(ctx, obj) && (hp->state & HOTSPOT_POINTER_DOWN))
-		{
 			n = pdf_dict_get(ctx, ap, PDF_NAME_D); /* down state */
-		}
-
 		if (n == NULL)
 			n = pdf_dict_get(ctx, ap, PDF_NAME_N); /* normal state */
 
@@ -2566,21 +2560,13 @@ pdf_update_annot(fz_context *ctx, pdf_annot *annot)
 		if (!pdf_is_stream(ctx, n))
 			n = pdf_dict_get(ctx, n, as);
 
-		pdf_drop_xobject(ctx, annot->ap);
-		annot->ap = NULL;
-
-		if (pdf_is_stream(ctx, n))
+		if (annot->ap != n)
 		{
-			fz_try(ctx)
-			{
-				annot->ap = pdf_load_xobject(ctx, doc, n);
-				annot->ap_iteration = annot->ap->iteration;
-			}
-			fz_catch(ctx)
-			{
-				fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
-				fz_warn(ctx, "ignoring broken annotation");
-			}
+			pdf_drop_obj(ctx, annot->ap);
+			annot->ap = NULL;
+			if (pdf_is_stream(ctx, n))
+				annot->ap = pdf_keep_obj(ctx, n);
+			annot->has_new_ap = 1;
 		}
 	}
 }
