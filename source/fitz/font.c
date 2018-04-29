@@ -48,7 +48,6 @@ fz_new_font(fz_context *ctx, const char *name, int use_glyph_bbox, int glyph_cou
 	font->flags.ft_substitute = 0;
 	font->flags.fake_bold = 0;
 	font->flags.fake_italic = 0;
-	font->flags.force_hinting = 0;
 	font->flags.has_opentype = 0;
 
 	font->t3matrix = fz_identity;
@@ -524,6 +523,7 @@ fz_new_font_from_buffer(fz_context *ctx, const char *name, fz_buffer *buffer, in
 	fz_font *font;
 	int fterr;
 	FT_ULong tag, size, i, n;
+	char namebuf[sizeof(font->name)];
 
 	fz_keep_freetype(ctx);
 
@@ -537,7 +537,27 @@ fz_new_font_from_buffer(fz_context *ctx, const char *name, fz_buffer *buffer, in
 	}
 
 	if (!name)
-		name = face->family_name;
+	{
+		if (!face->family_name)
+		{
+			name = face->style_name;
+		}
+		else if (!face->style_name)
+		{
+			name = face->family_name;
+		}
+		else if (strstr(face->style_name, face->family_name) == face->style_name)
+		{
+			name = face->style_name;
+		}
+		else
+		{
+			fz_strlcpy(namebuf, face->family_name, sizeof(namebuf));
+			fz_strlcat(namebuf, " ", sizeof(namebuf));
+			fz_strlcat(namebuf, face->style_name, sizeof(namebuf));
+			name = namebuf;
+		}
+	}
 
 	font = fz_new_font(ctx, name, use_glyph_bbox, face->num_glyphs);
 	font->ft_face = face;
@@ -614,19 +634,55 @@ fz_new_font_from_file(fz_context *ctx, const char *name, const char *path, int i
 	return font;
 }
 
+fz_font *
+fz_new_base14_font(fz_context *ctx, const char *name)
+{
+	const unsigned char *data;
+	int size;
+	data = fz_lookup_base14_font(ctx, name, &size);
+	if (!data)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find builtin font with name '%s'", name);
+	return fz_new_font_from_memory(ctx, name, data, size, 0, 0);
+}
+
+fz_font *
+fz_new_cjk_font(fz_context *ctx, int ordering, int serif, int wmode)
+{
+	const unsigned char *data;
+	int size, index;
+	data = fz_lookup_cjk_font(ctx, ordering, serif, wmode, &size, &index);
+	if (!data)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find builtin CJK font");
+	return fz_new_font_from_memory(ctx, NULL, data, size, index, 0);
+}
+
+fz_font *
+fz_new_builtin_font(fz_context *ctx, const char *name, int is_bold, int is_italic)
+{
+	const unsigned char *data;
+	int size;
+	data = fz_lookup_builtin_font(ctx, name, is_bold, is_italic, &size);
+	if (!data)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find builtin font with name '%s'", name);
+	return fz_new_font_from_memory(ctx, NULL, data, size, 0, 0);
+}
+
 static fz_matrix *
 fz_adjust_ft_glyph_width(fz_context *ctx, fz_font *font, int gid, fz_matrix *trm)
 {
 	/* Fudge the font matrix to stretch the glyph if we've substituted the font. */
 	if (font->flags.ft_stretch && font->width_table /* && font->wmode == 0 */)
 	{
-		FT_Fixed adv;
+		FT_Error fterr;
+		FT_Fixed adv = 0;
 		float subw;
 		float realw;
 
 		fz_lock(ctx, FZ_LOCK_FREETYPE);
-		FT_Get_Advance(font->ft_face, gid, FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_IGNORE_TRANSFORM, &adv);
+		fterr = FT_Get_Advance(font->ft_face, gid, FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_IGNORE_TRANSFORM, &adv);
 		fz_unlock(ctx, FZ_LOCK_FREETYPE);
+		if (fterr)
+			fz_warn(ctx, "freetype getting character advance: %s", ft_error_string(fterr));
 
 		realw = adv * 1000.0f / ((FT_Face)font->ft_face)->units_per_EM;
 		if (gid < font->width_count)
@@ -714,21 +770,6 @@ do_ft_render_glyph(fz_context *ctx, fz_font *font, int gid, const fz_matrix *trm
 			fz_warn(ctx, "freetype setting character size: %s", ft_error_string(fterr));
 		FT_Set_Transform(face, &m, &v);
 		fterr = FT_Load_Glyph(face, gid, FT_LOAD_NO_BITMAP | FT_LOAD_TARGET_MONO);
-		if (fterr) {
-			fz_warn(ctx, "freetype load hinted glyph (gid %d): %s", gid, ft_error_string(fterr));
-			goto retry_unhinted;
-		}
-	}
-	else if (font->flags.force_hinting)
-	{
-		/*
-		Enable hinting, but keep the huge char size so that
-		it is hinted for a character. This will in effect nullify
-		the effect of grid fitting. This form of hinting should
-		only be used for DynaLab and similar tricky TrueType fonts,
-		so that we get the correct outline shape.
-		*/
-		fterr = FT_Load_Glyph(face, gid, FT_LOAD_NO_BITMAP);
 		if (fterr) {
 			fz_warn(ctx, "freetype load hinted glyph (gid %d): %s", gid, ft_error_string(fterr));
 			goto retry_unhinted;
@@ -980,7 +1021,6 @@ fz_bound_ft_glyph(fz_context *ctx, fz_font *font, int gid)
 	FT_BBox cbox;
 	FT_Matrix m;
 	FT_Vector v;
-	int ft_flags;
 	fz_rect *bounds = &font->bbox_table[gid];
 
 	// TODO: refactor loading into fz_load_ft_glyph
@@ -1003,15 +1043,6 @@ fz_bound_ft_glyph(fz_context *ctx, fz_font *font, int gid)
 	v.x = local_trm.e * 65536;
 	v.y = local_trm.f * 65536;
 
-	if (font->flags.force_hinting)
-	{
-		ft_flags = FT_LOAD_NO_BITMAP;
-	}
-	else
-	{
-		ft_flags = FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING;
-	}
-
 	fz_lock(ctx, FZ_LOCK_FREETYPE);
 	/* Set the char size to scale=face->units_per_EM to effectively give
 	 * us unscaled results. This avoids quantisation. We then apply the
@@ -1021,7 +1052,7 @@ fz_bound_ft_glyph(fz_context *ctx, fz_font *font, int gid)
 		fz_warn(ctx, "freetype setting character size: %s", ft_error_string(fterr));
 	FT_Set_Transform(face, &m, &v);
 
-	fterr = FT_Load_Glyph(face, gid, ft_flags);
+	fterr = FT_Load_Glyph(face, gid, FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING);
 	if (fterr)
 	{
 		fz_warn(ctx, "freetype load glyph (gid %d): %s", gid, ft_error_string(fterr));
@@ -1125,7 +1156,6 @@ fz_outline_ft_glyph(fz_context *ctx, fz_font *font, int gid, const fz_matrix *tr
 	FT_Face face = font->ft_face;
 	int fterr;
 	fz_matrix local_trm = *trm;
-	int ft_flags;
 
 	const int scale = face->units_per_EM;
 	const float recip = 1.0f / scale;
@@ -1138,19 +1168,7 @@ fz_outline_ft_glyph(fz_context *ctx, fz_font *font, int gid, const fz_matrix *tr
 
 	fz_lock(ctx, FZ_LOCK_FREETYPE);
 
-	if (font->flags.force_hinting)
-	{
-		ft_flags = FT_LOAD_NO_BITMAP | FT_LOAD_IGNORE_TRANSFORM;
-		fterr = FT_Set_Char_Size(face, scale, scale, 72, 72);
-		if (fterr)
-			fz_warn(ctx, "freetype setting character size: %s", ft_error_string(fterr));
-	}
-	else
-	{
-		ft_flags = FT_LOAD_NO_SCALE | FT_LOAD_IGNORE_TRANSFORM;
-	}
-
-	fterr = FT_Load_Glyph(face, gid, ft_flags);
+	fterr = FT_Load_Glyph(face, gid, FT_LOAD_NO_SCALE | FT_LOAD_IGNORE_TRANSFORM);
 	if (fterr)
 	{
 		fz_warn(ctx, "freetype load glyph (gid %d): %s", gid, ft_error_string(fterr));
@@ -1492,7 +1510,8 @@ int fz_glyph_cacheable(fz_context *ctx, fz_font *font, int gid)
 static float
 fz_advance_ft_glyph(fz_context *ctx, fz_font *font, int gid, int wmode)
 {
-	FT_Fixed adv;
+	FT_Error fterr;
+	FT_Fixed adv = 0;
 	int mask;
 
 	/* Substitute font widths. */
@@ -1507,8 +1526,10 @@ fz_advance_ft_glyph(fz_context *ctx, fz_font *font, int gid, int wmode)
 	if (wmode)
 		mask |= FT_LOAD_VERTICAL_LAYOUT;
 	fz_lock(ctx, FZ_LOCK_FREETYPE);
-	FT_Get_Advance(font->ft_face, gid, mask, &adv);
+	fterr = FT_Get_Advance(font->ft_face, gid, mask, &adv);
 	fz_unlock(ctx, FZ_LOCK_FREETYPE);
+	if (fterr)
+		fz_warn(ctx, "freetype getting character advance: %s", ft_error_string(fterr));
 	return (float) adv / ((FT_Face)font->ft_face)->units_per_EM;
 }
 

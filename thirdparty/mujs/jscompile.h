@@ -29,7 +29,6 @@ enum js_OpCode
 	OP_FALSE,
 
 	OP_THIS,
-	OP_GLOBAL,
 	OP_CURRENT,	/* currently executing function object */
 
 	OP_INITLOCAL,	/* <value> -K- */
@@ -122,6 +121,7 @@ struct js_Function
 	const char *name;
 	int script;
 	int lightweight;
+	int strict;
 	int arguments;
 	int numparams;
 

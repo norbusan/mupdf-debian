@@ -5,6 +5,7 @@
 #include "mupdf/fitz/context.h"
 #include "mupdf/fitz/buffer.h"
 #include "mupdf/fitz/string-util.h"
+#include "mupdf/fitz/stream.h"
 
 /*
 	Generic output streams - generalise between outputting to a file,
@@ -62,6 +63,13 @@ typedef void (fz_output_close_fn)(fz_context *ctx, void *state);
 */
 typedef void (fz_output_drop_fn)(fz_context *ctx, void *state);
 
+/*
+	fz_stream_from_output_fn: A function type for use when implementing
+	fz_outputs. The supplied function of this type is called
+	when the fz_stream_from_output is called.
+*/
+typedef fz_stream *(fz_stream_from_output_fn)(fz_context *ctx, void *state);
+
 
 struct fz_output_s
 {
@@ -71,6 +79,8 @@ struct fz_output_s
 	fz_output_tell_fn *tell;
 	fz_output_close_fn *close;
 	fz_output_drop_fn *drop;
+	fz_stream_from_output_fn *as_stream;
+	char *bp, *wp, *ep;
 };
 
 /*
@@ -84,7 +94,7 @@ struct fz_output_s
 	close: Cleanup function to destroy state when output closed.
 	May permissibly be null.
 */
-fz_output *fz_new_output(fz_context *ctx, void *state, fz_output_write_fn *write, fz_output_close_fn *close, fz_output_drop_fn *drop);
+fz_output *fz_new_output(fz_context *ctx, int bufsiz, void *state, fz_output_write_fn *write, fz_output_close_fn *close, fz_output_drop_fn *drop);
 
 /*
 	fz_new_output_with_path: Open an output stream that writes to a
@@ -162,6 +172,11 @@ void fz_seek_output(fz_context *ctx, fz_output *out, int64_t off, int whence);
 int64_t fz_tell_output(fz_context *ctx, fz_output *out);
 
 /*
+	fz_flush_output: Flush unwritten data.
+*/
+void fz_flush_output(fz_context *ctx, fz_output *out);
+
+/*
 	fz_close_output: Flush pending output and close an output stream.
 */
 void fz_close_output(fz_context *, fz_output *);
@@ -170,6 +185,16 @@ void fz_close_output(fz_context *, fz_output *);
 	fz_drop_output: Free an output stream. Don't forget to close it first!
 */
 void fz_drop_output(fz_context *, fz_output *);
+
+/*
+	fz_stream_from_output: obtain the fz_output in the form of a fz_stream
+
+	This allows data to be read back from some forms of fz_output object.
+	When finished reading, the fz_stream should be released by calling
+	fz_drop_stream. Until the fz_stream is dropped, no further operations
+	should be performed on the fz_output object.
+*/
+fz_stream *fz_stream_from_output(fz_context *, fz_output *);
 
 /*
 	fz_write_data: Write data to output.
@@ -269,5 +294,24 @@ char *fz_tempfilename(fz_context *ctx, const char *base, const char *hint);
 	fz_save_buffer: Save contents of a buffer to file.
 */
 void fz_save_buffer(fz_context *ctx, fz_buffer *buf, const char *filename);
+
+/*
+	Compression and other filtering outputs.
+
+	These outputs write encoded data to another output. Create a filter
+	output with the destination, write to the filter, then drop it when
+	you're done. These can also be chained together, for example to write
+	ASCII Hex encoded, Deflate compressed, and RC4 encrypted data to a
+	buffer output.
+
+	Output streams don't use reference counting, so make sure to drop all
+	of the filters in the reverse order of creation so that data is flushed
+	properly.
+*/
+fz_output *fz_new_asciihex_output(fz_context *ctx, fz_output *chain);
+fz_output *fz_new_ascii85_output(fz_context *ctx, fz_output *chain);
+fz_output *fz_new_rle_output(fz_context *ctx, fz_output *chain);
+fz_output *fz_new_arc4_output(fz_context *ctx, fz_output *chain, unsigned char *key, size_t keylen);
+fz_output *fz_new_deflate_output(fz_context *ctx, fz_output *chain, int effort, int raw);
 
 #endif

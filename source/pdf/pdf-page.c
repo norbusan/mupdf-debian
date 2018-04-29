@@ -174,7 +174,13 @@ pdf_lookup_page_loc_imp(fz_context *ctx, pdf_document *doc, pdf_obj *node, int *
 				}
 			}
 		}
-		while (hit == NULL);
+		/* If i < len && hit != NULL the desired page was found in the
+		Kids array, done. If i < len && hit == NULL the found page tree
+		node contains a Kids array that contains the desired page, loop
+		back to top to extract it. When i == len the Kids array has been
+		exhausted without finding the desired page, give up.
+		*/
+		while (hit == NULL && i < len);
 	}
 	fz_always(ctx)
 	{
@@ -1138,7 +1144,7 @@ pdf_delete_page(fz_context *ctx, pdf_document *doc, int at)
 	while (parent)
 	{
 		int count = pdf_to_int(ctx, pdf_dict_get(ctx, parent, PDF_NAME_Count));
-		pdf_dict_put_drop(ctx, parent, PDF_NAME_Count, pdf_new_int(ctx, doc, count - 1));
+		pdf_dict_put_int(ctx, parent, PDF_NAME_Count, count - 1);
 		parent = pdf_dict_get(ctx, parent, PDF_NAME_Parent);
 	}
 }
@@ -1165,16 +1171,16 @@ pdf_add_page(fz_context *ctx, pdf_document *doc, const fz_rect *mediabox, int ro
 	pdf_obj *page_obj = pdf_new_dict(ctx, doc, 5);
 	fz_try(ctx)
 	{
-		pdf_dict_put_drop(ctx, page_obj, PDF_NAME_Type, PDF_NAME_Page);
-		pdf_dict_put_drop(ctx, page_obj, PDF_NAME_MediaBox, pdf_new_rect(ctx, doc, mediabox));
-		pdf_dict_put_drop(ctx, page_obj, PDF_NAME_Rotate, pdf_new_int(ctx, doc, rotate));
+		pdf_dict_put(ctx, page_obj, PDF_NAME_Type, PDF_NAME_Page);
+		pdf_dict_put_rect(ctx, page_obj, PDF_NAME_MediaBox, mediabox);
+		pdf_dict_put_int(ctx, page_obj, PDF_NAME_Rotate, rotate);
 
 		if (pdf_is_indirect(ctx, resources))
 			pdf_dict_put(ctx, page_obj, PDF_NAME_Resources, resources);
 		else if (pdf_is_dict(ctx, resources))
 			pdf_dict_put_drop(ctx, page_obj, PDF_NAME_Resources, pdf_add_object(ctx, doc, resources));
 		else
-			pdf_dict_put_drop(ctx, page_obj, PDF_NAME_Resources, pdf_new_dict(ctx, doc, 1));
+			pdf_dict_put_dict(ctx, page_obj, PDF_NAME_Resources, 1);
 
 		if (contents)
 			pdf_dict_put_drop(ctx, page_obj, PDF_NAME_Contents, pdf_add_stream(ctx, doc, contents, NULL, 0));
@@ -1233,7 +1239,7 @@ pdf_insert_page(fz_context *ctx, pdf_document *doc, int at, pdf_obj *page_ref)
 	while (parent)
 	{
 		count = pdf_to_int(ctx, pdf_dict_get(ctx, parent, PDF_NAME_Count));
-		pdf_dict_put_drop(ctx, parent, PDF_NAME_Count, pdf_new_int(ctx, doc, count + 1));
+		pdf_dict_put_int(ctx, parent, PDF_NAME_Count, count + 1);
 		parent = pdf_dict_get(ctx, parent, PDF_NAME_Parent);
 	}
 }

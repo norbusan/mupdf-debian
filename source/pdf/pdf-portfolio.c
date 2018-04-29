@@ -152,7 +152,7 @@ void pdf_reorder_portfolio_schema(fz_context *ctx, pdf_document *doc, int entry,
 
 	/* Rewrite the underlying orderings */
 	for (p = doc->portfolio, entry = 0; p; p = p->next, entry++)
-		pdf_dict_put_drop(ctx, p->val, PDF_NAME_O, pdf_new_int(ctx, doc, entry));
+		pdf_dict_put_int(ctx, p->val, PDF_NAME_O, entry);
 }
 
 void pdf_rename_portfolio_schema(fz_context *ctx, pdf_document *doc, int entry, const char *name, int name_len)
@@ -325,8 +325,8 @@ void pdf_add_portfolio_schema(fz_context *ctx, pdf_document *doc, int entry, con
 		while (p);
 
 		sc = pdf_new_dict(ctx, doc, 4);
-		pdf_dict_put_drop(ctx, sc, PDF_NAME_E, pdf_new_bool(ctx, doc, !!info->editable));
-		pdf_dict_put_drop(ctx, sc, PDF_NAME_V, pdf_new_bool(ctx, doc, !!info->visible));
+		pdf_dict_put_bool(ctx, sc, PDF_NAME_E, !!info->editable);
+		pdf_dict_put_bool(ctx, sc, PDF_NAME_V, !!info->visible);
 		pdf_dict_put_drop(ctx, sc, PDF_NAME_N, info->name);
 		pdf_dict_put(ctx, sc, PDF_NAME_Subtype, PDF_NAME_S);
 
@@ -346,7 +346,7 @@ void pdf_add_portfolio_schema(fz_context *ctx, pdf_document *doc, int entry, con
 		/* Renumber the schema entries */
 		for (num = 0, p = doc->portfolio; p; num++, p = p->next)
 		{
-			pdf_dict_put_drop(ctx, p->val, PDF_NAME_O, pdf_new_int(ctx, doc, num));
+			pdf_dict_put_int(ctx, p->val, PDF_NAME_O, num);
 			p->sort = num;
 		}
 	}
@@ -583,21 +583,21 @@ pdf_name_tree_insert(fz_context *ctx, pdf_document *doc, pdf_obj *tree, pdf_obj 
 	if (!data.found)
 	{
 		/* Completely empty name tree! */
-		pdf_dict_put_drop(ctx, tree, PDF_NAME_Names, pdf_new_array(ctx, doc, 2));
-		pdf_dict_put_drop(ctx, tree, PDF_NAME_Limits, pdf_new_array(ctx, doc, 2));
+		pdf_dict_put_array(ctx, tree, PDF_NAME_Names, 2);
+		pdf_dict_put_array(ctx, tree, PDF_NAME_Limits, 2);
 		data.found = tree;
 		data.found_index = 0;
 	}
 
 	names = pdf_dict_get(ctx, data.found, PDF_NAME_Names);
 	if (names == NULL)
-		pdf_dict_put_drop(ctx, data.found, PDF_NAME_Names, (names = pdf_new_array(ctx, doc, 2)));
+		names = pdf_dict_put_array(ctx, data.found, PDF_NAME_Names, 2);
 	pdf_array_insert(ctx, names, key, 2*data.found_index);
 	pdf_array_insert(ctx, names, val, 2*data.found_index+1);
 
 	limits = pdf_dict_get(ctx, data.found, PDF_NAME_Limits);
 	if (limits == NULL)
-		pdf_dict_put_drop(ctx, data.found, PDF_NAME_Limits, (limits = pdf_new_array(ctx, doc, 2)));
+		limits = pdf_dict_put_array(ctx, data.found, PDF_NAME_Limits, 2);
 	limit0 = pdf_array_get(ctx, limits, 0);
 	limit1 = pdf_array_get(ctx, limits, 1);
 	if (!pdf_is_string(ctx, limit0) || data.found_index == 0)
@@ -631,18 +631,18 @@ int pdf_add_portfolio_entry(fz_context *ctx, pdf_document *doc,
 	fz_try(ctx)
 	{
 		val = pdf_new_dict(ctx, doc, 6);
-		pdf_dict_put_drop(ctx, val, PDF_NAME_CI, pdf_new_dict(ctx, doc, 4));
-		pdf_dict_put_drop(ctx, val, PDF_NAME_EF, (ef = pdf_new_dict(ctx, doc, 4)));
-		pdf_dict_put_drop(ctx, val, PDF_NAME_F, pdf_new_string(ctx, doc, filename, filename_len));
-		pdf_dict_put_drop(ctx, val, PDF_NAME_UF, pdf_new_string(ctx, doc, unifile, unifile_len));
-		pdf_dict_put_drop(ctx, val, PDF_NAME_Desc, pdf_new_string(ctx, doc, desc, desc_len));
-		pdf_dict_put_drop(ctx, val, PDF_NAME_Type, PDF_NAME_Filespec);
+		pdf_dict_put_dict(ctx, val, PDF_NAME_CI, 4);
+		ef = pdf_dict_put_dict(ctx, val, PDF_NAME_EF, 4);
+		pdf_dict_put_string(ctx, val, PDF_NAME_F, filename, filename_len);
+		pdf_dict_put_string(ctx, val, PDF_NAME_UF, unifile, unifile_len);
+		pdf_dict_put_string(ctx, val, PDF_NAME_Desc, desc, desc_len);
+		pdf_dict_put(ctx, val, PDF_NAME_Type, PDF_NAME_Filespec);
 		pdf_dict_put_drop(ctx, ef, PDF_NAME_F, (f = pdf_add_stream(ctx, doc, buf, NULL, 0)));
 		len = fz_buffer_storage(ctx, buf, NULL);
-		pdf_dict_put_drop(ctx, f, PDF_NAME_DL, pdf_new_int(ctx, doc, len));
-		pdf_dict_put_drop(ctx, f, PDF_NAME_Length, pdf_new_int(ctx, doc, len));
-		pdf_dict_put_drop(ctx, f, PDF_NAME_Params, (params = pdf_new_dict(ctx, doc, 4)));
-		pdf_dict_put_drop(ctx, params, PDF_NAME_Size, pdf_new_int(ctx, doc, len));
+		pdf_dict_put_int(ctx, f, PDF_NAME_DL, len);
+		pdf_dict_put_int(ctx, f, PDF_NAME_Length, len);
+		params = pdf_dict_put_dict(ctx, f, PDF_NAME_Params, 4);
+		pdf_dict_put_int(ctx, params, PDF_NAME_Size, len);
 
 		s = pdf_dict_getl(ctx, pdf_trailer(ctx, doc), PDF_NAME_Root, PDF_NAME_Collection, NULL);
 		if (s == NULL)

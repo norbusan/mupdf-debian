@@ -960,6 +960,12 @@ static void quit(void)
 	doquit = 1;
 }
 
+static void clear_search(void)
+{
+	search_hit_page = -1;
+	search_hit_count = 0;
+}
+
 static void do_app(void)
 {
 	if (ui.key == KEY_F4 && ui.mod == GLUT_ACTIVE_ALT)
@@ -972,6 +978,7 @@ static void do_app(void)
 	{
 		switch (ui.key)
 		{
+		case KEY_ESCAPE: clear_search(); break;
 		case KEY_F1: showhelp = !showhelp; break;
 		case 'o': toggle_outline(); break;
 		case 'L': showlinks = !showlinks; break;
@@ -1032,12 +1039,14 @@ static void do_app(void)
 			break;
 
 		case '/':
+			clear_search();
 			search_dir = 1;
 			showsearch = 1;
 			search_input.p = search_input.text;
 			search_input.q = search_input.end;
 			break;
 		case '?':
+			clear_search();
 			search_dir = -1;
 			showsearch = 1;
 			search_input.p = search_input.text;
@@ -1478,6 +1487,14 @@ static void on_special(int key, int x, int y)
 	}
 }
 
+static void on_wheel(int wheel, int direction, int x, int y)
+{
+	ui.scroll_x = wheel == 1 ? direction : 0;
+	ui.scroll_y = wheel == 0 ? direction : 0;
+	run_main_loop();
+	ui.scroll_x = ui.scroll_y = 0;
+}
+
 static void on_mouse(int button, int action, int x, int y)
 {
 	ui.x = x;
@@ -1487,6 +1504,10 @@ static void on_mouse(int button, int action, int x, int y)
 	case GLUT_LEFT_BUTTON: ui.down = (action == GLUT_DOWN); break;
 	case GLUT_MIDDLE_BUTTON: ui.middle = (action == GLUT_DOWN); break;
 	case GLUT_RIGHT_BUTTON: ui.right = (action == GLUT_DOWN); break;
+	case 3: if (action == GLUT_DOWN) on_wheel(0, 1, x, y); break;
+	case 4: if (action == GLUT_DOWN) on_wheel(0, -1, x, y); break;
+	case 5: if (action == GLUT_DOWN) on_wheel(1, 1, x, y); break;
+	case 6: if (action == GLUT_DOWN) on_wheel(1, -1, x, y); break;
 	}
 	run_main_loop();
 }
@@ -1496,14 +1517,6 @@ static void on_motion(int x, int y)
 	ui.x = x;
 	ui.y = y;
 	glutPostRedisplay();
-}
-
-static void on_wheel(int wheel, int direction, int x, int y)
-{
-	ui.scroll_x = wheel == 1 ? direction * 10 : 0;
-	ui.scroll_y = wheel == 0 ? direction * 10 : 0;
-	run_main_loop();
-	ui.scroll_x = ui.scroll_y = 0;
 }
 
 static void on_reshape(int w, int h)
@@ -1661,6 +1674,8 @@ int main(int argc, char **argv)
 
 	/* Init GLUT */
 
+	glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_GLUTMAINLOOP_RETURNS);
+
 	glutInitErrorFunc(on_error);
 	glutInitWarningFunc(on_warning);
 	glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE);
@@ -1706,6 +1721,7 @@ int main(int argc, char **argv)
 		fz_debug_store(ctx);
 #endif
 
+	fz_drop_stext_page(ctx, text);
 	fz_drop_link(ctx, links);
 	fz_drop_page(ctx, page);
 	fz_drop_outline(ctx, outline);

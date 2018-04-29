@@ -2,6 +2,10 @@
 #define MUPDF_PDF_OBJECT_H
 
 typedef struct pdf_document_s pdf_document;
+typedef struct pdf_crypt_s pdf_crypt;
+
+/* Defined in PDF 1.7 according to Acrobat limit. */
+#define PDF_MAX_OBJECT_NUMBER 8388607
 
 /*
  * Dynamic objects.
@@ -126,6 +130,26 @@ void pdf_dict_del(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
 void pdf_dict_dels(fz_context *ctx, pdf_obj *dict, const char *key);
 void pdf_sort_dict(fz_context *ctx, pdf_obj *dict);
 
+void pdf_dict_put_bool(fz_context *ctx, pdf_obj *dict, pdf_obj *key, int x);
+void pdf_dict_put_int(fz_context *ctx, pdf_obj *dict, pdf_obj *key, int64_t x);
+void pdf_dict_put_real(fz_context *ctx, pdf_obj *dict, pdf_obj *key, double x);
+void pdf_dict_put_name(fz_context *ctx, pdf_obj *dict, pdf_obj *key, const char *x);
+void pdf_dict_put_string(fz_context *ctx, pdf_obj *dict, pdf_obj *key, const char *x, size_t n);
+void pdf_dict_put_text_string(fz_context *ctx, pdf_obj *dict, pdf_obj *key, const char *x);
+void pdf_dict_put_rect(fz_context *ctx, pdf_obj *dict, pdf_obj *key, const fz_rect *x);
+void pdf_dict_put_matrix(fz_context *ctx, pdf_obj *dict, pdf_obj *key, const fz_matrix *x);
+pdf_obj *pdf_dict_put_array(fz_context *ctx, pdf_obj *dict, pdf_obj *key, int initial);
+pdf_obj *pdf_dict_put_dict(fz_context *ctx, pdf_obj *dict, pdf_obj *key, int initial);
+
+void pdf_array_push_bool(fz_context *ctx, pdf_obj *array, int x);
+void pdf_array_push_int(fz_context *ctx, pdf_obj *array, int64_t x);
+void pdf_array_push_real(fz_context *ctx, pdf_obj *array, double x);
+void pdf_array_push_name(fz_context *ctx, pdf_obj *array, const char *x);
+void pdf_array_push_string(fz_context *ctx, pdf_obj *array, const char *x, size_t n);
+void pdf_array_push_text_string(fz_context *ctx, pdf_obj *array, const char *x);
+pdf_obj *pdf_array_push_array(fz_context *ctx, pdf_obj *array, int initial);
+pdf_obj *pdf_array_push_dict(fz_context *ctx, pdf_obj *array, int initial);
+
 /*
 	Recurse through the object structure setting the node's parent_num to num.
 	parent_num is used when a subobject is to be changed during a document edit.
@@ -139,7 +163,11 @@ int pdf_obj_refs(fz_context *ctx, pdf_obj *ref);
 int pdf_obj_parent_num(fz_context *ctx, pdf_obj *obj);
 
 int pdf_sprint_obj(fz_context *ctx, char *s, int n, pdf_obj *obj, int tight);
+int pdf_sprint_encrypted_obj(fz_context *ctx, char *s, int n, pdf_obj *obj, int tight, pdf_crypt *crypt, int num, int gen);
 int pdf_print_obj(fz_context *ctx, fz_output *out, pdf_obj *obj, int tight);
+int pdf_print_encrypted_obj(fz_context *ctx, fz_output *out, pdf_obj *obj, int tight, pdf_crypt *crypt, int num, int gen);
+
+void pdf_debug_obj(fz_context *ctx, pdf_obj *obj);
 
 char *pdf_to_utf8(fz_context *ctx, pdf_obj *src);
 char *pdf_load_stream_as_utf8(fz_context *ctx, pdf_obj *src);

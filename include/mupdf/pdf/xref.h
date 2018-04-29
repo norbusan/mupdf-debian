@@ -29,6 +29,9 @@ pdf_obj *pdf_add_object(fz_context *ctx, pdf_document *doc, pdf_obj *obj);
 pdf_obj *pdf_add_object_drop(fz_context *ctx, pdf_document *doc, pdf_obj *obj);
 pdf_obj *pdf_add_stream(fz_context *ctx, pdf_document *doc, fz_buffer *buf, pdf_obj *obj, int compressed);
 
+pdf_obj *pdf_add_new_dict(fz_context *ctx, pdf_document *doc, int initial);
+pdf_obj *pdf_add_new_array(fz_context *ctx, pdf_document *doc, int initial);
+
 /*
  * xref and object / stream api
  */
@@ -58,7 +61,7 @@ struct pdf_xref_subsec_s
 {
 	pdf_xref_subsec *next;
 	int len;
-	int64_t start;
+	int start;
 	pdf_xref_entry *table;
 };
 
@@ -105,7 +108,7 @@ pdf_xref_entry *pdf_get_xref_entry(fz_context *ctx, pdf_document *doc, int i);
 void pdf_replace_xref(fz_context *ctx, pdf_document *doc, pdf_xref_entry *entries, int n);
 void pdf_xref_ensure_incremental_object(fz_context *ctx, pdf_document *doc, int num);
 int pdf_xref_is_incremental(fz_context *ctx, pdf_document *doc, int num);
-void pdf_xref_store_unsaved_signature(fz_context *ctx, pdf_document *doc, pdf_obj *field, pdf_signer *signer);
+void pdf_xref_store_unsaved_signature(fz_context *ctx, pdf_document *doc, pdf_obj *field, pdf_pkcs7_signer *signer);
 int pdf_xref_obj_is_unsaved_signature(pdf_document *doc, pdf_obj *obj);
 
 void pdf_repair_xref(fz_context *ctx, pdf_document *doc);

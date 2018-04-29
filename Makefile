@@ -53,6 +53,7 @@ ALL_DIR += $(OUT)/source/gprf
 ALL_DIR += $(OUT)/source/tools
 ALL_DIR += $(OUT)/source/helpers
 ALL_DIR += $(OUT)/source/helpers/mu-threads
+ALL_DIR += $(OUT)/source/helpers/pkcs7
 ALL_DIR += $(OUT)/platform/x11
 ALL_DIR += $(OUT)/platform/x11/curl
 ALL_DIR += $(OUT)/platform/gl
@@ -72,7 +73,7 @@ QUIET_WINDRES = @ echo ' ' ' ' WINDRES $@ ;
 endif
 
 CC_CMD = $(QUIET_CC) $(CC) $(CFLAGS) -o $@ -c $<
-CXX_CMD = $(QUIET_CXX) $(CXX) $(CFLAGS) -o $@ -c $<
+CXX_CMD = $(QUIET_CXX) $(CXX) $(filter-out -Wdeclaration-after-statement,$(CFLAGS)) -o $@ -c $<
 AR_CMD = $(QUIET_AR) $(AR) cr $@ $^
 LINK_CMD = $(QUIET_LINK) $(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 MKDIR_CMD = $(QUIET_MKDIR) mkdir -p $@
@@ -93,8 +94,11 @@ $(OUT)/%.a :
 $(OUT)/%.exe: $(OUT)/%.o | $(ALL_DIR)
 	$(LINK_CMD)
 
-$(OUT)/source/helpers/%.o : source/helpers/%.c | $(ALL_DIR)
+$(OUT)/source/helpers/mu-threads/%.o : source/helpers/mu-threads/%.c | $(ALL_DIR)
 	$(CC_CMD) $(THREADING_CFLAGS)
+
+$(OUT)/source/helpers/pkcs7/%.o : source/helpers/pkcs7/%.c | $(ALL_DIR)
+	$(CC_CMD)
 
 $(OUT)/source/tools/%.o : source/tools/%.c | $(ALL_DIR)
 	$(CC_CMD) $(THREADING_CFLAGS)
@@ -127,6 +131,7 @@ $(OUT)/%.o : %.cpp | $(ALL_DIR)
 FITZ_HDR := include/mupdf/fitz.h $(wildcard include/mupdf/fitz/*.h)
 PDF_HDR := include/mupdf/pdf.h $(wildcard include/mupdf/pdf/*.h)
 THREAD_HDR := include/mupdf/helpers/mu-threads.h
+PKCS7_HDR := $(sort $(wildcard include/mupdf/helpers/pkcs7-*.h))
 
 FITZ_SRC := $(sort $(wildcard source/fitz/*.c))
 PDF_SRC := $(sort $(wildcard source/pdf/*.c))
@@ -136,6 +141,10 @@ CBZ_SRC := $(sort $(wildcard source/cbz/*.c))
 HTML_SRC := $(sort $(wildcard source/html/*.c))
 GPRF_SRC := $(sort $(wildcard source/gprf/*.c))
 THREAD_SRC := $(sort $(wildcard source/helpers/mu-threads/*.c))
+PKCS7_SRC := $(wildcard source/helpers/pkcs7/pkcs7-check.c)
+ifeq "$(HAVE_LIBCRYPTO)" "yes"
+PKCS7_SRC += $(wildcard source/helpers/pkcs7/pkcs7-openssl.c)
+endif
 
 FITZ_SRC_HDR := $(wildcard source/fitz/*.h)
 PDF_SRC_HDR := $(wildcard source/pdf/*.h) source/pdf/pdf-name-table.h
@@ -152,6 +161,8 @@ CBZ_OBJ := $(CBZ_SRC:%.c=$(OUT)/%.o)
 HTML_OBJ := $(HTML_SRC:%.c=$(OUT)/%.o)
 GPRF_OBJ := $(GPRF_SRC:%.c=$(OUT)/%.o)
 THREAD_OBJ := $(THREAD_SRC:%.c=$(OUT)/%.o)
+PKCS7_OBJ := $(PKCS7_SRC:%.c=$(OUT)/%.o)
+SIGNATURE_OBJ := $(OUT)/platform/x11/pdfapp.o $(OUT)/source/tools/pdfsign.o
 
 $(FITZ_OBJ) : $(FITZ_HDR) $(FITZ_SRC_HDR)
 $(PDF_OBJ) : $(FITZ_HDR) $(PDF_HDR) $(PDF_SRC_HDR)
@@ -163,6 +174,8 @@ $(CBZ_OBJ) : $(FITZ_HDR) $(CBZ_HDR) $(CBZ_SRC_HDR)
 $(HTML_OBJ) : $(FITZ_HDR) $(HTML_HDR) $(HTML_SRC_HDR)
 $(GPRF_OBJ) : $(FITZ_HDR) $(GPRF_HDR) $(GPRF_SRC_HDR)
 $(THREAD_OBJ) : $(THREAD_HDR)
+$(PKCS7_OBJ) : $(FITZ_HDR) $(PDF_HDR) $(PKCS7_HDR)
+$(SIGNATURE_OBJ) : $(PKCS7_HDR)
 
 # --- Generated PDF name tables ---
 
@@ -315,6 +328,7 @@ generate: $(JAVASCRIPT_GEN)
 MUPDF_LIB = $(OUT)/libmupdf.a
 THIRD_LIB = $(OUT)/libmupdfthird.a
 THREAD_LIB = $(OUT)/libmuthreads.a
+PKCS7_LIB = $(OUT)/libmupkcs7.a
 
 MUPDF_OBJ := \
 	$(FITZ_OBJ) \
@@ -341,11 +355,10 @@ THIRD_OBJ := \
 	$(ZLIB_OBJ) \
 	$(LCMS2_OBJ)
 
-THREAD_OBJ := $(THREAD_OBJ)
-
 $(MUPDF_LIB) : $(MUPDF_OBJ)
 $(THIRD_LIB) : $(THIRD_OBJ)
 $(THREAD_LIB) : $(THREAD_OBJ)
+$(PKCS7_LIB) : $(PKCS7_OBJ)
 
 INSTALL_LIBS := $(MUPDF_LIB) $(THIRD_LIB)
 
@@ -356,7 +369,7 @@ MUTOOL_SRC := source/tools/mutool.c source/tools/muconvert.c source/tools/mudraw
 MUTOOL_SRC += $(sort $(wildcard source/tools/pdf*.c))
 MUTOOL_OBJ := $(MUTOOL_SRC:%.c=$(OUT)/%.o)
 $(MUTOOL_OBJ) : $(FITZ_HDR) $(PDF_HDR)
-$(MUTOOL_EXE) : $(MUTOOL_OBJ) $(MUPDF_LIB) $(THIRD_LIB) $(THREAD_LIB)
+$(MUTOOL_EXE) : $(MUTOOL_OBJ) $(MUPDF_LIB) $(THIRD_LIB) $(THREAD_LIB) $(PKCS7_LIB)
 	$(LINK_CMD) $(THREADING_LIBS)
 
 MURASTER_EXE := $(OUT)/muraster
@@ -374,21 +387,21 @@ $(MJSGEN_EXE) : $(MJSGEN_OBJ) $(MUPDF_LIB) $(THIRD_LIB)
 MUJSTEST_EXE := $(OUT)/mujstest
 MUJSTEST_OBJ := $(addprefix $(OUT)/platform/x11/, jstest_main.o pdfapp.o)
 $(MUJSTEST_OBJ) : $(FITZ_HDR) $(PDF_HDR)
-$(MUJSTEST_EXE) : $(MUJSTEST_OBJ) $(MUPDF_LIB) $(THIRD_LIB)
+$(MUJSTEST_EXE) : $(MUJSTEST_OBJ) $(MUPDF_LIB) $(THIRD_LIB) $(PKCS7_LIB)
 	$(LINK_CMD)
 
 ifeq "$(HAVE_X11)" "yes"
 MUVIEW_X11_EXE := $(OUT)/mupdf-x11
 MUVIEW_X11_OBJ := $(addprefix $(OUT)/platform/x11/, x11_main.o x11_image.o pdfapp.o)
 $(MUVIEW_X11_OBJ) : $(FITZ_HDR) $(PDF_HDR)
-$(MUVIEW_X11_EXE) : $(MUVIEW_X11_OBJ) $(MUPDF_LIB) $(THIRD_LIB)
+$(MUVIEW_X11_EXE) : $(MUVIEW_X11_OBJ) $(MUPDF_LIB) $(THIRD_LIB) $(PKCS7_LIB)
 	$(LINK_CMD) $(X11_LIBS)
 
 ifeq "$(HAVE_CURL)" "yes"
 MUVIEW_X11_CURL_EXE := $(OUT)/mupdf-x11-curl
 MUVIEW_X11_CURL_OBJ := $(addprefix $(OUT)/platform/x11/curl/, x11_main.o x11_image.o pdfapp.o curl_stream.o)
 $(MUVIEW_X11_CURL_OBJ) : $(FITZ_HDR) $(PDF_HDR)
-$(MUVIEW_X11_CURL_EXE) : $(MUVIEW_X11_CURL_OBJ) $(MUPDF_LIB) $(THIRD_LIB) $(CURL_LIB)
+$(MUVIEW_X11_CURL_EXE) : $(MUVIEW_X11_CURL_OBJ) $(MUPDF_LIB) $(THIRD_LIB) $(CURL_LIB) $(PKCS7_LIB)
 	$(LINK_CMD) $(X11_LIBS) $(CURL_LIBS) $(SYS_CURL_DEPS)
 endif
 endif
@@ -405,7 +418,7 @@ ifeq "$(HAVE_WIN32)" "yes"
 MUVIEW_WIN32_EXE := $(OUT)/mupdf
 MUVIEW_WIN32_OBJ := $(addprefix $(OUT)/platform/x11/, win_main.o pdfapp.o win_res.o)
 $(MUVIEW_WIN32_OBJ) : $(FITZ_HDR) $(PDF_HDR)
-$(MUVIEW_WIN32_EXE) : $(MUVIEW_WIN32_OBJ) $(MUPDF_LIB) $(THIRD_LIB)
+$(MUVIEW_WIN32_EXE) : $(MUVIEW_WIN32_OBJ) $(MUPDF_LIB) $(THIRD_LIB) $(PKCS7_LIB)
 	$(LINK_CMD) $(WIN32_LIBS)
 endif
 
@@ -413,10 +426,10 @@ MUVIEW_EXE := $(MUVIEW_X11_EXE) $(MUVIEW_WIN32_EXE) $(MUVIEW_GLUT_EXE)
 MUVIEW_CURL_EXE := $(MUVIEW_X11_CURL_EXE) $(MUVIEW_WIN32_CURL_EXE)
 
 INSTALL_APPS := $(MUTOOL_EXE) $(MUVIEW_EXE)
-INSTALL_APPS += $(MURASTER_EXE)
-INSTALL_APPS += $(MUVIEW_CURL_EXE)
-INSTALL_APPS += $(MUJSTEST_EXE)
-INSTALL_APPS += $(MJSGEN_EXE)
+EXTRA_APPS += $(MURASTER_EXE)
+EXTRA_APPS += $(MUVIEW_CURL_EXE)
+EXTRA_APPS += $(MUJSTEST_EXE)
+EXTRA_APPS += $(MJSGEN_EXE)
 
 # --- Examples ---
 
@@ -454,9 +467,11 @@ mandir ?= $(prefix)/share/man
 docdir ?= $(prefix)/share/doc/mupdf
 
 third: $(THIRD_LIB)
-extra: $(CURL_LIB) $(GLUT_LIB)
+extra-libs: $(CURL_LIB) $(GLUT_LIB)
 libs: $(INSTALL_LIBS)
 apps: $(INSTALL_APPS)
+extra-apps: $(EXTRA_APPS)
+extra: extra-libs extra-apps
 
 install: libs apps
 	install -d $(DESTDIR)$(incdir)/mupdf
@@ -513,6 +528,12 @@ release:
 	$(MAKE) build=release
 debug:
 	$(MAKE) build=debug
+sanitize:
+	$(MAKE) build=sanitize
+tofu:
+	$(MAKE) OUT=build/tofu CMAP_GEN= FONT_GEN_DROID= FONT_GEN_NOTO= FONT_GEN_HAN= FONT_GEN_SIL= XCFLAGS="-DNOCJK -DTOFU"
+tofumax:
+	$(MAKE) OUT=build/tofumax CMAP_GEN= FONT_GEN= XCFLAGS="-DNOCJK -DTOFU -DTOFU_BASE14"
 
 android: generate
 	ndk-build -j8 \

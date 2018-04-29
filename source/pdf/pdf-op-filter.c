@@ -360,7 +360,7 @@ done_SC:
 		if (gstate->pending.stroke.miterlimit != gstate->sent.stroke.miterlimit)
 		{
 			if (p->chain->op_M)
-				p->chain->op_M(ctx, p->chain, gstate->pending.stroke.linewidth);
+				p->chain->op_M(ctx, p->chain, gstate->pending.stroke.miterlimit);
 		}
 		gstate->sent.stroke = gstate->pending.stroke;
 	}
@@ -558,12 +558,12 @@ filter_show_string(fz_context *ctx, pdf_filter_processor *p, unsigned char *buf,
 		send_adjustment(ctx, p, skip);
 }
 
-static pdf_obj *
+static float
 adjustment(fz_context *ctx, pdf_filter_processor *p, fz_point skip)
 {
 	float skip_dist = p->tos.fontdesc->wmode == 1 ? -skip.y : -skip.x;
 	skip_dist = skip_dist / p->gstate->pending.text.size;
-	return pdf_new_real(ctx, p->doc, skip_dist * 1000);
+	return skip_dist * 1000;
 }
 
 
@@ -613,10 +613,10 @@ filter_show_text(fz_context *ctx, pdf_filter_processor *p, pdf_obj *text)
 						/* We have *some* chars to send at least */
 						if (skip.x != 0 || skip.y != 0)
 						{
-							pdf_array_push_drop(ctx, new_arr, adjustment(ctx, p, skip));
+							pdf_array_push_real(ctx, new_arr, adjustment(ctx, p, skip));
 							skip.x = skip.y = 0;
 						}
-						pdf_array_push_drop(ctx, new_arr, pdf_new_string(ctx, doc, (char *)buf+start, j-start));
+						pdf_array_push_string(ctx, new_arr, (char *)buf+start, j-start);
 					}
 					if (j != len)
 					{
@@ -643,7 +643,7 @@ filter_show_text(fz_context *ctx, pdf_filter_processor *p, pdf_obj *text)
 			}
 		}
 		if (skip.x != 0 || skip.y != 0)
-			pdf_array_push_drop(ctx, new_arr, adjustment(ctx, p, skip));
+			pdf_array_push_real(ctx, new_arr, adjustment(ctx, p, skip));
 		if (p->chain->op_TJ && pdf_array_len(ctx, new_arr))
 			p->chain->op_TJ(ctx, p->chain, new_arr);
 	}
@@ -785,7 +785,7 @@ pdf_filter_gs_ca(fz_context *ctx, pdf_processor *proc, float alpha)
 }
 
 static void
-pdf_filter_gs_SMask(fz_context *ctx, pdf_processor *proc, pdf_xobject *smask, pdf_obj *page_resources, float *bc, int luminosity)
+pdf_filter_gs_SMask(fz_context *ctx, pdf_processor *proc, pdf_obj *smask, pdf_obj *page_resources, float *bc, int luminosity)
 {
 	pdf_filter_processor *p = (pdf_filter_processor*)proc;
 	if (p->chain->op_gs_SMask)
@@ -1400,7 +1400,7 @@ pdf_filter_Do_image(fz_context *ctx, pdf_processor *proc, const char *name, fz_i
 }
 
 static void
-pdf_filter_Do_form(fz_context *ctx, pdf_processor *proc, const char *name, pdf_xobject *xobj, pdf_obj *page_resources)
+pdf_filter_Do_form(fz_context *ctx, pdf_processor *proc, const char *name, pdf_obj *xobj, pdf_obj *page_resources)
 {
 	pdf_filter_processor *p = (pdf_filter_processor*)proc;
 	filter_flush(ctx, p, FLUSH_ALL);

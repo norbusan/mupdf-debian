@@ -2,11 +2,25 @@
 <html>
 <head>
 <link href="style.css" rel="stylesheet">
-<title>MuJS: reference manual</title>
+<title>MuJS Reference</title>
 </head>
+
 <body>
 
-<h1>MuJS Reference Manual</h1>
+<header>
+<h1>MuJS Reference</h1>
+</header>
+
+<nav>
+<a href="introduction.html">Introduction</a>
+<a href="reference.html">Reference</a>
+<a href="examples.html">Examples</a>
+<a href="license.html">License</a>
+<a href="http://git.ghostscript.com/?p=mujs.git;a=summary">Source</a>
+<a href="https://bugs.ghostscript.com/">Bugs</a>
+</nav>
+
+<article>
 
 <h2>Introduction</h2>
 
@@ -47,7 +61,12 @@ Custom properties on userdata objects can be implemented using getter and setter
 Numbers are represented using double precision floating point values.
 
 <p>
-Strings in the C interface are zero-terminated byte arrays in UTF-8 encoding.
+Strings in the C interface are zero-terminated byte arrays in CESU-8 encoding.
+CESU-8 is a variant of UTF-8 which encodes supplementary unicode characters as
+surrogate pairs. This maintains compatibility with the UTF-16 nature of
+JavaScript, but requires attention when passing strings using supplementary
+unicode characters to and from the MuJS library. It also means that you cannot
+have any JavaScript strings with a zero character value in MuJS.
 
 <h3>Environments</h3>
 
@@ -88,7 +107,8 @@ Collection is automatically triggered when enough allocations have accumulated.
 You can also force a collection pass from C.
 
 <p>
-TODO: garbage collection of userdata.
+Userdata objects have an associated C finalizer function that is called when
+the correspending object is freed.
 
 <h3>The Stack</h3>
 
@@ -165,6 +185,18 @@ js_Panic js_atpanic(js_State *J, js_Panic panic);
 
 Set a new panic function, and return the old one.
 
+<h3>Report</h3>
+
+<pre>
+typedef void (*js_Report)(js_State *J, const char *message);
+
+void js_setreport(js_State *J, js_Report report);
+</pre>
+
+<p>
+Set a callback function for reporting various warnings
+and garbage collection statistics.
+
 <h3>Garbage collection</h3>
 
 <pre>
@@ -173,7 +205,8 @@ js_gc(js_State *J, int report);
 
 <p>
 Force a garbage collection pass.
-If the report argument is non-zero, print a summary of garbage collection statistics to stdout.
+If the report argument is non-zero, send a summary of garbage collection statistics to
+the report callback function.
 
 <h3>Loading and compiling scripts</h3>
 
@@ -249,7 +282,7 @@ int js_dostring(js_State *J, const char *source);
 
 <p>
 Compile and execute the script in the zero-terminated string in source argument.
-If any errors occur, print the error message to stderr and return 1.
+If any errors occur, call the report callback function and return 1.
 Return 0 on success.
 
 <pre>
@@ -258,7 +291,7 @@ int js_dofile(js_State *J, const char *filename);
 
 <p>
 Load the script from the file with the given filename, then compile and execute it.
-If any errors occur, print the error message to stderr and return 1.
+If any errors occur, call the report callback function and return 1.
 Return 0 on success.
 
 <h3>Protected environments</h3>
@@ -573,13 +606,38 @@ Push the currently executing function object.
 <h3>Userdata</h3>
 
 <pre>
-void js_newuserdata(js_State *J, const char *tag, void *data);
+typedef void (*js_Finalize)(js_State *J, void *data);
+typedef int (*js_HasProperty)(js_State *J, void *data, const char *name);
+typedef int (*js_Put)(js_State *J, void *data, const char *name);
+typedef int (*js_Delete)(js_State *J, void *data, const char *name);
+
+void js_newuserdata(js_State *J, const char *tag, void *data,
+	js_Finalize finalize);
+
+void js_newuserdatax(js_State *J, const char *tag, void *data,
+	js_HasProperty has,
+	js_Put put,
+	js_Delete delete,
+	js_Finalize finalize);
 </pre>
 
 <p>
 Pop an object from the top of the stack to use as the internal prototype property for the new object.
 Push a new userdata object wrapping a pointer to C memory.
 The userdata object is tagged using a string, to represent the type of the C memory.
+
+<p>
+The finalize callback, if it is not NULL, will be called when the object is
+freed by the garbage collector.
+
+<p>
+The extended function also has callback functions for overriding property accesses.
+If these are set, they can be used to override accesses to certain properties.
+Any property accesses that are not overridden will be handled as usual in the runtime.
+The "HasProperty" callback should push a value and return true if it wants to
+handle the property, otherwise it should do nothing and return false. "Put"
+should pop a value and return true if it wants to handle the property.
+Likewise, "Delete" should return true if it wants to handle the property.
 
 <pre>
 int js_isuserdata(js_State *J, int idx, const char *tag);
@@ -627,4 +685,12 @@ void js_unref(js_State *J, const char *ref);
 <p>
 WIP: Delete the reference from the registry.
 
+</article>
+
+<footer>
+<a href="http://artifex.com"><img src="artifex-logo.png" align="right"></a>
+Copyright &copy; 2013-2017 Artifex Software Inc.
+</footer>
+
 </body>
+</html>

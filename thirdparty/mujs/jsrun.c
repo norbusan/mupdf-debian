@@ -161,14 +161,6 @@ void js_pushglobal(js_State *J)
 	js_pushobject(J, J->G);
 }
 
-void js_pushundefinedthis(js_State *J)
-{
-	if (J->strict)
-		js_pushundefined(J);
-	else
-		js_pushobject(J, J->G);
-}
-
 void js_currentfunction(js_State *J)
 {
 	CHECKSTACK(1);
@@ -442,12 +434,20 @@ void js_rot(js_State *J, int n)
 
 /* Property access that takes care of attributes and getters/setters */
 
-int js_isarrayindex(js_State *J, const char *str, int *idx)
+int js_isarrayindex(js_State *J, const char *p, int *idx)
 {
-	char buf[32];
-	*idx = jsV_numbertointeger(jsV_stringtonumber(J, str));
-	sprintf(buf, "%u", *idx);
-	return !strcmp(buf, str);
+	int n = 0;
+	while (*p) {
+		int c = *p++;
+		if (c >= '0' && c <= '9') {
+			if (n > INT_MAX / 10 - 1)
+				return 0;
+			n = n * 10 + (c - '0');
+		} else {
+			return 0;
+		}
+	}
+	return *idx = n, 1;
 }
 
 static void js_pushrune(js_State *J, Rune rune)
@@ -479,8 +479,10 @@ static int jsR_hasproperty(js_State *J, js_Object *obj, const char *name)
 			return 1;
 		}
 		if (js_isarrayindex(J, name, &k)) {
-			js_pushrune(J, js_runeat(J, obj->u.s.string, k));
-			return 1;
+			if (k >= 0 && k < obj->u.s.length) {
+				js_pushrune(J, js_runeat(J, obj->u.s.string, k));
+				return 1;
+			}
 		}
 	}
 
@@ -558,7 +560,7 @@ static void jsR_setproperty(js_State *J, js_Object *obj, const char *name)
 		if (!strcmp(name, "length"))
 			goto readonly;
 		if (js_isarrayindex(J, name, &k))
-			if (js_runeat(J, obj->u.s.string, k))
+			if (k >= 0 && k < obj->u.s.length)
 				goto readonly;
 	}
 
@@ -580,13 +582,19 @@ static void jsR_setproperty(js_State *J, js_Object *obj, const char *name)
 
 	/* First try to find a setter in prototype chain */
 	ref = jsV_getpropertyx(J, obj, name, &own);
-	if (ref && ref->setter) {
-		js_pushobject(J, ref->setter);
-		js_pushobject(J, obj);
-		js_pushvalue(J, *value);
-		js_call(J, 1);
-		js_pop(J, 1);
-		return;
+	if (ref) {
+		if (ref->setter) {
+			js_pushobject(J, ref->setter);
+			js_pushobject(J, obj);
+			js_pushvalue(J, *value);
+			js_call(J, 1);
+			js_pop(J, 1);
+			return;
+		} else {
+			if (J->strict)
+				if (ref->getter)
+					js_typeerror(J, "setting property '%s' that only has a getter", name);
+		}
 	}
 
 	/* Property not found on this object, so create one */
@@ -622,7 +630,7 @@ static void jsR_defproperty(js_State *J, js_Object *obj, const char *name,
 		if (!strcmp(name, "length"))
 			goto readonly;
 		if (js_isarrayindex(J, name, &k))
-			if (js_runeat(J, obj->u.s.string, k))
+			if (k >= 0 && k < obj->u.s.length)
 				goto readonly;
 	}
 
@@ -683,7 +691,7 @@ static int jsR_delproperty(js_State *J, js_Object *obj, const char *name)
 		if (!strcmp(name, "length"))
 			goto dontconf;
 		if (js_isarrayindex(J, name, &k))
-			if (js_runeat(J, obj->u.s.string, k))
+			if (k >= 0 && k < obj->u.s.length)
 				goto dontconf;
 	}
 
@@ -1169,6 +1177,7 @@ void *js_savetrypc(js_State *J, js_Instruction *pc)
 	J->trybuf[J->trytop].tracetop = J->tracetop;
 	J->trybuf[J->trytop].top = J->top;
 	J->trybuf[J->trytop].bot = J->bot;
+	J->trybuf[J->trytop].strict = J->strict;
 	J->trybuf[J->trytop].pc = pc;
 	return J->trybuf[J->trytop++].buf;
 }
@@ -1182,6 +1191,7 @@ void *js_savetry(js_State *J)
 	J->trybuf[J->trytop].tracetop = J->tracetop;
 	J->trybuf[J->trytop].top = J->top;
 	J->trybuf[J->trytop].bot = J->bot;
+	J->trybuf[J->trytop].strict = J->strict;
 	J->trybuf[J->trytop].pc = NULL;
 	return J->trybuf[J->trytop++].buf;
 }
@@ -1203,6 +1213,7 @@ void js_throw(js_State *J)
 		J->tracetop = J->trybuf[J->trytop].tracetop;
 		J->top = J->trybuf[J->trytop].top;
 		J->bot = J->trybuf[J->trytop].bot;
+		J->strict = J->trybuf[J->trytop].strict;
 		js_pushvalue(J, v);
 		longjmp(J->trybuf[J->trytop].buf, 1);
 	}
@@ -1273,6 +1284,7 @@ static void jsR_run(js_State *J, js_Function *F)
 	js_Instruction *pc = F->code;
 	enum js_OpCode opcode;
 	int offset;
+	int savestrict;
 
 	const char *str;
 	js_Object *obj;
@@ -1280,6 +1292,9 @@ static void jsR_run(js_State *J, js_Function *F)
 	unsigned int ux, uy;
 	int ix, iy, okay;
 	int b;
+
+	savestrict = J->strict;
+	J->strict = F->strict;
 
 	while (1) {
 		if (J->gccounter > JS_GCLIMIT) {
@@ -1313,9 +1328,20 @@ static void jsR_run(js_State *J, js_Function *F)
 		case OP_TRUE: js_pushboolean(J, 1); break;
 		case OP_FALSE: js_pushboolean(J, 0); break;
 
-		case OP_THIS: js_copy(J, 0); break;
-		case OP_GLOBAL: js_pushobject(J, J->G); break;
-		case OP_CURRENT: js_currentfunction(J); break;
+		case OP_THIS:
+			if (J->strict) {
+				js_copy(J, 0);
+			} else {
+				if (js_iscoercible(J, 0))
+					js_copy(J, 0);
+				else
+					js_pushglobal(J);
+			}
+			break;
+
+		case OP_CURRENT:
+			js_currentfunction(J);
+			break;
 
 		case OP_INITLOCAL:
 			STACK[BOT + *pc++] = STACK[--TOP];
@@ -1714,6 +1740,7 @@ static void jsR_run(js_State *J, js_Function *F)
 			break;
 
 		case OP_RETURN:
+			J->strict = savestrict;
 			return;
 
 		case OP_LINE:

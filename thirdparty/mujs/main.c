@@ -120,21 +120,28 @@ static const char *require_js =
 	"require.cache = Object.create(null);\n"
 ;
 
+static const char *stacktrace_js =
+	"Error.prototype.toString = function() {\n"
+	"if (this.stackTrace) return this.name + ': ' + this.message + this.stackTrace;\n"
+	"return this.name + ': ' + this.message;\n"
+	"};\n"
+;
+
 static int eval_print(js_State *J, const char *source)
 {
 	if (js_ploadstring(J, "[string]", source)) {
-		fprintf(stderr, "%s\n", js_tostring(J, -1));
+		fprintf(stderr, "%s\n", js_trystring(J, -1, "Error"));
 		js_pop(J, 1);
 		return 1;
 	}
-	js_pushglobal(J);
+	js_pushundefined(J);
 	if (js_pcall(J, 0)) {
-		fprintf(stderr, "%s\n", js_tostring(J, -1));
+		fprintf(stderr, "%s\n", js_trystring(J, -1, "Error"));
 		js_pop(J, 1);
 		return 1;
 	}
 	if (js_isdefined(J, -1))
-		printf("%s\n", js_tostring(J, -1));
+		printf("%s\n", js_trystring(J, -1, "can't convert to string"));
 	js_pop(J, 1);
 	return 0;
 }
@@ -174,7 +181,7 @@ main(int argc, char **argv)
 {
 	char line[256];
 	js_State *J;
-	int i;
+	int i, status = 0;
 
 	J = js_newstate(NULL, NULL, JS_STRICT);
 
@@ -200,13 +207,12 @@ main(int argc, char **argv)
 	js_setglobal(J, "quit");
 
 	js_dostring(J, require_js);
+	js_dostring(J, stacktrace_js);
 
 	if (argc > 1) {
-		for (i = 1; i < argc; ++i) {
+		for (i = 1; i < argc; ++i)
 			if (js_dofile(J, argv[i]))
-				return 1;
-			js_gc(J, 0);
-		}
+				status = 1;
 	} else {
 		if (isatty(0)) {
 			fputs(PS1, stdout);
@@ -215,18 +221,16 @@ main(int argc, char **argv)
 				fputs(PS1, stdout);
 			}
 			putchar('\n');
-			js_gc(J, 1);
 		} else {
 			char *input = read_stdin();
-			if (!input)
-				return 1;
-			if (js_dostring(J, input))
-				return 1;
-			js_gc(J, 0);
+			if (!input || !js_dostring(J, input))
+				status = 1;
+			free(input);
 		}
 	}
 
+	js_gc(J, 0);
 	js_freestate(J);
 
-	return 0;
+	return status;
 }

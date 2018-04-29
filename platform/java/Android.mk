@@ -10,6 +10,9 @@
 # The top-level Makefile will invoke ndk-build with appropriate arguments
 # if you run 'make android'.
 #
+# Use the MUPDF_EXTRA_CFLAGS, MUPDF_EXTRA_CPPFLAGS, MUPDF_EXTRA_LDFLAGS,
+# and MUPDF_EXTRA_LDLIBS variables to add more compiler flags.
+#
 # LOCAL_C_INCLUDES paths are relative to the NDK root directory.
 # LOCAL_SRC_FILES paths are relative to LOCAL_PATH.
 #
@@ -56,6 +59,10 @@ LOCAL_CFLAGS := \
 	-D_FILE_OFFSET_BITS=32 \
 	-DTOFU_NOTO -DTOFU_CJK \
 	-DAA_BITS=8 \
+	-DOPJ_STATIC -DOPJ_HAVE_INTTYPES_H -DOPJ_HAVE_STDINT_H \
+
+LOCAL_CFLAGS += \
+	$(MUPDF_EXTRA_CFLAGS)
 
 LOCAL_SRC_FILES += \
 	$(wildcard $(MUPDF_PATH)/source/fitz/*.c) \
@@ -96,16 +103,22 @@ LOCAL_CFLAGS := \
 	'-DFT_CONFIG_MODULES_H="slimftmodules.h"' \
 	'-DFT_CONFIG_OPTIONS_H="slimftoptions.h"' \
 	-DHAVE_STDINT_H \
-	-DOPJ_STATIC -DOPJ_HAVE_INTTYPES_H -DOPJ_HAVE_STDINT_H -DUSE_JPIP \
+	-DOPJ_STATIC -DOPJ_HAVE_INTTYPES_H -DOPJ_HAVE_STDINT_H \
+
+LOCAL_CFLAGS += \
+	$(MUPDF_EXTRA_CFLAGS)
 
 LOCAL_CPPFLAGS := \
 	-ffunction-sections -fdata-sections \
-	-fno-rtti -fno-exceptions -fvisibility-inlines-hidden --std=c++0x \
+	-fno-rtti -fno-exceptions -fvisibility-inlines-hidden \
 	-DHAVE_OT -DHAVE_UCDN -DHB_NO_MT \
 	-Dhb_malloc_impl=fz_hb_malloc \
 	-Dhb_calloc_impl=fz_hb_calloc \
 	-Dhb_realloc_impl=fz_hb_realloc \
 	-Dhb_free_impl=fz_hb_free \
+
+LOCAL_CPPFLAGS += \
+	$(MUPDF_EXTRA_CPPFLAGS)
 
 LOCAL_SRC_FILES += \
 	$(MUPDF_PATH)/thirdparty/freetype/src/base/ftbase.c \
@@ -247,7 +260,6 @@ LOCAL_SRC_FILES += \
 
 LOCAL_SRC_FILES += \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/bio.c \
-	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/cidx_manager.c \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/cio.c \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/dwt.c \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/event.c \
@@ -259,17 +271,13 @@ LOCAL_SRC_FILES += \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/mct.c \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/mqc.c \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/openjpeg.c \
-	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/phix_manager.c \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/pi.c \
-	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/ppix_manager.c \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/raw.c \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/t1.c \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/t2.c \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/tcd.c \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/tgt.c \
-	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/thix_manager.c \
 	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/thread.c \
-	$(MUPDF_PATH)/thirdparty/openjpeg/src/lib/openjp2/tpix_manager.c \
 
 LOCAL_SRC_FILES += \
 	$(MUPDF_PATH)/thirdparty/zlib/adler32.c \
@@ -297,11 +305,18 @@ LOCAL_C_INCLUDES := \
 LOCAL_CFLAGS := \
 	-DHAVE_ANDROID
 
+LOCAL_CFLAGS += \
+	$(MUPDF_EXTRA_CFLAGS)
+
 LOCAL_SRC_FILES := \
 	$(MUPDF_PATH)/platform/java/mupdf_native.c
 
 LOCAL_STATIC_LIBRARIES := mupdf_core mupdf_thirdparty
+
 LOCAL_LDLIBS := -ljnigraphics -llog -lm
+LOCAL_LDLIBS += $(MUDPF_EXTRA_LDLIBS)
+
 LOCAL_LDFLAGS := -Wl,--gc-sections
+LOCAL_LDFLAGS += $(MUDPF_EXTRA_LDFLAGS)
 
 include $(BUILD_SHARED_LIBRARY)

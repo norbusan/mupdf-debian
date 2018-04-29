@@ -309,12 +309,12 @@ tiff_decode_data(fz_context *ctx, struct tiff *tiff, const unsigned char *rp, un
 		rp = reversed;
 	}
 
+	fz_var(jpegtables);
 	fz_var(encstm);
 	fz_var(stm);
 
 	fz_try(ctx)
 	{
-		/* each decoder will close this */
 		encstm = fz_open_memory(ctx, rp, rlen);
 
 		/* switch on compression to create a filter */
@@ -331,7 +331,7 @@ tiff_decode_data(fz_context *ctx, struct tiff *tiff, const unsigned char *rp, un
 		{
 		case 1:
 			/* stm already open and reading uncompressed data */
-			stm = encstm;
+			stm = fz_keep_stream(ctx, encstm);
 			break;
 		case 2:
 		case 3:
@@ -385,7 +385,6 @@ tiff_decode_data(fz_context *ctx, struct tiff *tiff, const unsigned char *rp, un
 			stm = fz_open_thunder(ctx, encstm, tiff->imagewidth);
 			break;
 		default:
-			stm = encstm;
 			fz_throw(ctx, FZ_ERROR_GENERIC, "unknown TIFF compression: %d", tiff->compression);
 		}
 
@@ -393,6 +392,8 @@ tiff_decode_data(fz_context *ctx, struct tiff *tiff, const unsigned char *rp, un
 	}
 	fz_always(ctx)
 	{
+		fz_drop_stream(ctx, jpegtables);
+		fz_drop_stream(ctx, encstm);
 		fz_drop_stream(ctx, stm);
 		fz_free(ctx, reversed);
 	}
@@ -1374,6 +1375,7 @@ fz_load_tiff_subimage(fz_context *ctx, const unsigned char *buf, size_t len, int
 	fz_always(ctx)
 	{
 		/* Clean up scratch memory */
+		fz_drop_colorspace(ctx, tiff.colorspace);
 		fz_free(ctx, tiff.colormap);
 		fz_free(ctx, tiff.stripoffsets);
 		fz_free(ctx, tiff.stripbytecounts);
@@ -1420,14 +1422,18 @@ fz_load_tiff_info_subimage(fz_context *ctx, const unsigned char *buf, size_t len
 			fz_drop_colorspace(ctx, tiff.colorspace);
 			tiff.colorspace = fz_keep_colorspace(ctx, fz_device_rgb(ctx));
 		}
-		*cspacep = tiff.colorspace;
+		*cspacep = fz_keep_colorspace(ctx, tiff.colorspace);
 	}
 	fz_always(ctx)
 	{
 		/* Clean up scratch memory */
+		fz_drop_colorspace(ctx, tiff.colorspace);
 		fz_free(ctx, tiff.colormap);
 		fz_free(ctx, tiff.stripoffsets);
 		fz_free(ctx, tiff.stripbytecounts);
+		fz_free(ctx, tiff.tileoffsets);
+		fz_free(ctx, tiff.tilebytecounts);
+		fz_free(ctx, tiff.data);
 		fz_free(ctx, tiff.samples);
 		fz_free(ctx, tiff.profile);
 	}

@@ -1,4 +1,5 @@
 #include "jsi.h"
+#include "jslex.h"
 #include "jsparse.h"
 #include "jscompile.h"
 #include "jsvalue.h" /* for jsV_numbertostring */
@@ -31,7 +32,26 @@ void jsC_error(js_State *J, js_Ast *node, const char *fmt, ...)
 	js_throw(J);
 }
 
-static js_Function *newfun(js_State *J, js_Ast *name, js_Ast *params, js_Ast *body, int script)
+static const char *futurewords[] = {
+	"class", "const", "enum", "export", "extends", "import", "super",
+};
+
+static const char *strictfuturewords[] = {
+	"implements", "interface", "let", "package", "private", "protected",
+	"public", "static", "yield",
+};
+
+static void checkfutureword(JF, js_Ast *exp)
+{
+	if (jsY_findword(exp->string, futurewords, nelem(futurewords)) >= 0)
+		jsC_error(J, exp, "'%s' is a future reserved word", exp->string);
+	if (F->strict) {
+		if (jsY_findword(exp->string, strictfuturewords, nelem(strictfuturewords)) >= 0)
+			jsC_error(J, exp, "'%s' is a strict mode future reserved word", exp->string);
+	}
+}
+
+static js_Function *newfun(js_State *J, js_Ast *name, js_Ast *params, js_Ast *body, int script, int default_strict)
 {
 	js_Function *F = js_malloc(J, sizeof *F);
 	memset(F, 0, sizeof *F);
@@ -43,6 +63,7 @@ static js_Function *newfun(js_State *J, js_Ast *name, js_Ast *params, js_Ast *bo
 	F->filename = js_intern(J, J->filename);
 	F->line = name ? name->line : params ? params->line : body ? body->line : 1;
 	F->script = script;
+	F->strict = default_strict;
 	F->name = name ? name->string : "";
 
 	cfunbody(J, F, name, params, body);
@@ -118,19 +139,19 @@ static int addstring(JF, const char *value)
 static void addlocal(JF, js_Ast *ident, int reuse)
 {
 	const char *name = ident->string;
-	if (J->strict) {
+	if (F->strict) {
 		if (!strcmp(name, "arguments"))
 			jsC_error(J, ident, "redefining 'arguments' is not allowed in strict mode");
 		if (!strcmp(name, "eval"))
 			jsC_error(J, ident, "redefining 'eval' is not allowed in strict mode");
 	}
-	if (reuse || J->strict) {
+	if (reuse || F->strict) {
 		int i;
 		for (i = 0; i < F->varlen; ++i) {
 			if (!strcmp(F->vartab[i], name)) {
 				if (reuse)
 					return;
-				if (J->strict)
+				if (F->strict)
 					jsC_error(J, ident, "duplicate formal parameter '%s'", name);
 			}
 		}
@@ -186,7 +207,8 @@ static void emitstring(JF, int opcode, const char *str)
 static void emitlocal(JF, int oploc, int opvar, js_Ast *ident)
 {
 	int i;
-	if (J->strict && oploc == OP_SETLOCAL) {
+	checkfutureword(J, F, ident);
+	if (F->strict && oploc == OP_SETLOCAL) {
 		if (!strcmp(ident->string, "arguments"))
 			jsC_error(J, ident, "'arguments' is read-only in strict mode");
 		if (!strcmp(ident->string, "eval"))
@@ -266,6 +288,7 @@ static void carray(JF, js_Ast *list)
 	while (list) {
 		if (list->a->type != EXP_UNDEF) {
 			emitnumber(J, F, i++);
+			emitline(J, F, list->a);
 			cexp(J, F, list->a);
 			emit(J, F, OP_INITPROP);
 		} else {
@@ -314,21 +337,22 @@ static void cobject(JF, js_Ast *list)
 		else
 			jsC_error(J, prop, "invalid property name in object initializer");
 
-		if (J->strict)
+		if (F->strict)
 			checkdup(J, F, head, kv);
 
 		switch (kv->type) {
 		default: /* impossible */ break;
 		case EXP_PROP_VAL:
+			emitline(J, F, kv->b);
 			cexp(J, F, kv->b);
 			emit(J, F, OP_INITPROP);
 			break;
 		case EXP_PROP_GET:
-			emitfunction(J, F, newfun(J, NULL, kv->b, kv->c, 0));
+			emitfunction(J, F, newfun(J, NULL, NULL, kv->c, 0, F->strict));
 			emit(J, F, OP_INITGETTER);
 			break;
 		case EXP_PROP_SET:
-			emitfunction(J, F, newfun(J, NULL, kv->b, kv->c, 0));
+			emitfunction(J, F, newfun(J, NULL, kv->b, kv->c, 0, F->strict));
 			emit(J, F, OP_INITSETTER);
 			break;
 		}
@@ -464,7 +488,7 @@ static void cdelete(JF, js_Ast *exp)
 {
 	switch (exp->type) {
 	case EXP_IDENTIFIER:
-		if (J->strict)
+		if (F->strict)
 			jsC_error(J, exp, "delete on an unqualified name is not allowed in strict mode");
 		emitlocal(J, F, OP_DELLOCAL, OP_DELVAR, exp);
 		break;
@@ -517,7 +541,7 @@ static void ccall(JF, js_Ast *fun, js_Ast *args)
 		/* fall through */
 	default:
 		cexp(J, F, fun);
-		emit(J, F, J->strict ? OP_UNDEF : OP_GLOBAL);
+		emit(J, F, OP_UNDEF);
 		break;
 	}
 	n = cargs(J, F, args);
@@ -556,7 +580,7 @@ static void cexp(JF, js_Ast *exp)
 		break;
 
 	case EXP_FUN:
-		emitfunction(J, F, newfun(J, exp->a, exp->b, exp->c, 0));
+		emitfunction(J, F, newfun(J, exp->a, exp->b, exp->c, 0, F->strict));
 		break;
 
 	case EXP_IDENTIFIER:
@@ -866,7 +890,8 @@ static void ctrycatch(JF, js_Ast *trystm, js_Ast *catchvar, js_Ast *catchstm)
 	L1 = emitjump(J, F, OP_TRY);
 	{
 		/* if we get here, we have caught an exception in the try block */
-		if (J->strict) {
+		checkfutureword(J, F, catchvar);
+		if (F->strict) {
 			if (!strcmp(catchvar->string, "arguments"))
 				jsC_error(J, catchvar, "redefining 'arguments' is not allowed in strict mode");
 			if (!strcmp(catchvar->string, "eval"))
@@ -896,7 +921,8 @@ static void ctrycatchfinally(JF, js_Ast *trystm, js_Ast *catchvar, js_Ast *catch
 			emit(J, F, OP_THROW); /* rethrow exception */
 		}
 		label(J, F, L2);
-		if (J->strict) {
+		if (F->strict) {
+			checkfutureword(J, F, catchvar);
 			if (!strcmp(catchvar->string, "arguments"))
 				jsC_error(J, catchvar, "redefining 'arguments' is not allowed in strict mode");
 			if (!strcmp(catchvar->string, "eval"))
@@ -1102,6 +1128,7 @@ static void cstm(JF, js_Ast *stm)
 
 	case STM_BREAK:
 		if (stm->a) {
+			checkfutureword(J, F, stm->a);
 			target = breaktarget(J, F, stm->parent, stm->a->string);
 			if (!target)
 				jsC_error(J, stm, "break label '%s' not found", stm->a->string);
@@ -1116,6 +1143,7 @@ static void cstm(JF, js_Ast *stm)
 
 	case STM_CONTINUE:
 		if (stm->a) {
+			checkfutureword(J, F, stm->a);
 			target = continuetarget(J, F, stm->parent, stm->a->string);
 			if (!target)
 				jsC_error(J, stm, "continue label '%s' not found", stm->a->string);
@@ -1146,6 +1174,8 @@ static void cstm(JF, js_Ast *stm)
 		break;
 
 	case STM_WITH:
+		if (F->strict)
+			jsC_error(J, stm->a, "'with' statements are not allowed in strict mode");
 		cexp(J, F, stm->a);
 		emit(J, F, OP_WITH);
 		cstm(J, F, stm->b);
@@ -1231,13 +1261,18 @@ static int listlength(js_Ast *list)
 	return n;
 }
 
-static void cparams(JF, js_Ast *list)
+static int cparams(JF, js_Ast *list, js_Ast *fname)
 {
+	int shadow = 0;
 	F->numparams = listlength(list);
 	while (list) {
+		checkfutureword(J, F, list->a);
 		addlocal(J, F, list->a, 0);
+		if (fname && !strcmp(fname->string, list->a->string))
+			shadow = 1;
 		list = list->b;
 	}
+	return shadow;
 }
 
 static void cvardecs(JF, js_Ast *node)
@@ -1246,6 +1281,7 @@ static void cvardecs(JF, js_Ast *node)
 		return; /* stop at inner functions */
 
 	if (node->type == EXP_VAR) {
+		checkfutureword(J, F, node->a);
 		if (F->lightweight)
 			addlocal(J, F, node->a, 1);
 		else
@@ -1263,7 +1299,7 @@ static void cfundecs(JF, js_Ast *list)
 	while (list) {
 		js_Ast *stm = list->a;
 		if (stm->type == AST_FUNDEC) {
-			emitfunction(J, F, newfun(J, stm->a, stm->b, stm->c, 0));
+			emitfunction(J, F, newfun(J, stm->a, stm->b, stm->c, 0, F->strict));
 			emitstring(J, F, OP_INITVAR, stm->a->string);
 		}
 		list = list->b;
@@ -1272,6 +1308,8 @@ static void cfundecs(JF, js_Ast *list)
 
 static void cfunbody(JF, js_Ast *name, js_Ast *params, js_Ast *body)
 {
+	int shadow;
+
 	F->lightweight = 1;
 	F->arguments = 0;
 
@@ -1281,9 +1319,15 @@ static void cfunbody(JF, js_Ast *name, js_Ast *params, js_Ast *body)
 	if (body)
 		analyze(J, F, body);
 
-	cparams(J, F, params);
+	/* Check if first statement is 'use strict': */
+	if (body && body->type == AST_LIST && body->a && body->a->type == EXP_STRING)
+		if (!strcmp(body->a->string, "use strict"))
+			F->strict = 1;
 
-	if (name) {
+	shadow = cparams(J, F, params, name);
+
+	if (name && !shadow) {
+		checkfutureword(J, F, name);
 		emit(J, F, OP_CURRENT);
 		if (F->lightweight) {
 			addlocal(J, F, name, 0);
@@ -1312,10 +1356,10 @@ static void cfunbody(JF, js_Ast *name, js_Ast *params, js_Ast *body)
 
 js_Function *jsC_compilefunction(js_State *J, js_Ast *prog)
 {
-	return newfun(J, prog->a, prog->b, prog->c, 0);
+	return newfun(J, prog->a, prog->b, prog->c, 0, J->default_strict);
 }
 
 js_Function *jsC_compile(js_State *J, js_Ast *prog)
 {
-	return newfun(J, NULL, NULL, prog, 1);
+	return newfun(J, NULL, NULL, prog, 1, J->default_strict);
 }

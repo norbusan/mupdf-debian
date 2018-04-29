@@ -1146,6 +1146,35 @@ js_dev_end_tile(fz_context *ctx, fz_device *dev)
 	js_endtry(J);
 }
 
+static void
+js_dev_begin_layer(fz_context *ctx, fz_device *dev, const char *name)
+{
+	js_State *J = ((js_device*)dev)->J;
+	if (js_try(J))
+		rethrow_as_fz(J);
+	if (js_hasproperty(J, -1, "beginLayer")) {
+		js_copy(J, -2);
+		js_pushstring(J, name);
+		js_call(J, 1);
+		js_pop(J, 1);
+	}
+	js_endtry(J);
+}
+
+static void
+js_dev_end_layer(fz_context *ctx, fz_device *dev)
+{
+	js_State *J = ((js_device*)dev)->J;
+	if (js_try(J))
+		rethrow_as_fz(J);
+	if (js_hasproperty(J, -1, "endLayer")) {
+		js_copy(J, -2);
+		js_call(J, 0);
+		js_pop(J, 1);
+	}
+	js_endtry(J);
+}
+
 static fz_device *new_js_device(fz_context *ctx, js_State *J)
 {
 	js_device *dev = fz_new_derived_device(ctx, js_device);
@@ -1175,6 +1204,9 @@ static fz_device *new_js_device(fz_context *ctx, js_State *J)
 
 	dev->super.begin_tile = js_dev_begin_tile;
 	dev->super.end_tile = js_dev_end_tile;
+
+	dev->super.begin_layer = js_dev_begin_layer;
+	dev->super.end_layer = js_dev_end_layer;
 
 	dev->J = J;
 	return (fz_device*)dev;
@@ -1451,6 +1483,27 @@ static void ffi_Device_endTile(js_State *J)
 	fz_device *dev = js_touserdata(J, 0, "fz_device");
 	fz_try(ctx)
 		fz_end_tile(ctx, dev);
+	fz_catch(ctx)
+		rethrow(J);
+}
+
+static void ffi_Device_beginLayer(js_State *J)
+{
+	fz_context *ctx = js_getcontext(J);
+	fz_device *dev = js_touserdata(J, 0, "fz_device");
+	const char *name = js_tostring(J, 1);
+	fz_try(ctx)
+		fz_begin_layer(ctx, dev, name);
+	fz_catch(ctx)
+		rethrow(J);
+}
+
+static void ffi_Device_endLayer(js_State *J)
+{
+	fz_context *ctx = js_getcontext(J);
+	fz_device *dev = js_touserdata(J, 0, "fz_device");
+	fz_try(ctx)
+		fz_end_layer(ctx, dev);
 	fz_catch(ctx)
 		rethrow(J);
 }
@@ -3198,10 +3251,38 @@ static void ffi_PDFDocument_addSimpleFont(js_State *J)
 	fz_context *ctx = js_getcontext(J);
 	pdf_document *pdf = js_touserdata(J, 0, "pdf_document");
 	fz_font *font = js_touserdata(J, 1, "fz_font");
+	const char *encname = js_tostring(J, 2);
 	pdf_obj *ind = NULL;
+	int enc = PDF_SIMPLE_ENCODING_LATIN;
+
+	if (!strcmp(encname, "Latin")) enc = PDF_SIMPLE_ENCODING_LATIN;
+	else if (!strcmp(encname, "Greek")) enc = PDF_SIMPLE_ENCODING_GREEK;
+	else if (!strcmp(encname, "Cyrillic")) enc = PDF_SIMPLE_ENCODING_CYRILLIC;
 
 	fz_try(ctx)
-		ind = pdf_add_simple_font(ctx, pdf, font);
+		ind = pdf_add_simple_font(ctx, pdf, font, enc);
+	fz_catch(ctx)
+		rethrow(J);
+
+	ffi_pushobj(J, ind);
+}
+
+static void ffi_PDFDocument_addCJKFont(js_State *J)
+{
+	fz_context *ctx = js_getcontext(J);
+	pdf_document *pdf = js_touserdata(J, 0, "pdf_document");
+	fz_font *font = js_touserdata(J, 1, "fz_font");
+	const char *on = js_tostring(J, 2);
+	int ord = FZ_ADOBE_JAPAN_1;
+	pdf_obj *ind = NULL;
+
+	if (!strcmp(on, "CNS1") || !strcmp(on, "CN")) ord = FZ_ADOBE_CNS_1;
+	else if (!strcmp(on, "GB1") || !strcmp(on, "TW")) ord = FZ_ADOBE_GB_1;
+	else if (!strcmp(on, "Korea1") || !strcmp(on, "KR") || !strcmp(on, "KO")) ord = FZ_ADOBE_KOREA_1;
+	else if (!strcmp(on, "Japan1") || !strcmp(on, "JP") || !strcmp(on, "JA")) ord = FZ_ADOBE_JAPAN_1;
+
+	fz_try(ctx)
+		ind = pdf_add_cjk_font(ctx, pdf, font, ord);
 	fz_catch(ctx)
 		rethrow(J);
 
@@ -4194,7 +4275,7 @@ static void ffi_PDFAnnotation_getInkList(js_State *J)
 	fz_context *ctx = js_getcontext(J);
 	pdf_annot *annot = js_touserdata(J, 0, "pdf_annot");
 	int i, k, m = 0, n = 0;
-	float v[2] = { 0 };
+	fz_point pt;
 
 	js_newarray(J);
 
@@ -4212,12 +4293,12 @@ static void ffi_PDFAnnotation_getInkList(js_State *J)
 		js_newarray(J);
 		for (k = 0; k < m; ++k) {
 			fz_try(ctx)
-				pdf_annot_ink_list_stroke_vertex(ctx, annot, i, k, v);
+				pt = pdf_annot_ink_list_stroke_vertex(ctx, annot, i, k);
 			fz_catch(ctx)
 				rethrow(J);
-			js_pushnumber(J, v[0]);
+			js_pushnumber(J, pt.x);
 			js_setindex(J, -2, k * 2 + 0);
-			js_pushnumber(J, v[1]);
+			js_pushnumber(J, pt.y);
 			js_setindex(J, -2, k * 2 + 1);
 		}
 		js_setindex(J, -2, i);
@@ -4228,7 +4309,7 @@ static void ffi_PDFAnnotation_setInkList(js_State *J)
 {
 	fz_context *ctx = js_getcontext(J);
 	pdf_annot *annot = js_touserdata(J, 0, "pdf_annot");
-	float *points = NULL;
+	fz_point *points = NULL;
 	int *counts = NULL;
 	int n, nv, k, i, v;
 
@@ -4245,7 +4326,7 @@ static void ffi_PDFAnnotation_setInkList(js_State *J)
 
 	fz_try(ctx) {
 		counts = fz_malloc(ctx, n * sizeof(int));
-		points = fz_malloc(ctx, nv * 2 * sizeof(float));
+		points = fz_malloc(ctx, nv * sizeof(fz_point));
 	} fz_catch(ctx) {
 		fz_free(ctx, counts);
 		fz_free(ctx, points);
@@ -4260,10 +4341,14 @@ static void ffi_PDFAnnotation_setInkList(js_State *J)
 	for (i = v = 0; i < n; ++i) {
 		js_getindex(J, 1, i);
 		counts[i] = js_getlength(J, -1) / 2;
-		for (k = 0; k < counts[i] * 2; ++k) {
-			js_getindex(J, -1, k);
-			points[v++] = js_tonumber(J, -1);
+		for (k = 0; k < counts[i]; ++k) {
+			js_getindex(J, -1, k*2);
+			points[v].x = js_tonumber(J, -1);
 			js_pop(J, 1);
+			js_getindex(J, -1, k*2+1);
+			points[v].y = js_tonumber(J, -1);
+			js_pop(J, 1);
+			++v;
 		}
 		js_pop(J, 1);
 	}
@@ -4345,7 +4430,7 @@ static void ffi_PDFAnnotation_updateAppearance(js_State *J)
 	fz_context *ctx = js_getcontext(J);
 	pdf_annot *annot = js_touserdata(J, 0, "pdf_annot");
 	fz_try(ctx)
-		pdf_update_appearance(ctx, annot->page->doc, annot);
+		pdf_update_appearance(ctx, annot);
 	fz_catch(ctx)
 		rethrow(J);
 }
@@ -4424,7 +4509,7 @@ int murun_main(int argc, char **argv)
 		jsB_propfun(J, "Page.run", ffi_Page_run, 3);
 		jsB_propfun(J, "Page.toPixmap", ffi_Page_toPixmap, 4);
 		jsB_propfun(J, "Page.toDisplayList", ffi_Page_toDisplayList, 1);
-		jsB_propfun(J, "Page.toStructuredText", ffi_Page_toStructuredText, 0);
+		jsB_propfun(J, "Page.toStructuredText", ffi_Page_toStructuredText, 1);
 		jsB_propfun(J, "Page.search", ffi_Page_search, 0);
 		jsB_propfun(J, "Page.getAnnotations", ffi_Page_getAnnotations, 0);
 		jsB_propfun(J, "Page.getLinks", ffi_Page_getLinks, 0);
@@ -4469,6 +4554,9 @@ int murun_main(int argc, char **argv)
 		jsB_propfun(J, "Device.endGroup", ffi_Device_endGroup, 0);
 		jsB_propfun(J, "Device.beginTile", ffi_Device_beginTile, 6);
 		jsB_propfun(J, "Device.endTile", ffi_Device_endTile, 0);
+
+		jsB_propfun(J, "Device.beginLayer", ffi_Device_beginLayer, 1);
+		jsB_propfun(J, "Device.endLayer", ffi_Device_endLayer, 0);
 	}
 	js_setregistry(J, "fz_device");
 
@@ -4552,7 +4640,7 @@ int murun_main(int argc, char **argv)
 	{
 		jsB_propfun(J, "DisplayList.run", ffi_DisplayList_run, 2);
 		jsB_propfun(J, "DisplayList.toPixmap", ffi_DisplayList_toPixmap, 3);
-		jsB_propfun(J, "DisplayList.toStructuredText", ffi_DisplayList_toStructuredText, 0);
+		jsB_propfun(J, "DisplayList.toStructuredText", ffi_DisplayList_toStructuredText, 1);
 		jsB_propfun(J, "DisplayList.search", ffi_DisplayList_search, 1);
 	}
 	js_setregistry(J, "fz_display_list");
@@ -4615,7 +4703,8 @@ int murun_main(int argc, char **argv)
 		jsB_propfun(J, "PDFDocument.addObject", ffi_PDFDocument_addObject, 1);
 		jsB_propfun(J, "PDFDocument.addStream", ffi_PDFDocument_addStream, 2);
 		jsB_propfun(J, "PDFDocument.addRawStream", ffi_PDFDocument_addRawStream, 2);
-		jsB_propfun(J, "PDFDocument.addSimpleFont", ffi_PDFDocument_addSimpleFont, 1);
+		jsB_propfun(J, "PDFDocument.addSimpleFont", ffi_PDFDocument_addSimpleFont, 2);
+		jsB_propfun(J, "PDFDocument.addCJKFont", ffi_PDFDocument_addCJKFont, 2);
 		jsB_propfun(J, "PDFDocument.addFont", ffi_PDFDocument_addFont, 1);
 		jsB_propfun(J, "PDFDocument.addImage", ffi_PDFDocument_addImage, 1);
 		jsB_propfun(J, "PDFDocument.addPage", ffi_PDFDocument_addPage, 4);

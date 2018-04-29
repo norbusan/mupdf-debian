@@ -96,9 +96,16 @@ public class PDFDocument extends Document
 	public native void insertPage(int at, PDFObject page);
 	public native void deletePage(int at);
 	public native PDFObject addImage(Image image);
-	public native PDFObject addSimpleFont(Font font);
+	public native PDFObject addSimpleFont(Font font, int encoding);
+	public native PDFObject addCJKFont(Font font, int ordering);
 	public native PDFObject addFont(Font font);
 	public native boolean hasUnsavedChanges();
 	public native boolean canBeSavedIncrementally();
+
 	public native int save(String filename, String options);
+
+	protected native int nativeSaveWithStream(SeekableOutputStream stream, String options);
+	public int save(SeekableOutputStream stream, String options) {
+		return nativeSaveWithStream(stream, options);
+	}
 }

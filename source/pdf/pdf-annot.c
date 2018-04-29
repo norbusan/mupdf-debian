@@ -119,7 +119,7 @@ pdf_parse_file_spec(fz_context *ctx, pdf_document *doc, pdf_obj *file_spec, pdf_
 		filename = file_spec;
 
 	if (pdf_is_dict(ctx, file_spec)) {
-#if defined(_WIN32) || defined(_WIN64)
+#ifdef _WIN32
 		filename = pdf_dict_get(ctx, file_spec, PDF_NAME_DOS);
 #else
 		filename = pdf_dict_get(ctx, file_spec, PDF_NAME_Unix);
@@ -135,8 +135,8 @@ pdf_parse_file_spec(fz_context *ctx, pdf_document *doc, pdf_obj *file_spec, pdf_
 	}
 
 	path = pdf_to_utf8(ctx, filename);
-#if defined(_WIN32) || defined(_WIN64)
-	if (strcmp(pdf_to_name(ctx, pdf_dict_gets(ctx, file_spec, "FS")), "URL") != 0)
+#ifdef _WIN32
+	if (!pdf_name_eq(ctx, pdf_dict_get(ctx, file_spec, PDF_NAME_FS), PDF_NAME_URL))
 	{
 		/* move the file name into the expected place and use the expected path separator */
 		char *c;
@@ -358,7 +358,7 @@ pdf_resolve_link(fz_context *ctx, pdf_document *doc, const char *uri, float *xp,
 static void
 pdf_drop_annot_imp(fz_context *ctx, pdf_annot *annot)
 {
-	pdf_drop_xobject(ctx, annot->ap);
+	pdf_drop_obj(ctx, annot->ap);
 	pdf_drop_obj(ctx, annot->obj);
 }
 
@@ -400,16 +400,19 @@ pdf_annot_transform(fz_context *ctx, pdf_annot *annot, fz_matrix *annot_ctm)
 	fz_pre_scale(fz_translate(annot_ctm, x, y), w, h);
 }
 
-pdf_annot *pdf_new_annot(fz_context *ctx, pdf_page *page)
+pdf_annot *pdf_new_annot(fz_context *ctx, pdf_page *page, pdf_obj *obj)
 {
-	pdf_annot *annot = fz_new_derived_annot(ctx, pdf_annot);
+	pdf_annot *annot;
+
+	annot = fz_new_derived_annot(ctx, pdf_annot);
 
 	annot->super.drop_annot = (fz_annot_drop_fn*)pdf_drop_annot_imp;
 	annot->super.bound_annot = (fz_annot_bound_fn*)pdf_bound_annot;
 	annot->super.run_annot = (fz_annot_run_fn*)pdf_run_annot;
 	annot->super.next_annot = (fz_annot_next_fn*)pdf_next_annot;
 
-	annot->page = page;
+	annot->page = page; /* only borrowed, as the page owns the annot */
+	annot->obj = pdf_keep_obj(ctx, obj);
 
 	return annot;
 }
@@ -417,121 +420,35 @@ pdf_annot *pdf_new_annot(fz_context *ctx, pdf_page *page)
 void
 pdf_load_annots(fz_context *ctx, pdf_page *page, pdf_obj *annots)
 {
-	pdf_document *doc = page->doc;
-	pdf_annot *annot, **itr;
-	pdf_obj *obj, *ap, *as, *n;
-	int i, len, keep_annot;
+	pdf_annot *annot;
+	pdf_obj *subtype;
+	int i, n;
 
-	fz_var(annot);
-	fz_var(itr);
-	fz_var(keep_annot);
-
-	itr = &page->annots;
-
-	len = pdf_array_len(ctx, annots);
-	/*
-	Create an initial linked list of pdf_annot structures with only the obj field
-	filled in. We do this because update_appearance has the potential to change
-	the annot array, so we don't want to be iterating through the array while
-	that happens.
-	*/
-	fz_try(ctx)
+	n = pdf_array_len(ctx, annots);
+	for (i = 0; i < n; ++i)
 	{
-		for (i = 0; i < len; i++)
+		pdf_obj *obj = pdf_array_get(ctx, annots, i);
+		if (obj)
 		{
-			obj = pdf_array_get(ctx, annots, i);
+			subtype = pdf_dict_get(ctx, obj, PDF_NAME_Subtype);
+			if (pdf_name_eq(ctx, subtype, PDF_NAME_Link))
+				continue;
+			if (pdf_name_eq(ctx, subtype, PDF_NAME_Popup))
+				continue;
 
-			annot = pdf_new_annot(ctx, page);
-			*itr = annot;
-			annot->obj = pdf_keep_obj(ctx, obj);
-			itr = &annot->next;
+			annot = pdf_new_annot(ctx, page, obj);
+			fz_try(ctx)
+			{
+				pdf_update_annot(ctx, annot);
+				annot->has_new_ap = 0;
+			}
+			fz_catch(ctx)
+				fz_warn(ctx, "could not update appearance for annotation");
+
+			*page->annot_tailp = annot;
+			page->annot_tailp = &annot->next;
 		}
 	}
-	fz_catch(ctx)
-	{
-		pdf_drop_annots(ctx, page->annots);
-		page->annots = NULL;
-		fz_rethrow(ctx);
-	}
-
-	/*
-	Iterate through the newly created annot linked list, using a double pointer to
-	facilitate deleting broken annotations.
-	*/
-	itr = &page->annots;
-	while (*itr)
-	{
-		annot = *itr;
-
-		fz_try(ctx)
-		{
-			pdf_hotspot *hp = &doc->hotspot;
-
-			n = NULL;
-
-			if (doc->update_appearance)
-				doc->update_appearance(ctx, doc, annot);
-
-			obj = annot->obj;
-			ap = pdf_dict_get(ctx, obj, PDF_NAME_AP);
-			as = pdf_dict_get(ctx, obj, PDF_NAME_AS);
-
-			/* We only collect annotations with an appearance
-			 * stream into this list, so remove any that don't
-			 * (such as links) and continue. */
-			keep_annot = pdf_is_dict(ctx, ap);
-			if (!keep_annot)
-				break;
-
-			if (hp->num == pdf_to_num(ctx, obj) && (hp->state & HOTSPOT_POINTER_DOWN))
-			{
-				n = pdf_dict_get(ctx, ap, PDF_NAME_D); /* down state */
-			}
-
-			if (n == NULL)
-				n = pdf_dict_get(ctx, ap, PDF_NAME_N); /* normal state */
-
-			/* lookup current state in sub-dictionary */
-			if (!pdf_is_stream(ctx, n))
-				n = pdf_dict_get(ctx, n, as);
-
-			annot->ap = NULL;
-
-			if (pdf_is_stream(ctx, n))
-			{
-				annot->ap = pdf_load_xobject(ctx, doc, n);
-				annot->ap_iteration = annot->ap->iteration;
-			}
-			else
-				fz_warn(ctx, "no appearance stream for annotation %d 0 R", pdf_to_num(ctx, annot->obj));
-
-			if (obj == doc->focus_obj)
-				doc->focus = annot;
-
-			/* Move to next item in the linked list */
-			itr = &annot->next;
-		}
-		fz_catch(ctx)
-		{
-			if (fz_caught(ctx) == FZ_ERROR_TRYLATER)
-			{
-				pdf_drop_annots(ctx, page->annots);
-				page->annots = NULL;
-				fz_rethrow(ctx);
-			}
-			keep_annot = 0;
-			fz_warn(ctx, "ignoring broken annotation");
-		}
-		if (!keep_annot)
-		{
-			/* Move to next item in the linked list, dropping this one */
-			*itr = annot->next;
-			annot->next = NULL; /* Required because pdf_drop_annots follows the "next" chain */
-			pdf_drop_annots(ctx, annot);
-		}
-	}
-
-	page->annot_tailp = itr;
 }
 
 pdf_annot *
@@ -561,23 +478,7 @@ pdf_bound_annot(fz_context *ctx, pdf_annot *annot, fz_rect *rect)
 void
 pdf_dirty_annot(fz_context *ctx, pdf_annot *annot)
 {
-	if (annot)
-	{
-		annot->dirty = 1;
-		if (annot->page && annot->page->doc)
-			annot->page->doc->dirty = 1;
-	}
-}
-
-void
-pdf_clean_annot(fz_context *ctx, pdf_annot *annot)
-{
-	if (annot)
-		annot->dirty = 0;
-}
-
-int
-pdf_annot_is_dirty(fz_context *ctx, pdf_annot *annot)
-{
-	return annot ? annot->dirty: 0;
+	annot->needs_new_ap = 1;
+	if (annot->page && annot->page->doc)
+		annot->page->doc->dirty = 1;
 }

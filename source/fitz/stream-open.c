@@ -14,7 +14,7 @@ int
 fz_file_exists(fz_context *ctx, const char *path)
 {
 	FILE *file;
-#if defined(_WIN32) || defined(_WIN64)
+#ifdef _WIN32
 	file = fz_fopen_utf8(path, "rb");
 #else
 	file = fopen(path, "rb");
@@ -25,7 +25,7 @@ fz_file_exists(fz_context *ctx, const char *path)
 }
 
 fz_stream *
-fz_new_stream(fz_context *ctx, void *state, fz_stream_next_fn *next, fz_stream_close_fn *close)
+fz_new_stream(fz_context *ctx, void *state, fz_stream_next_fn *next, fz_stream_drop_fn *drop)
 {
 	fz_stream *stm = NULL;
 
@@ -35,7 +35,7 @@ fz_new_stream(fz_context *ctx, void *state, fz_stream_next_fn *next, fz_stream_c
 	}
 	fz_catch(ctx)
 	{
-		close(ctx, state);
+		drop(ctx, state);
 		fz_rethrow(ctx);
 	}
 
@@ -52,7 +52,7 @@ fz_new_stream(fz_context *ctx, void *state, fz_stream_next_fn *next, fz_stream_c
 
 	stm->state = state;
 	stm->next = next;
-	stm->close = close;
+	stm->drop = drop;
 	stm->seek = NULL;
 
 	return stm;
@@ -69,8 +69,8 @@ fz_drop_stream(fz_context *ctx, fz_stream *stm)
 {
 	if (fz_drop_imp(ctx, stm, &stm->refs))
 	{
-		if (stm->close)
-			stm->close(ctx, stm->state);
+		if (stm->drop)
+			stm->drop(ctx, stm->state);
 		fz_free(ctx, stm);
 	}
 }
@@ -106,14 +106,14 @@ static int next_file(fz_context *ctx, fz_stream *stm, size_t n)
 static void seek_file(fz_context *ctx, fz_stream *stm, int64_t offset, int whence)
 {
 	fz_file_stream *state = stm->state;
-#if defined(_WIN32) || defined(_WIN64)
+#ifdef _WIN32
 	int64_t n = _fseeki64(state->file, offset, whence);
 #else
 	int64_t n = fseeko(state->file, offset, whence);
 #endif
 	if (n < 0)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot seek: %s", strerror(errno));
-#if defined(_WIN32) || defined(_WIN64)
+#ifdef _WIN32
 	stm->pos = _ftelli64(state->file);
 #else
 	stm->pos = ftello(state->file);
@@ -122,7 +122,7 @@ static void seek_file(fz_context *ctx, fz_stream *stm, int64_t offset, int whenc
 	stm->wp = state->buffer;
 }
 
-static void close_file(fz_context *ctx, void *state_)
+static void drop_file(fz_context *ctx, void *state_)
 {
 	fz_file_stream *state = state_;
 	int n = fclose(state->file);
@@ -138,9 +138,17 @@ fz_open_file_ptr(fz_context *ctx, FILE *file)
 	fz_file_stream *state = fz_malloc_struct(ctx, fz_file_stream);
 	state->file = file;
 
-	stm = fz_new_stream(ctx, state, next_file, close_file);
+	stm = fz_new_stream(ctx, state, next_file, drop_file);
 	stm->seek = seek_file;
 
+	return stm;
+}
+
+fz_stream *fz_open_file_ptr_no_close(fz_context *ctx, FILE *file)
+{
+	fz_stream *stm = fz_open_file_ptr(ctx, file);
+	/* We don't own the file ptr. Ensure we don't close it */
+	stm->drop = NULL;
 	return stm;
 }
 
@@ -148,7 +156,7 @@ fz_stream *
 fz_open_file(fz_context *ctx, const char *name)
 {
 	FILE *file;
-#if defined(_WIN32) || defined(_WIN64)
+#ifdef _WIN32
 	file = fz_fopen_utf8(name, "rb");
 #else
 	file = fopen(name, "rb");
@@ -158,7 +166,7 @@ fz_open_file(fz_context *ctx, const char *name)
 	return fz_open_file_ptr(ctx, file);
 }
 
-#if defined(_WIN32) || defined(_WIN64)
+#ifdef _WIN32
 fz_stream *
 fz_open_file_w(fz_context *ctx, const wchar_t *name)
 {
@@ -196,7 +204,7 @@ static void seek_buffer(fz_context *ctx, fz_stream *stm, int64_t offset, int whe
 	stm->rp += (int)(offset - pos);
 }
 
-static void close_buffer(fz_context *ctx, void *state_)
+static void drop_buffer(fz_context *ctx, void *state_)
 {
 	fz_buffer *state = (fz_buffer *)state_;
 	fz_drop_buffer(ctx, state);
@@ -208,7 +216,7 @@ fz_open_buffer(fz_context *ctx, fz_buffer *buf)
 	fz_stream *stm;
 
 	fz_keep_buffer(ctx, buf);
-	stm = fz_new_stream(ctx, buf, next_buffer, close_buffer);
+	stm = fz_new_stream(ctx, buf, next_buffer, drop_buffer);
 	stm->seek = seek_buffer;
 
 	stm->rp = buf->data;
@@ -224,7 +232,7 @@ fz_open_memory(fz_context *ctx, const unsigned char *data, size_t len)
 {
 	fz_stream *stm;
 
-	stm = fz_new_stream(ctx, NULL, next_buffer, close_buffer);
+	stm = fz_new_stream(ctx, NULL, next_buffer, NULL);
 	stm->seek = seek_buffer;
 
 	stm->rp = (unsigned char *)data;

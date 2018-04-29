@@ -25,6 +25,9 @@ typedef unsigned char uint8_t;
 typedef unsigned short int uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned __int64 uint64_t;
+#ifndef INT64_MAX
+#define INT64_MAX 9223372036854775807i64
+#endif
 #else
 #include <stdint.h> /* needed for int64_t */
 #endif
@@ -120,6 +123,10 @@ static __inline int signbit(double x)
 #define hypotf _hypotf
 #define atoll _atoi64
 
+#endif
+
+#ifdef _WIN32
+
 char *fz_utf8_from_wchar(const wchar_t *s);
 wchar_t *fz_wchar_from_utf8(const char *s);
 
@@ -152,7 +159,7 @@ void fz_free_argv(int argc, char **argv);
 
 /* restrict is standard in C99, but not in all C++ compilers. */
 #if __STDC_VERSION__ == 199901L /* C99 */
-#elif _MSC_VER >= 1500 /* MSVC 9 or newer */
+#elif _MSC_VER >= 1600 /* MSVC 10 or newer */
 #define restrict __restrict
 #elif __GNUC__ >= 3 /* GCC 3 or newer */
 #define restrict __restrict
@@ -179,12 +186,13 @@ void fz_free_argv(int argc, char **argv);
 #endif
 
 /* GCC can do type checking of printf strings */
-#ifndef __printflike
-#if __GNUC__ > 2 || __GNUC__ == 2 && __GNUC_MINOR__ >= 7
-#define __printflike(fmtarg, firstvararg) \
-	__attribute__((__format__ (__printf__, fmtarg, firstvararg)))
+#ifdef __printflike
+#define FZ_PRINTFLIKE(F,V) __printflike(F,V)
 #else
-#define __printflike(fmtarg, firstvararg)
+#if __GNUC__ > 2 || __GNUC__ == 2 && __GNUC_MINOR__ >= 7
+#define FZ_PRINTFLIKE(F,V) __attribute__((__format__ (__printf__, F, V)))
+#else
+#define FZ_PRINTFLIKE(F,V)
 #endif
 #endif
 

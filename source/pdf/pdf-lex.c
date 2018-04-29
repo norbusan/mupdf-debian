@@ -151,12 +151,21 @@ lex_number(fz_context *ctx, fz_stream *f, pdf_lexbuf *buf, int c)
 	char *e = buf->scratch + buf->size - 1; /* leave space for zero terminator */
 	char *isreal = (c == '.' ? s : NULL);
 	int neg = (c == '-');
+	int isbad = 0;
 
 	*s++ = c;
 
+	c = fz_read_byte(ctx, f);
+
+	/* skip extra '-' signs at start of number */
+	if (neg)
+	{
+		while (c == '-')
+			c = fz_read_byte(ctx, f);
+	}
+
 	while (s < e)
 	{
-		c = fz_read_byte(ctx, f);
 		switch (c)
 		{
 		case IS_WHITE:
@@ -165,21 +174,27 @@ lex_number(fz_context *ctx, fz_stream *f, pdf_lexbuf *buf, int c)
 			goto end;
 		case EOF:
 			goto end;
-		case '-':
-			neg++;
+		case '.':
+			if (isreal)
+				isbad = 1;
+			isreal = s;
 			*s++ = c;
 			break;
-		case '.':
-			isreal = s;
-			/* Fall through */
+		case RANGE_0_9:
+			*s++ = c;
+			break;
 		default:
+			isbad = 1;
 			*s++ = c;
 			break;
 		}
+		c = fz_read_byte(ctx, f);
 	}
 
 end:
 	*s = '\0';
+	if (isbad)
+		return PDF_TOK_ERROR;
 	if (isreal)
 	{
 		/* We'd like to use the fastest possible atof
@@ -288,7 +303,7 @@ lex_string(fz_context *ctx, fz_stream *f, pdf_lexbuf *lb)
 		switch (c)
 		{
 		case EOF:
-			goto end;
+			return PDF_TOK_ERROR;
 		case '(':
 			bal++;
 			*s++ = c;
@@ -304,7 +319,7 @@ lex_string(fz_context *ctx, fz_stream *f, pdf_lexbuf *lb)
 			switch (c)
 			{
 			case EOF:
-				goto end;
+				return PDF_TOK_ERROR;
 			case 'n':
 				*s++ = '\n';
 				break;
@@ -399,8 +414,9 @@ lex_hex_string(fz_context *ctx, fz_stream *f, pdf_lexbuf *lb)
 			}
 			break;
 		case '>':
-		case EOF:
 			goto end;
+		case EOF:
+			return PDF_TOK_ERROR;
 		default:
 			fz_warn(ctx, "ignoring invalid character in hex string");
 		}
@@ -506,32 +522,21 @@ pdf_lex(fz_context *ctx, fz_stream *f, pdf_lexbuf *buf)
 		case '(':
 			return lex_string(ctx, f, buf);
 		case ')':
-			fz_warn(ctx, "lexical error (unexpected ')')");
-			continue;
+			return PDF_TOK_ERROR;
 		case '<':
 			c = fz_read_byte(ctx, f);
 			if (c == '<')
-			{
 				return PDF_TOK_OPEN_DICT;
-			}
-			else
-			{
+			if (c != EOF)
 				fz_unread_byte(ctx, f);
-				return lex_hex_string(ctx, f, buf);
-			}
+			return lex_hex_string(ctx, f, buf);
 		case '>':
 			c = fz_read_byte(ctx, f);
 			if (c == '>')
-			{
 				return PDF_TOK_CLOSE_DICT;
-			}
-			fz_warn(ctx, "lexical error (unexpected '>')");
-			if (c == EOF)
-			{
-				return PDF_TOK_EOF;
-			}
-			fz_unread_byte(ctx, f);
-			continue;
+			if (c != EOF)
+				fz_unread_byte(ctx, f);
+			return PDF_TOK_ERROR;
 		case '[':
 			return PDF_TOK_OPEN_ARRAY;
 		case ']':
@@ -570,31 +575,23 @@ pdf_lex_no_string(fz_context *ctx, fz_stream *f, pdf_lexbuf *buf)
 			lex_name(ctx, f, buf);
 			return PDF_TOK_NAME;
 		case '(':
-			continue;
+			return PDF_TOK_ERROR; /* no strings allowed */
 		case ')':
-			continue;
+			return PDF_TOK_ERROR; /* no strings allowed */
 		case '<':
 			c = fz_read_byte(ctx, f);
 			if (c == '<')
-			{
 				return PDF_TOK_OPEN_DICT;
-			}
-			else
-			{
-				continue;
-			}
+			if (c != EOF)
+				fz_unread_byte(ctx, f);
+			return PDF_TOK_ERROR; /* no strings allowed */
 		case '>':
 			c = fz_read_byte(ctx, f);
 			if (c == '>')
-			{
 				return PDF_TOK_CLOSE_DICT;
-			}
-			if (c == EOF)
-			{
-				return PDF_TOK_EOF;
-			}
-			fz_unread_byte(ctx, f);
-			continue;
+			if (c != EOF)
+				fz_unread_byte(ctx, f);
+			return PDF_TOK_ERROR;
 		case '[':
 			return PDF_TOK_OPEN_ARRAY;
 		case ']':
