@@ -6,6 +6,6 @@ TryExec=mupdf
 Icon=mupdf
 Terminal=false
 Type=Application
-MimeType=application/pdf;
+MimeType=application/pdf;application/epub+zip;application/vnd.ms-xpsdocument;
 Categories=Viewer;Graphics;
 NoDisplay=true
