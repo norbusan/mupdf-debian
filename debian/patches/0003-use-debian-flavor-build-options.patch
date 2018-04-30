@@ -1,0 +1,37 @@
+From: Kan-Ru Chen <kanru@kanru.info>
+Date: Mon, 30 Apr 2018 09:40:47 +0900
+Subject: use debian flavor build options
+
+Do not strip binaries by default and use Debian LDFLAGS
+---
+ Makerules                | 3 +++
+ thirdparty/mujs/Makefile | 2 ++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/Makerules b/Makerules
+index 57065f3..9f06b98 100644
+--- a/Makerules
++++ b/Makerules
+@@ -27,6 +27,9 @@ SANITIZE_FLAGS += -fsanitize=leak
+ ifeq "$(build)" "debug"
+ CFLAGS += -pipe -g
+ LDFLAGS += -g
++else ifeq "$(build)" "debian"
++CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer
++LDFLAGS += $(LDREMOVEUNREACH)
+ else ifeq "$(build)" "release"
+ CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer
+ LDFLAGS += $(LDREMOVEUNREACH) -Wl,-s
+diff --git a/thirdparty/mujs/Makefile b/thirdparty/mujs/Makefile
+index 2193c96..85842b0 100644
+--- a/thirdparty/mujs/Makefile
++++ b/thirdparty/mujs/Makefile
+@@ -31,6 +31,8 @@ CFLAGS += -g
+ else ifeq "$(build)" "sanitize"
+ CFLAGS += -pipe -g -fsanitize=address -fno-omit-frame-pointer
+ LDFLAGS += -fsanitize=address
++else ifeq "$(build)" "debian"
++LDFLAGS += $(XLDFLAGS)
+ else
+ CFLAGS += -Os
+ LDFLAGS += -Wl,-s

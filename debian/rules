@@ -10,7 +10,6 @@
 # This has to be exported to make some magic below work.
 export DH_OPTIONS
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
-DPKG_EXPORT_BUILDFLAGS = 1
 include /usr/share/dpkg/buildflags.mk
 include /usr/share/dpkg/architecture.mk
 # The build system doesn't use CPPFLAGS, pass them to CFLAGS to enable the
@@ -24,7 +23,7 @@ ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 	MAKEFLAGS += -j$(NUMJOBS)
 endif
 
-BUILD_FLAGS=build=release OS=Linux verbose=yes XCFLAGS="$(CFLAGS)"
+BUILD_FLAGS=build=debian OS=Linux verbose=yes XCFLAGS="$(CFLAGS)" XLDFLAGS="$(LDFLAGS)"
 
 override_dh_auto_build:
 	$(MAKE) $(BUILD_FLAGS)

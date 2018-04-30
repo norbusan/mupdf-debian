@@ -1,2 +1,3 @@
 0001-mupdf_manpage.patch
 0003-Sort-files-in-static-library-to-make-the-build-repro.patch
+0003-use-debian-flavor-build-options.patch
