@@ -17,16 +17,14 @@ include /usr/share/dpkg/architecture.mk
 # missing (hardening) flags.
 CFLAGS += $(CPPFLAGS)
 CFLAGS += -DJBIG_NO_MEMENTO
+CFLAGS += -fPIC
 
-ifneq (,$(filter x-fpic,$(DEB_BUILD_OPTIONS)))
-	CFLAGS += -fPIC
-endif
 ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 	NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 	MAKEFLAGS += -j$(NUMJOBS)
 endif
 
-BUILD_FLAGS=build=release OS=Linux verbose=yes
+BUILD_FLAGS=build=release OS=Linux verbose=yes XCFLAGS="$(CFLAGS)"
 
 override_dh_auto_build:
 	$(MAKE) $(BUILD_FLAGS)
