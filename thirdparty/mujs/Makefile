@@ -30,6 +30,8 @@ ifeq "$(build)" "debug"
 else ifeq "$(build)" "sanitize"
   CFLAGS += -pipe -g -fsanitize=address -fno-omit-frame-pointer
   LDFLAGS += -fsanitize=address
+else ifeq "$(build)" "debian"
+  LDFLAGS += $(XLDFLAGS)
 else
   CFLAGS += -Os
   LDFLAGS += -Wl,-s
