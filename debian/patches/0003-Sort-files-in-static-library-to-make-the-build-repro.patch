@@ -7,13 +7,13 @@ Subject: Sort files in static library to make the build reproducible
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/Makefile b/Makefile
-index 114a6eb..1483a95 100644
+index 8e47e3a..98e6567 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -73,7 +73,7 @@ endif
+@@ -74,7 +74,7 @@ endif
  
  CC_CMD = $(QUIET_CC) $(CC) $(CFLAGS) -o $@ -c $<
- CXX_CMD = $(QUIET_CXX) $(CXX) $(CFLAGS) -o $@ -c $<
+ CXX_CMD = $(QUIET_CXX) $(CXX) $(filter-out -Wdeclaration-after-statement,$(CFLAGS)) -o $@ -c $<
 -AR_CMD = $(QUIET_AR) $(AR) cr $@ $^
 +AR_CMD = $(QUIET_AR) $(AR) cr $@ `LC_ALL=C ls $^ 2>/dev/null`
  LINK_CMD = $(QUIET_LINK) $(CC) $(LDFLAGS) -o $@ $^ $(LIBS)

@@ -1,5 +1,2 @@
 0001-mupdf_manpage.patch
-0002-Fix-build-with-system-libopjnjp2.patch
 0003-Sort-files-in-static-library-to-make-the-build-repro.patch
-0004-CVE-2018-1000051.patch
-0005-CVE-2018-6544.patch
