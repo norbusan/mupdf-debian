@@ -1,6 +1,26 @@
+mupdf (1.13.0+ds1-1) unstable; urgency=medium
+
+  * New upstream version 1.13.0+ds1
+    - Fixes CVE-2018-5686 (Closes: #887130)
+    - Fixes CVE-2018-6187 (Closes: #888464)
+    - Fixes CVE-2018-6192 (Closes: #888487)
+  * debian/control: Migrate vcs to salsa.debian.org
+  * debian/patches: Refresh patches
+  * debian/rules: Build with Debian CFLAGS and enable PIC libmupdf.a
+    (Closes: #841403)
+  * debian/rules: use Debian flavor build options (Closes: #877067)
+  * debian/mupdf.sh: Do not read from a file descriptor
+    (Closes: #893115, #893862)
+  * debian/mupdf.desktop: Fixes and add ePub and XPS to supported mimetype.
+    Thanks to Pino Toscano, Hartmut Buhrmester (Closes: #877082)
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Mon, 30 Apr 2018 11:17:25 +0900
+
 mupdf (1.12.0+ds1-1) unstable; urgency=high
 
   * New upstream version 1.12.0+ds1
+    - Fixes CVE-2017-17866 (Closes: #885120)
+    - Closes: #877062
   * Exclude thirdparty/{freeglut,lcms2} from upstream source
   * Refresh patches
   * Add freeglut3-dev build-dep
