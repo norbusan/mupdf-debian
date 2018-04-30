@@ -35,14 +35,14 @@ test -f "$1" && file="$1" ||
 
 tmp=$(tempfile -s .pdf)
 case "$file" in
-    *.gz|*.Z)  zcat -- "$file" > "$tmp" && exec 3< "$tmp" && file="/dev/fd/3";;
-    *.xz)     xzcat -- "$file" > "$tmp" && exec 3< "$tmp" && file="/dev/fd/3";;
-    *.bz2)    bzcat -- "$file" > "$tmp" && exec 3< "$tmp" && file="/dev/fd/3";;
+    *.gz|*.Z)  zcat -- "$file" > "$tmp" && exec 3< "$tmp" && file="$tmp";;
+    *.xz)     xzcat -- "$file" > "$tmp" && exec 3< "$tmp" && file="$tmp";;
+    *.bz2)    bzcat -- "$file" > "$tmp" && exec 3< "$tmp" && file="$tmp";;
 esac
-rm -f "$tmp"
+trap 'rm -f "$tmp"' EXIT
 
 if [ "$file" = "" ]; then
-    exec $cmd || true
+    $cmd || true
 else
-    exec $cmd "$file" || true
+    $cmd "$file" || true
 fi
