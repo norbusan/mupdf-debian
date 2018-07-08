@@ -1,3 +1,10 @@
+mupdf (1.13.0+ds1-2) unstable; urgency=medium
+
+  * Use dh_auto_build/dh_auto_install --parallel.
+    Thanks to Helmut Grohne for the patch (Closes: #902968)
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sun, 08 Jul 2018 15:17:02 +0900
+
 mupdf (1.13.0+ds1-1) unstable; urgency=medium
 
   * New upstream version 1.13.0+ds1
