@@ -18,18 +18,13 @@ CFLAGS += $(CPPFLAGS)
 CFLAGS += -DJBIG_NO_MEMENTO
 CFLAGS += -fPIC
 
-ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
-	NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
-	MAKEFLAGS += -j$(NUMJOBS)
-endif
-
-BUILD_FLAGS=build=debian OS=Linux verbose=yes XCFLAGS="$(CFLAGS)" XLDFLAGS="$(LDFLAGS)"
+BUILD_FLAGS=build=debian OS=Linux verbose=yes XCFLAGS="$(CFLAGS)" XLDFLAGS="$(LDFLAGS)" prefix=/usr
 
 override_dh_auto_build:
-	$(MAKE) $(BUILD_FLAGS)
+	dh_auto_build -- $(BUILD_FLAGS)
 
 override_dh_auto_install:
-	$(MAKE) $(BUILD_FLAGS) prefix=$(CURDIR)/debian/tmp/usr install
+	dh_auto_install -- $(BUILD_FLAGS)
 	install -m744 -T $(CURDIR)/debian/mupdf.sh $(CURDIR)/debian/tmp/usr/bin/mupdf
 
 override_dh_auto_clean:
@@ -38,4 +33,4 @@ override_dh_auto_clean:
 	-rm -f include/mupdf/pdf/name-table.h source/pdf/pdf-name-table.h
 
 %:
-	dh $@
+	dh $@ --parallel
