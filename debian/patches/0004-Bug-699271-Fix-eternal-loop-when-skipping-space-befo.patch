@@ -1,0 +1,22 @@
+From: Sebastian Rasmussen <sebras@gmail.com>
+Date: Tue, 21 Aug 2018 19:07:57 +0800
+Subject: Bug 699271: Fix eternal loop when skipping space before EOF.
+
+Thanks to Michael J Gruber for providing this oneliner.
+---
+ source/pdf/pdf-xref.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/source/pdf/pdf-xref.c b/source/pdf/pdf-xref.c
+index 8515090..baaab12 100644
+--- a/source/pdf/pdf-xref.c
++++ b/source/pdf/pdf-xref.c
+@@ -647,7 +647,7 @@ fz_skip_space(fz_context *ctx, fz_stream *stm)
+ 	do
+ 	{
+ 		int c = fz_peek_byte(ctx, stm);
+-		if (c > 32 && c != EOF)
++		if (c == EOF || c > 32)
+ 			return;
+ 		(void)fz_read_byte(ctx, stm);
+ 	}
