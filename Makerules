@@ -6,6 +6,10 @@ OS := $(OS:MSYS%=MINGW)
 OS := $(OS:Windows_NT=MINGW)
 OS := $(OS:Darwin=MACOS)
 
+PKG_CONFIG ?= pkg-config
+
+HAVE_LIBDL ?= yes
+
 ifeq ($(findstring -fembed-bitcode,$(XCFLAGS)),)
   # clang does not support these in combination with -fembed-bitcode
   CFLAGS += -ffunction-sections -fdata-sections
@@ -91,35 +95,35 @@ else ifeq ($(OS),MACOS)
 else ifeq ($(OS),Linux)
   HAVE_OBJCOPY := yes
 
-  ifeq ($(shell pkg-config --exists freetype2 && echo yes),yes)
-	SYS_FREETYPE_CFLAGS := $(shell pkg-config --cflags freetype2)
-	SYS_FREETYPE_LIBS := $(shell pkg-config --libs freetype2)
+  ifeq ($(shell $(PKG_CONFIG) --exists freetype2 && echo yes),yes)
+	SYS_FREETYPE_CFLAGS := $(shell $(PKG_CONFIG) --cflags freetype2)
+	SYS_FREETYPE_LIBS := $(shell $(PKG_CONFIG) --libs freetype2)
   endif
-  ifeq ($(shell pkg-config --exists harfbuzz && echo yes),yes)
-	SYS_HARFBUZZ_CFLAGS := $(shell pkg-config --cflags harfbuzz)
-	SYS_HARFBUZZ_LIBS := $(shell pkg-config --libs harfbuzz)
+  ifeq ($(shell $(PKG_CONFIG) --exists harfbuzz && echo yes),yes)
+	SYS_HARFBUZZ_CFLAGS := $(shell $(PKG_CONFIG) --cflags harfbuzz)
+	SYS_HARFBUZZ_LIBS := $(shell $(PKG_CONFIG) --libs harfbuzz)
   endif
-  ifeq ($(shell pkg-config --exists lcms2 && echo yes),yes)
-	SYS_LCMS2_CFLAGS := $(shell pkg-config --cflags lcms2)
-	SYS_LCMS2_LIBS := $(shell pkg-config --libs lcms2)
+  ifeq ($(shell $(PKG_CONFIG) --exists lcms2 && echo yes),yes)
+	SYS_LCMS2_CFLAGS := $(shell $(PKG_CONFIG) --cflags lcms2)
+	SYS_LCMS2_LIBS := $(shell $(PKG_CONFIG) --libs lcms2)
   endif
-  ifeq ($(shell pkg-config --exists libjpeg && echo yes),yes)
-	SYS_LIBJPEG_CFLAGS := $(shell pkg-config --cflags libjpeg)
-	SYS_LIBJPEG_LIBS := $(shell pkg-config --libs libjpeg)
+  ifeq ($(shell $(PKG_CONFIG) --exists libjpeg && echo yes),yes)
+	SYS_LIBJPEG_CFLAGS := $(shell $(PKG_CONFIG) --cflags libjpeg)
+	SYS_LIBJPEG_LIBS := $(shell $(PKG_CONFIG) --libs libjpeg)
   endif
-  ifeq ($(shell pkg-config --exists libopenjp2 && echo yes),yes)
-	SYS_OPENJPEG_CFLAGS := $(shell pkg-config --cflags libopenjp2)
-	SYS_OPENJPEG_LIBS := $(shell pkg-config --libs libopenjp2)
+  ifeq ($(shell $(PKG_CONFIG) --exists libopenjp2 && echo yes),yes)
+	SYS_OPENJPEG_CFLAGS := $(shell $(PKG_CONFIG) --cflags libopenjp2)
+	SYS_OPENJPEG_LIBS := $(shell $(PKG_CONFIG) --libs libopenjp2)
   endif
-  ifeq ($(shell pkg-config --exists zlib && echo yes),yes)
-	SYS_ZLIB_CFLAGS := $(shell pkg-config --cflags zlib)
-	SYS_ZLIB_LIBS := $(shell pkg-config --libs zlib)
+  ifeq ($(shell $(PKG_CONFIG) --exists zlib && echo yes),yes)
+	SYS_ZLIB_CFLAGS := $(shell $(PKG_CONFIG) --cflags zlib)
+	SYS_ZLIB_LIBS := $(shell $(PKG_CONFIG) --libs zlib)
   endif
 
-  HAVE_CURL := $(shell pkg-config --exists libcurl && echo yes)
+  HAVE_CURL := $(shell $(PKG_CONFIG) --exists libcurl && echo yes)
   ifeq ($(HAVE_CURL),yes)
-	SYS_CURL_CFLAGS := $(shell pkg-config --cflags libcurl)
-	SYS_CURL_LIBS := $(shell pkg-config --libs libcurl)
+	SYS_CURL_CFLAGS := $(shell $(PKG_CONFIG) --cflags libcurl)
+	SYS_CURL_LIBS := $(shell $(PKG_CONFIG) --libs libcurl)
   endif
 
   HAVE_GLUT := yes
@@ -128,16 +132,16 @@ else ifeq ($(OS),Linux)
 	SYS_GLUT_LIBS := -lglut -lGL
   endif
 
-  HAVE_X11 := $(shell pkg-config --exists x11 xext && echo yes)
+  HAVE_X11 := $(shell $(PKG_CONFIG) --exists x11 xext && echo yes)
   ifeq ($(HAVE_X11),yes)
-	X11_CFLAGS := $(shell pkg-config --cflags x11 xext)
-	X11_LIBS := $(shell pkg-config --libs x11 xext)
+	X11_CFLAGS := $(shell $(PKG_CONFIG) --cflags x11 xext)
+	X11_LIBS := $(shell $(PKG_CONFIG) --libs x11 xext)
   endif
 
-  HAVE_LIBCRYPTO := $(shell pkg-config --exists 'libcrypto >= 1.1.0' && echo yes)
+  HAVE_LIBCRYPTO := $(shell $(PKG_CONFIG) --exists 'libcrypto >= 1.1.0' && echo yes)
   ifeq ($(HAVE_LIBCRYPTO),yes)
-	LIBCRYPTO_CFLAGS := $(shell pkg-config --cflags libcrypto) -DHAVE_LIBCRYPTO
-	LIBCRYPTO_LIBS := $(shell pkg-config --libs libcrypto)
+	LIBCRYPTO_CFLAGS := $(shell $(PKG_CONFIG) --cflags libcrypto) -DHAVE_LIBCRYPTO
+	LIBCRYPTO_LIBS := $(shell $(PKG_CONFIG) --libs libcrypto)
   endif
 
   HAVE_PTHREAD := yes
