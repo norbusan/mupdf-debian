@@ -134,6 +134,8 @@ PKCS7_OBJ := $(PKCS7_SRC:%.c=$(OUT)/%.o)
 # --- Generated embedded font files ---
 
 HEXDUMP_EXE := $(OUT)/scripts/hexdump.exe
+$(HEXDUMP_EXE): scripts/hexdump.c
+	$(QUIET_CC) $(MKTGTDIR) ; $(CC_FOR_BUILD) $(CFLAGS) -o $@ $<
 
 FONT_BIN := $(sort $(wildcard resources/fonts/urw/*.cff))
 FONT_BIN += $(sort $(wildcard resources/fonts/han/*.ttc))

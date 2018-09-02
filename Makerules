@@ -7,6 +7,7 @@ OS := $(OS:Windows_NT=MINGW)
 OS := $(OS:Darwin=MACOS)
 
 PKG_CONFIG ?= pkg-config
+CC_FOR_BUILD ?= $(CC)
 
 HAVE_LIBDL ?= yes
 
