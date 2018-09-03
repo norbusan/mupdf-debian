@@ -1,3 +1,11 @@
+mupdf (1.13.0+ds1-3) unstable; urgency=medium
+
+  * debian/patches: import upstream patch for CVE-2018-10289 (Closes: 896545)
+  * More FTCBFS patches.
+    Thanks to Helmut Grohne for the patches. (Closes: 903319)
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Mon, 03 Sep 2018 09:10:50 +0900
+
 mupdf (1.13.0+ds1-2) unstable; urgency=medium
 
   * Use dh_auto_build/dh_auto_install --parallel.
