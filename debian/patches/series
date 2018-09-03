@@ -2,3 +2,5 @@
 0003-Sort-files-in-static-library-to-make-the-build-repro.patch
 0003-use-debian-flavor-build-options.patch
 0004-Bug-699271-Fix-eternal-loop-when-skipping-space-befo.patch
+0005-MuPDF-crossbuild-use-target-arch-pkg-config.patch
+0006-MuPDF-crossbuild-use-host-cc-for-utils.patch

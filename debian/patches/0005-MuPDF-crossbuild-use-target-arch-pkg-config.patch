@@ -1,0 +1,88 @@
+From: Kan-Ru Chen <kanru@kanru.info>
+Date: Mon, 3 Sep 2018 08:51:04 +0900
+Subject: MuPDF crossbuild use target arch pkg-config
+
+mupdf fails to cross build, because it uses the build architecture
+pkg-config and thus fails to find a pile of .pc files.
+---
+ Makerules | 44 +++++++++++++++++++++++---------------------
+ 1 file changed, 23 insertions(+), 21 deletions(-)
+
+diff --git a/Makerules b/Makerules
+index 9f06b98..2e5bbce 100644
+--- a/Makerules
++++ b/Makerules
+@@ -6,6 +6,8 @@ OS := $(OS:MSYS%=MINGW)
+ OS := $(OS:Windows_NT=MINGW)
+ OS := $(OS:Darwin=MACOS)
+ 
++PKG_CONFIG ?= pkg-config
++
+ HAVE_LIBDL ?= yes
+ 
+ CFLAGS += -Wall -Wdeclaration-after-statement
+@@ -100,43 +102,43 @@ HAVE_GLUT := yes
+ SYS_GLUT_CFLAGS :=
+ SYS_GLUT_LIBS := -lglut -lGL
+ 
+-ifeq "$(shell pkg-config --exists 'libcrypto >= 1.1.0' && echo yes)" "yes"
++ifeq "$(shell $(PKG_CONFIG) --exists 'libcrypto >= 1.1.0' && echo yes)" "yes"
+ HAVE_LIBCRYPTO := yes
+-SYS_LIBCRYPTO_CFLAGS := -DHAVE_LIBCRYPTO $(shell pkg-config --cflags libcrypto)
+-SYS_LIBCRYPTO_LIBS := $(shell pkg-config --libs libcrypto)
++SYS_LIBCRYPTO_CFLAGS := -DHAVE_LIBCRYPTO $(shell $(PKG_CONFIG) --cflags libcrypto)
++SYS_LIBCRYPTO_LIBS := $(shell $(PKG_CONFIG) --libs libcrypto)
+ endif
+ 
+-ifeq "$(shell pkg-config --exists libcurl && echo yes)" "yes"
++ifeq "$(shell $(PKG_CONFIG) --exists libcurl && echo yes)" "yes"
+ HAVE_CURL := yes
+-SYS_CURL_CFLAGS := $(shell pkg-config --cflags libcurl)
+-SYS_CURL_LIBS := $(shell pkg-config --libs libcurl)
+-ifeq "$(shell pkg-config --exists openssl && echo yes)" "yes"
++SYS_CURL_CFLAGS := $(shell $(PKG_CONFIG) --cflags libcurl)
++SYS_CURL_LIBS := $(shell $(PKG_CONFIG) --libs libcurl)
++ifeq "$(shell $(PKG_CONFIG) --exists openssl && echo yes)" "yes"
+ HAVE_OPENSSL_SSL := yes
+-SYS_CURL_CFLAGS += $(shell pkg-config --cflags openssl)
+-SYS_CURL_DEPS += $(shell pkg-config --libs openssl)
++SYS_CURL_CFLAGS += $(shell $(PKG_CONFIG) --cflags openssl)
++SYS_CURL_DEPS += $(shell $(PKG_CONFIG) --libs openssl)
+ endif
+ endif
+ SYS_CURL_DEPS += -lpthread -lrt
+ 
+-ifeq "$(shell pkg-config --exists x11 xext && echo yes)" "yes"
++ifeq "$(shell $(PKG_CONFIG) --exists x11 xext && echo yes)" "yes"
+ HAVE_X11 := yes
+-SYS_X11_CFLAGS := $(shell pkg-config --cflags x11 xext)
+-SYS_X11_LIBS := $(shell pkg-config --libs x11 xext)
++SYS_X11_CFLAGS := $(shell $(PKG_CONFIG) --cflags x11 xext)
++SYS_X11_LIBS := $(shell $(PKG_CONFIG) --libs x11 xext)
+ endif
+ 
+-ifeq "$(shell pkg-config --exists harfbuzz && echo yes)" "yes"
+-SYS_HARFBUZZ_CFLAGS := $(shell pkg-config --cflags harfbuzz)
+-SYS_HARFBUZZ_LIBS := $(shell pkg-config --libs harfbuzz)
++ifeq "$(shell $(PKG_CONFIG) --exists harfbuzz && echo yes)" "yes"
++SYS_HARFBUZZ_CFLAGS := $(shell $(PKG_CONFIG) --cflags harfbuzz)
++SYS_HARFBUZZ_LIBS := $(shell $(PKG_CONFIG) --libs harfbuzz)
+ endif
+ 
+-ifeq "$(shell pkg-config --exists freetype2 && echo yes)" "yes"
+-SYS_FREETYPE_CFLAGS := $(shell pkg-config --cflags freetype2)
+-SYS_FREETYPE_LIBS := $(shell pkg-config --libs freetype2)
++ifeq "$(shell $(PKG_CONFIG) --exists freetype2 && echo yes)" "yes"
++SYS_FREETYPE_CFLAGS := $(shell $(PKG_CONFIG) --cflags freetype2)
++SYS_FREETYPE_LIBS := $(shell $(PKG_CONFIG) --libs freetype2)
+ endif
+ 
+-ifeq "$(shell pkg-config --exists libopenjp2 && echo yes)" "yes"
+-SYS_OPENJPEG_CFLAGS := $(shell pkg-config --cflags libopenjp2)
+-SYS_OPENJPEG_LIBS := $(shell pkg-config --libs libopenjp2)
++ifeq "$(shell $(PKG_CONFIG) --exists libopenjp2 && echo yes)" "yes"
++SYS_OPENJPEG_CFLAGS := $(shell $(PKG_CONFIG) --cflags libopenjp2)
++SYS_OPENJPEG_LIBS := $(shell $(PKG_CONFIG) --libs libopenjp2)
+ endif
+ 
+ SYS_JBIG2DEC_LIBS := -ljbig2dec
