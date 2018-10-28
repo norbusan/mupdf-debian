@@ -437,8 +437,6 @@ pdf_process_extgstate(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, pdf_ob
 			fz_var(xobj);
 
 			group = pdf_dict_get(ctx, obj, PDF_NAME_G);
-			if (!group)
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot load softmask xobject (%d %d R)", pdf_to_num(ctx, obj), pdf_to_gen(ctx, obj));
 			xobj = pdf_load_xobject(ctx, csi->doc, group);
 
 			fz_try(ctx)

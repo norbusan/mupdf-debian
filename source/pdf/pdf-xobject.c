@@ -39,6 +39,9 @@ pdf_load_xobject(fz_context *ctx, pdf_document *doc, pdf_obj *dict)
 	pdf_xobject *form;
 	pdf_obj *obj;
 
+	if (!pdf_is_stream(ctx, dict))
+		fz_throw(ctx, FZ_ERROR_SYNTAX, "XObject must be a stream");
+
 	if ((form = pdf_find_item(ctx, pdf_drop_xobject_imp, dict)) != NULL)
 	{
 		return form;
