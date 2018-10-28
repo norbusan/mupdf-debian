@@ -1,3 +1,11 @@
+mupdf (1.9a+ds1-4+deb9u4) stretch-security; urgency=high
+
+  * Fix CVE-2017-17866, CVE-2018-1000037, CVE-2018-1000040, CVE-2018-5686,
+    CVE-2018-6187, and CVE-2018-6192
+    (Closes: #885120, #887130, #888464, #888487)
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sun, 28 Oct 2018 18:14:58 +0900
+
 mupdf (1.9a+ds1-4+deb9u3) stretch-security; urgency=high
 
   * Non-maintainer upload by the Security Team.
