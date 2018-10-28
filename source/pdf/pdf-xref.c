@@ -1687,6 +1687,19 @@ pdf_load_obj_stm(fz_context *ctx, pdf_document *doc, int num, int gen, pdf_lexbu
 	{
 		objstm = pdf_load_object(ctx, doc, num, gen);
 
+		if (pdf_obj_marked(ctx, objstm))
+			fz_throw(ctx, FZ_ERROR_GENERIC, "recursive object stream lookup");
+	}
+	fz_catch(ctx)
+	{
+		pdf_drop_obj(ctx, objstm);
+		fz_rethrow(ctx);
+	}
+
+	fz_try(ctx)
+	{
+		pdf_mark_obj(ctx, objstm);
+
 		count = pdf_to_int(ctx, pdf_dict_get(ctx, objstm, PDF_NAME_N));
 		first = pdf_to_int(ctx, pdf_dict_get(ctx, objstm, PDF_NAME_First));
 
@@ -1766,6 +1779,7 @@ pdf_load_obj_stm(fz_context *ctx, pdf_document *doc, int num, int gen, pdf_lexbu
 		fz_drop_stream(ctx, stm);
 		fz_free(ctx, ofsbuf);
 		fz_free(ctx, numbuf);
+		pdf_unmark_obj(ctx, objstm);
 		pdf_drop_obj(ctx, objstm);
 	}
 	fz_catch(ctx)
