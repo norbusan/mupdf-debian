@@ -7,15 +7,15 @@ Subject: Sort files in static library to make the build reproducible
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/Makefile b/Makefile
-index 8e47e3a..98e6567 100644
+index 37fc48e..dde1840 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -74,7 +74,7 @@ endif
- 
- CC_CMD = $(QUIET_CC) $(CC) $(CFLAGS) -o $@ -c $<
- CXX_CMD = $(QUIET_CXX) $(CXX) $(filter-out -Wdeclaration-after-statement,$(CFLAGS)) -o $@ -c $<
--AR_CMD = $(QUIET_AR) $(AR) cr $@ $^
-+AR_CMD = $(QUIET_AR) $(AR) cr $@ `LC_ALL=C ls $^ 2>/dev/null`
- LINK_CMD = $(QUIET_LINK) $(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
- MKDIR_CMD = $(QUIET_MKDIR) mkdir -p $@
- RM_CMD = $(QUIET_RM) rm -f $@
+@@ -53,7 +53,7 @@ endif
+ MKTGTDIR = mkdir -p $(dir $@)
+ CC_CMD = $(QUIET_CC) $(MKTGTDIR) ; $(CC) $(CFLAGS) -MMD -MP -o $@ -c $<
+ CXX_CMD = $(QUIET_CXX) $(MKTGTDIR) ; $(CXX) $(CFLAGS) -MMD -MP -o $@ -c $<
+-AR_CMD = $(QUIET_AR) $(MKTGTDIR) ; $(AR) cr $@ $^
++AR_CMD = $(QUIET_AR) $(MKTGTDIR) ; $(AR) cr $@ `LC_ALL=C ls $^ 2>/dev/null`
+ ifdef RANLIB
+   RANLIB_CMD = $(QUIET_RANLIB) $(RANLIB) $@
+ endif

@@ -9,29 +9,29 @@ Do not strip binaries by default and use Debian LDFLAGS
  2 files changed, 5 insertions(+)
 
 diff --git a/Makerules b/Makerules
-index 57065f3..9f06b98 100644
+index fc9bf99..b7e64f2 100644
 --- a/Makerules
 +++ b/Makerules
-@@ -27,6 +27,9 @@ SANITIZE_FLAGS += -fsanitize=leak
- ifeq "$(build)" "debug"
- CFLAGS += -pipe -g
- LDFLAGS += -g
+@@ -23,6 +23,9 @@ SANITIZE_FLAGS += -fsanitize=leak
+ ifeq ($(build),debug)
+   CFLAGS += -pipe -g
+   LDFLAGS += -g $(LDREMOVEUNREACH)
 +else ifeq "$(build)" "debian"
-+CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer
-+LDFLAGS += $(LDREMOVEUNREACH)
- else ifeq "$(build)" "release"
- CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer
- LDFLAGS += $(LDREMOVEUNREACH) -Wl,-s
++  CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer
++  LDFLAGS += $(LDREMOVEUNREACH)
+ else ifeq ($(build),release)
+   CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer
+   LDFLAGS += $(LDREMOVEUNREACH) -Wl,-s
 diff --git a/thirdparty/mujs/Makefile b/thirdparty/mujs/Makefile
-index 2193c96..85842b0 100644
+index 7284f51..3920f4a 100644
 --- a/thirdparty/mujs/Makefile
 +++ b/thirdparty/mujs/Makefile
-@@ -31,6 +31,8 @@ CFLAGS += -g
+@@ -30,6 +30,8 @@ ifeq "$(build)" "debug"
  else ifeq "$(build)" "sanitize"
- CFLAGS += -pipe -g -fsanitize=address -fno-omit-frame-pointer
- LDFLAGS += -fsanitize=address
+   CFLAGS += -pipe -g -fsanitize=address -fno-omit-frame-pointer
+   LDFLAGS += -fsanitize=address
 +else ifeq "$(build)" "debian"
-+LDFLAGS += $(XLDFLAGS)
++  LDFLAGS += $(XLDFLAGS)
  else
- CFLAGS += -Os
- LDFLAGS += -Wl,-s
+   CFLAGS += -Os
+   LDFLAGS += -Wl,-s

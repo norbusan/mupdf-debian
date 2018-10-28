@@ -1,0 +1,34 @@
+From: Kan-Ru Chen <kanru@kanru.info>
+Date: Mon, 3 Sep 2018 08:53:44 +0900
+Subject: MuPDF crossbuild use host cc for utils
+
+---
+ Makefile  | 2 ++
+ Makerules | 1 +
+ 2 files changed, 3 insertions(+)
+
+diff --git a/Makefile b/Makefile
+index dde1840..cb76e87 100644
+--- a/Makefile
++++ b/Makefile
+@@ -134,6 +134,8 @@ PKCS7_OBJ := $(PKCS7_SRC:%.c=$(OUT)/%.o)
+ # --- Generated embedded font files ---
+ 
+ HEXDUMP_EXE := $(OUT)/scripts/hexdump.exe
++$(HEXDUMP_EXE): scripts/hexdump.c | $(ALL_DIR)
++	$(QUIET_CC) $(CC_FOR_BUILD) $(CFLAGS) -o $@ $<
+ 
+ FONT_BIN := $(sort $(wildcard resources/fonts/urw/*.cff))
+ FONT_BIN += $(sort $(wildcard resources/fonts/han/*.ttc))
+diff --git a/Makerules b/Makerules
+index 0d444f1..35c9cbe 100644
+--- a/Makerules
++++ b/Makerules
+@@ -7,6 +7,7 @@ OS := $(OS:Windows_NT=MINGW)
+ OS := $(OS:Darwin=MACOS)
+ 
+ PKG_CONFIG ?= pkg-config
++CC_FOR_BUILD ?= $(CC)
+ 
+ HAVE_LIBDL ?= yes
+ 
