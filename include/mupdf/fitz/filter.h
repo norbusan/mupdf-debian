@@ -12,12 +12,12 @@ typedef struct fz_jbig2_globals_s fz_jbig2_globals;
 typedef struct
 {
 	int64_t offset;
-	int len;
+	size_t length;
 } fz_range;
 
-fz_stream *fz_open_copy(fz_context *ctx, fz_stream *chain);
-fz_stream *fz_open_null_n(fz_context *ctx, fz_stream *chain, fz_range *ranges, int nranges);
-fz_stream *fz_open_null(fz_context *ctx, fz_stream *chain, int len, int64_t offset);
+fz_stream *fz_open_null_filter(fz_context *ctx, fz_stream *chain, int len, int64_t offset);
+fz_stream *fz_open_range_filter(fz_context *ctx, fz_stream *chain, fz_range *ranges, int nranges);
+fz_stream *fz_open_endstream_filter(fz_context *ctx, fz_stream *chain, int len, int64_t offset);
 fz_stream *fz_open_concat(fz_context *ctx, int max, int pad);
 void fz_concat_push_drop(fz_context *ctx, fz_stream *concat, fz_stream *chain); /* Ownership of chain is passed in */
 fz_stream *fz_open_arc4(fz_context *ctx, fz_stream *chain, unsigned char *key, unsigned keylen);
@@ -35,6 +35,8 @@ fz_stream *fz_open_predict(fz_context *ctx, fz_stream *chain, int predictor, int
 fz_stream *fz_open_jbig2d(fz_context *ctx, fz_stream *chain, fz_jbig2_globals *globals);
 
 fz_jbig2_globals *fz_load_jbig2_globals(fz_context *ctx, fz_buffer *buf);
+fz_jbig2_globals *fz_keep_jbig2_globals(fz_context *ctx, fz_jbig2_globals *globals);
+void fz_drop_jbig2_globals(fz_context *ctx, fz_jbig2_globals *globals);
 void fz_drop_jbig2_globals_imp(fz_context *ctx, fz_storable *globals);
 
 /* Extra filters for tiff */

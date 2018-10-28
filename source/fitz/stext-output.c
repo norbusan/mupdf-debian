@@ -364,8 +364,12 @@ fz_print_stext_page_as_xml(fz_context *ctx, fz_output *out, fz_stext_page *page)
 						name = font_full_name(ctx, font);
 						fz_write_printf(ctx, out, "<font name=\"%s\" size=\"%g\">\n", name, size);
 					}
-					fz_write_printf(ctx, out, "<char bbox=\"%g %g %g %g\" x=\"%g\" y=\"%g\" c=\"",
-							ch->bbox.x0, ch->bbox.y0, ch->bbox.x1, ch->bbox.y1, ch->origin.x, ch->origin.y);
+					fz_write_printf(ctx, out, "<char quad=\"%g %g %g %g %g %g %g %g\" x=\"%g\" y=\"%g\" c=\"",
+							ch->quad.ul.x, ch->quad.ul.y,
+							ch->quad.ur.x, ch->quad.ur.y,
+							ch->quad.ll.x, ch->quad.ll.y,
+							ch->quad.lr.x, ch->quad.lr.y,
+							ch->origin.x, ch->origin.y);
 					switch (ch->c)
 					{
 					case '<': fz_write_string(ctx, out, "&lt;"); break;
@@ -451,7 +455,7 @@ struct fz_text_writer_s
 };
 
 static fz_device *
-text_begin_page(fz_context *ctx, fz_document_writer *wri_, const fz_rect *mediabox)
+text_begin_page(fz_context *ctx, fz_document_writer *wri_, fz_rect mediabox)
 {
 	fz_text_writer *wri = (fz_text_writer*)wri_;
 

@@ -3,40 +3,42 @@
 
 #include <string.h>
 
-fz_rect *
-pdf_to_rect(fz_context *ctx, pdf_obj *array, fz_rect *r)
+fz_rect
+pdf_to_rect(fz_context *ctx, pdf_obj *array)
 {
 	if (!pdf_is_array(ctx, array))
-		*r = fz_empty_rect;
+		return fz_empty_rect;
 	else
 	{
-		float a = pdf_to_real(ctx, pdf_array_get(ctx, array, 0));
-		float b = pdf_to_real(ctx, pdf_array_get(ctx, array, 1));
-		float c = pdf_to_real(ctx, pdf_array_get(ctx, array, 2));
-		float d = pdf_to_real(ctx, pdf_array_get(ctx, array, 3));
-		r->x0 = fz_min(a, c);
-		r->y0 = fz_min(b, d);
-		r->x1 = fz_max(a, c);
-		r->y1 = fz_max(b, d);
+		float a = pdf_array_get_real(ctx, array, 0);
+		float b = pdf_array_get_real(ctx, array, 1);
+		float c = pdf_array_get_real(ctx, array, 2);
+		float d = pdf_array_get_real(ctx, array, 3);
+		fz_rect r;
+		r.x0 = fz_min(a, c);
+		r.y0 = fz_min(b, d);
+		r.x1 = fz_max(a, c);
+		r.y1 = fz_max(b, d);
+		return r;
 	}
-	return r;
 }
 
-fz_matrix *
-pdf_to_matrix(fz_context *ctx, pdf_obj *array, fz_matrix *m)
+fz_matrix
+pdf_to_matrix(fz_context *ctx, pdf_obj *array)
 {
 	if (!pdf_is_array(ctx, array))
-		*m = fz_identity;
+		return fz_identity;
 	else
 	{
-		m->a = pdf_to_real(ctx, pdf_array_get(ctx, array, 0));
-		m->b = pdf_to_real(ctx, pdf_array_get(ctx, array, 1));
-		m->c = pdf_to_real(ctx, pdf_array_get(ctx, array, 2));
-		m->d = pdf_to_real(ctx, pdf_array_get(ctx, array, 3));
-		m->e = pdf_to_real(ctx, pdf_array_get(ctx, array, 4));
-		m->f = pdf_to_real(ctx, pdf_array_get(ctx, array, 5));
+		fz_matrix m;
+		m.a = pdf_array_get_real(ctx, array, 0);
+		m.b = pdf_array_get_real(ctx, array, 1);
+		m.c = pdf_array_get_real(ctx, array, 2);
+		m.d = pdf_array_get_real(ctx, array, 3);
+		m.e = pdf_array_get_real(ctx, array, 4);
+		m.f = pdf_array_get_real(ctx, array, 5);
+		return m;
 	}
-	return m;
 }
 
 static int
@@ -80,9 +82,11 @@ skip_language_code_utf8(const unsigned char *s, size_t n, size_t i)
 	return 0;
 }
 
+/* Convert Unicode/PdfDocEncoding string into utf-8 */
 char *
-pdf_to_utf8_imp(fz_context *ctx, const unsigned char *srcptr, size_t srclen)
+pdf_new_utf8_from_pdf_string(fz_context *ctx, const char *ssrcptr, size_t srclen)
 {
+	const unsigned char *srcptr = (const unsigned char*)ssrcptr;
 	char *dstptr, *dst;
 	size_t dstlen = 0;
 	int ucs;
@@ -168,30 +172,29 @@ pdf_to_utf8_imp(fz_context *ctx, const unsigned char *srcptr, size_t srclen)
 	return dst;
 }
 
-/* Convert Unicode/PdfDocEncoding string into utf-8 */
+/* Convert text string object to UTF-8 */
 char *
-pdf_to_utf8(fz_context *ctx, pdf_obj *src)
+pdf_new_utf8_from_pdf_string_obj(fz_context *ctx, pdf_obj *src)
 {
-	unsigned char *srcptr;
+	const char *srcptr;
 	size_t srclen;
-	srcptr = (unsigned char *) pdf_to_str_buf(ctx, src);
-	srclen = pdf_to_str_len(ctx, src);
-	return pdf_to_utf8_imp(ctx, srcptr, srclen);
+	srcptr = pdf_to_string(ctx, src, &srclen);
+	return pdf_new_utf8_from_pdf_string(ctx, srcptr, srclen);
 }
 
 /* Load text stream and convert to UTF-8 */
 char *
-pdf_load_stream_as_utf8(fz_context *ctx, pdf_obj *src)
+pdf_new_utf8_from_pdf_stream_obj(fz_context *ctx, pdf_obj *src)
 {
 	fz_buffer *stmbuf;
-	unsigned char *srcptr;
+	char *srcptr;
 	size_t srclen;
 	char *dst = NULL;
 
 	stmbuf = pdf_load_stream(ctx, src);
-	srclen = fz_buffer_storage(ctx, stmbuf, &srcptr);
+	srclen = fz_buffer_storage(ctx, stmbuf, (unsigned char **)&srcptr);
 	fz_try(ctx)
-		dst = pdf_to_utf8_imp(ctx, srcptr, srclen);
+		dst = pdf_new_utf8_from_pdf_string(ctx, srcptr, srclen);
 	fz_always(ctx)
 		fz_drop_buffer(ctx, stmbuf);
 	fz_catch(ctx)
@@ -204,121 +207,12 @@ char *
 pdf_load_stream_or_string_as_utf8(fz_context *ctx, pdf_obj *src)
 {
 	if (pdf_is_stream(ctx, src))
-		return pdf_load_stream_as_utf8(ctx, src);
-	return pdf_to_utf8(ctx, src);
-}
-
-/* Convert Unicode/PdfDocEncoding string into ucs-2 */
-unsigned short *
-pdf_to_ucs2(fz_context *ctx, pdf_obj *src)
-{
-	unsigned char *srcptr = (unsigned char *) pdf_to_str_buf(ctx, src);
-	unsigned short *dstptr, *dst;
-	int srclen = pdf_to_str_len(ctx, src);
-	int i;
-
-	if (srclen >= 2 && srcptr[0] == 254 && srcptr[1] == 255)
-	{
-		dstptr = dst = fz_malloc_array(ctx, (srclen - 2) / 2 + 1, sizeof(short));
-		for (i = 2; i + 1 < srclen; i += 2)
-			*dstptr++ = srcptr[i] << 8 | srcptr[i+1];
-	}
-	else if (srclen >= 2 && srcptr[0] == 255 && srcptr[1] == 254)
-	{
-		dstptr = dst = fz_malloc_array(ctx, (srclen - 2) / 2 + 1, sizeof(short));
-		for (i = 2; i + 1 < srclen; i += 2)
-			*dstptr++ = srcptr[i] | srcptr[i+1] << 8;
-	}
-	else
-	{
-		dstptr = dst = fz_malloc_array(ctx, srclen + 1, sizeof(short));
-		for (i = 0; i < srclen; i++)
-			*dstptr++ = pdf_doc_encoding[srcptr[i]];
-	}
-
-	*dstptr = '\0';
-	return dst;
-}
-
-/* allow conversion to UCS-2 without the need for a fz_context */
-/* (buffer must be at least (fz_to_str_len(src) + 1) * 2 bytes in size) */
-void
-pdf_to_ucs2_buf(fz_context *ctx, unsigned short *buffer, pdf_obj *src)
-{
-	unsigned char *srcptr = (unsigned char *) pdf_to_str_buf(ctx, src);
-	unsigned short *dstptr = buffer;
-	int srclen = pdf_to_str_len(ctx, src);
-	int i;
-
-	if (srclen >= 2 && srcptr[0] == 254 && srcptr[1] == 255)
-	{
-		for (i = 2; i + 1 < srclen; i += 2)
-			*dstptr++ = srcptr[i] << 8 | srcptr[i+1];
-	}
-	else if (srclen >= 2 && srcptr[0] == 255 && srcptr[1] == 254)
-	{
-		for (i = 2; i + 1 < srclen; i += 2)
-			*dstptr++ = srcptr[i] | srcptr[i+1] << 8;
-	}
-	else
-	{
-		for (i = 0; i < srclen; i++)
-			*dstptr++ = pdf_doc_encoding[srcptr[i]];
-	}
-
-	*dstptr = '\0';
-}
-
-/* Convert UCS-2 string into PdfDocEncoding for authentication */
-char *
-pdf_from_ucs2(fz_context *ctx, unsigned short *src)
-{
-	int i, j, len;
-	char *docstr;
-
-	len = 0;
-	while (src[len])
-		len++;
-
-	docstr = fz_malloc(ctx, len + 1);
-
-	for (i = 0; i < len; i++)
-	{
-		/* shortcut: check if the character has the same code point in both encodings */
-		if (0 < src[i] && src[i] < 256 && pdf_doc_encoding[src[i]] == src[i]) {
-			docstr[i] = src[i];
-			continue;
-		}
-
-		/* search through pdf_docencoding for the character's code point */
-		for (j = 0; j < 256; j++)
-			if (pdf_doc_encoding[j] == src[i])
-				break;
-		docstr[i] = j;
-
-		/* fail, if a character can't be encoded */
-		if (!docstr[i])
-		{
-			fz_free(ctx, docstr);
-			return NULL;
-		}
-	}
-	docstr[len] = '\0';
-
-	return docstr;
-}
-
-pdf_obj *
-pdf_to_utf8_name(fz_context *ctx, pdf_document *doc, pdf_obj *src)
-{
-	char *buf = pdf_to_utf8(ctx, src);
-	pdf_obj *dst = pdf_new_name(ctx, doc, buf);
-	fz_free(ctx, buf);
-	return dst;
+		return pdf_new_utf8_from_pdf_stream_obj(ctx, src);
+	return pdf_new_utf8_from_pdf_string_obj(ctx, src);
 }
 
 static pdf_obj *
-pdf_new_text_string_utf16be(fz_context *ctx, pdf_document *doc, const char *s)
+pdf_new_text_string_utf16be(fz_context *ctx, const char *s)
 {
 	int c, i = 0, n = fz_utflen(s);
 	unsigned char *p = fz_malloc(ctx, n * 2 + 2);
@@ -332,7 +226,7 @@ pdf_new_text_string_utf16be(fz_context *ctx, pdf_document *doc, const char *s)
 		p[i++] = (c) & 0xff;
 	}
 	fz_try(ctx)
-		obj = pdf_new_string(ctx, doc, (char*)p, i);
+		obj = pdf_new_string(ctx, (char*)p, i);
 	fz_always(ctx)
 		fz_free(ctx, p);
 	fz_catch(ctx)
@@ -345,16 +239,16 @@ pdf_new_text_string_utf16be(fz_context *ctx, pdf_document *doc, const char *s)
  * In theory, we could also use PDFDocEncoding.
  */
 pdf_obj *
-pdf_new_text_string(fz_context *ctx, pdf_document *doc, const char *s)
+pdf_new_text_string(fz_context *ctx, const char *s)
 {
 	int i = 0;
 	while (s[i] != 0)
 	{
 		if (((unsigned char)s[i]) >= 128)
-			return pdf_new_text_string_utf16be(ctx, doc, s);
+			return pdf_new_text_string_utf16be(ctx, s);
 		++i;
 	}
-	return pdf_new_string(ctx, doc, s, i);
+	return pdf_new_string(ctx, s, i);
 }
 
 pdf_obj *
@@ -442,11 +336,11 @@ pdf_parse_array(fz_context *ctx, pdf_document *doc, fz_stream *file, pdf_lexbuf 
 				pdf_array_push_bool(ctx, ary, 0);
 				break;
 			case PDF_TOK_NULL:
-				pdf_array_push(ctx, ary, PDF_OBJ_NULL);
+				pdf_array_push(ctx, ary, PDF_NULL);
 				break;
 
 			default:
-				pdf_array_push(ctx, ary, PDF_OBJ_NULL);
+				pdf_array_push(ctx, ary, PDF_NULL);
 				break;
 			}
 		}
@@ -491,7 +385,7 @@ pdf_parse_dict(fz_context *ctx, pdf_document *doc, fz_stream *file, pdf_lexbuf *
 			if (tok != PDF_TOK_NAME)
 				fz_throw(ctx, FZ_ERROR_SYNTAX, "invalid key in dict");
 
-			key = pdf_new_name(ctx, doc, buf->scratch);
+			key = pdf_new_name(ctx, buf->scratch);
 
 			tok = pdf_lex(ctx, file, buf);
 
@@ -505,12 +399,12 @@ pdf_parse_dict(fz_context *ctx, pdf_document *doc, fz_stream *file, pdf_lexbuf *
 				val = pdf_parse_dict(ctx, doc, file, buf);
 				break;
 
-			case PDF_TOK_NAME: val = pdf_new_name(ctx, doc, buf->scratch); break;
-			case PDF_TOK_REAL: val = pdf_new_real(ctx, doc, buf->f); break;
-			case PDF_TOK_STRING: val = pdf_new_string(ctx, doc, buf->scratch, buf->len); break;
-			case PDF_TOK_TRUE: val = pdf_new_bool(ctx, doc, 1); break;
-			case PDF_TOK_FALSE: val = pdf_new_bool(ctx, doc, 0); break;
-			case PDF_TOK_NULL: val = pdf_new_null(ctx, doc); break;
+			case PDF_TOK_NAME: val = pdf_new_name(ctx, buf->scratch); break;
+			case PDF_TOK_REAL: val = pdf_new_real(ctx, buf->f); break;
+			case PDF_TOK_STRING: val = pdf_new_string(ctx, buf->scratch, buf->len); break;
+			case PDF_TOK_TRUE: val = PDF_TRUE; break;
+			case PDF_TOK_FALSE: val = PDF_FALSE; break;
+			case PDF_TOK_NULL: val = PDF_NULL; break;
 
 			case PDF_TOK_INT:
 				/* 64-bit to allow for numbers > INT_MAX and overflow */
@@ -519,7 +413,7 @@ pdf_parse_dict(fz_context *ctx, pdf_document *doc, fz_stream *file, pdf_lexbuf *
 				if (tok == PDF_TOK_CLOSE_DICT || tok == PDF_TOK_NAME ||
 					(tok == PDF_TOK_KEYWORD && !strcmp(buf->scratch, "ID")))
 				{
-					val = pdf_new_int(ctx, doc, a);
+					val = pdf_new_int(ctx, a);
 					pdf_dict_put(ctx, dict, key, val);
 					pdf_drop_obj(ctx, val);
 					val = NULL;
@@ -538,11 +432,11 @@ pdf_parse_dict(fz_context *ctx, pdf_document *doc, fz_stream *file, pdf_lexbuf *
 					}
 				}
 				fz_warn(ctx, "invalid indirect reference in dict");
-				val = pdf_new_null(ctx, doc);
+				val = PDF_NULL;
 				break;
 
 			default:
-				val = pdf_new_null(ctx, doc);
+				val = PDF_NULL;
 				break;
 			}
 
@@ -576,13 +470,13 @@ pdf_parse_stm_obj(fz_context *ctx, pdf_document *doc, fz_stream *file, pdf_lexbu
 		return pdf_parse_array(ctx, doc, file, buf);
 	case PDF_TOK_OPEN_DICT:
 		return pdf_parse_dict(ctx, doc, file, buf);
-	case PDF_TOK_NAME: return pdf_new_name(ctx, doc, buf->scratch); break;
-	case PDF_TOK_REAL: return pdf_new_real(ctx, doc, buf->f); break;
-	case PDF_TOK_STRING: return pdf_new_string(ctx, doc, buf->scratch, buf->len); break;
-	case PDF_TOK_TRUE: return pdf_new_bool(ctx, doc, 1); break;
-	case PDF_TOK_FALSE: return pdf_new_bool(ctx, doc, 0); break;
-	case PDF_TOK_NULL: return pdf_new_null(ctx, doc); break;
-	case PDF_TOK_INT: return pdf_new_int(ctx, doc, buf->i); break;
+	case PDF_TOK_NAME: return pdf_new_name(ctx, buf->scratch);
+	case PDF_TOK_REAL: return pdf_new_real(ctx, buf->f);
+	case PDF_TOK_STRING: return pdf_new_string(ctx, buf->scratch, buf->len);
+	case PDF_TOK_TRUE: return PDF_TRUE;
+	case PDF_TOK_FALSE: return PDF_FALSE;
+	case PDF_TOK_NULL: return PDF_NULL;
+	case PDF_TOK_INT: return pdf_new_int(ctx, buf->i);
 	default: fz_throw(ctx, FZ_ERROR_SYNTAX, "unknown token in object stream");
 	}
 }
@@ -641,12 +535,12 @@ pdf_parse_ind_obj(fz_context *ctx, pdf_document *doc,
 		obj = pdf_parse_dict(ctx, doc, file, buf);
 		break;
 
-	case PDF_TOK_NAME: obj = pdf_new_name(ctx, doc, buf->scratch); break;
-	case PDF_TOK_REAL: obj = pdf_new_real(ctx, doc, buf->f); break;
-	case PDF_TOK_STRING: obj = pdf_new_string(ctx, doc, buf->scratch, buf->len); break;
-	case PDF_TOK_TRUE: obj = pdf_new_bool(ctx, doc, 1); break;
-	case PDF_TOK_FALSE: obj = pdf_new_bool(ctx, doc, 0); break;
-	case PDF_TOK_NULL: obj = pdf_new_null(ctx, doc); break;
+	case PDF_TOK_NAME: obj = pdf_new_name(ctx, buf->scratch); break;
+	case PDF_TOK_REAL: obj = pdf_new_real(ctx, buf->f); break;
+	case PDF_TOK_STRING: obj = pdf_new_string(ctx, buf->scratch, buf->len); break;
+	case PDF_TOK_TRUE: obj = PDF_TRUE; break;
+	case PDF_TOK_FALSE: obj = PDF_FALSE; break;
+	case PDF_TOK_NULL: obj = PDF_NULL; break;
 
 	case PDF_TOK_INT:
 		a = buf->i;
@@ -654,7 +548,7 @@ pdf_parse_ind_obj(fz_context *ctx, pdf_document *doc,
 
 		if (tok == PDF_TOK_STREAM || tok == PDF_TOK_ENDOBJ)
 		{
-			obj = pdf_new_int(ctx, doc, a);
+			obj = pdf_new_int(ctx, a);
 			read_next_token = 0;
 			break;
 		}
@@ -671,7 +565,7 @@ pdf_parse_ind_obj(fz_context *ctx, pdf_document *doc,
 		fz_throw(ctx, FZ_ERROR_SYNTAX, "expected 'R' keyword (%d %d R)", num, gen);
 
 	case PDF_TOK_ENDOBJ:
-		obj = pdf_new_null(ctx, doc);
+		obj = PDF_NULL;
 		read_next_token = 0;
 		break;
 

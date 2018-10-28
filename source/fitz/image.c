@@ -252,7 +252,7 @@ static void fz_adjust_image_subarea(fz_context *ctx, fz_image *image, fz_irect *
 		subarea->y1 = image->h;
 }
 
-static void fz_compute_image_key(fz_context *ctx, fz_image *image, const fz_matrix *ctm,
+static void fz_compute_image_key(fz_context *ctx, fz_image *image, fz_matrix *ctm,
 	fz_image_key *key, const fz_irect *subarea, int l2factor, int *w, int *h, int *dw, int *dh)
 {
 	key->refs = 1;
@@ -590,7 +590,7 @@ update_ctm_for_subarea(fz_matrix *ctm, const fz_irect *subarea, int w, int h)
 	m.d = (float) (subarea->y1 - subarea->y0) / h;
 	m.e = (float) subarea->x0 / w;
 	m.f = (float) subarea->y0 / h;
-	fz_concat(ctm, &m, ctm);
+	*ctm = fz_concat(m, *ctm);
 }
 
 void fz_default_image_decode(void *arg, int w, int h, int l2factor, fz_irect *subarea)
@@ -1139,14 +1139,13 @@ display_list_image_get_pixmap(fz_context *ctx, fz_image *image_, fz_irect *subar
 
 	/* If we render the display list into pix with the image matrix, we'll get a unit
 	 * square result. Therefore scale by w, h. */
-	ctm = image->transform;
-	fz_pre_scale(&ctm, w, h);
+	ctm = fz_pre_scale(image->transform, w, h);
 
 	fz_clear_pixmap(ctx, pix); /* clear to transparent */
-	dev = fz_new_draw_device(ctx, &ctm, pix);
+	dev = fz_new_draw_device(ctx, ctm, pix);
 	fz_try(ctx)
 	{
-		fz_run_display_list(ctx, image->list, dev, &fz_identity, NULL, NULL);
+		fz_run_display_list(ctx, image->list, dev, fz_identity, fz_infinite_rect, NULL);
 		fz_close_device(ctx, dev);
 	}
 	fz_always(ctx)
@@ -1196,7 +1195,7 @@ fz_image *fz_new_image_from_display_list(fz_context *ctx, float w, float h, fz_d
 				display_list_image_get_size,
 				drop_display_list_image);
 	image->super.scalable = 1;
-	fz_scale(&image->transform, 1 / w, 1 / h);
+	image->transform = fz_scale(1 / w, 1 / h);
 	image->list = fz_keep_display_list(ctx, list);
 
 	return &image->super;

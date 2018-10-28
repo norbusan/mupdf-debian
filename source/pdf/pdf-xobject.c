@@ -4,42 +4,42 @@
 pdf_obj *
 pdf_xobject_resources(fz_context *ctx, pdf_obj *xobj)
 {
-	return pdf_dict_get(ctx, xobj, PDF_NAME_Resources);
+	return pdf_dict_get(ctx, xobj, PDF_NAME(Resources));
 }
 
-fz_rect *
-pdf_xobject_bbox(fz_context *ctx, pdf_obj *xobj, fz_rect *bbox)
+fz_rect
+pdf_xobject_bbox(fz_context *ctx, pdf_obj *xobj)
 {
-	return pdf_to_rect(ctx, pdf_dict_get(ctx, xobj, PDF_NAME_BBox), bbox);
+	return pdf_dict_get_rect(ctx, xobj, PDF_NAME(BBox));
 }
 
-fz_matrix *
-pdf_xobject_matrix(fz_context *ctx, pdf_obj *xobj, fz_matrix *matrix)
+fz_matrix
+pdf_xobject_matrix(fz_context *ctx, pdf_obj *xobj)
 {
-	return pdf_to_matrix(ctx, pdf_dict_get(ctx, xobj, PDF_NAME_Matrix), matrix);
+	return pdf_dict_get_matrix(ctx, xobj, PDF_NAME(Matrix));
 }
 
 int pdf_xobject_isolated(fz_context *ctx, pdf_obj *xobj)
 {
-	pdf_obj *group = pdf_dict_get(ctx, xobj, PDF_NAME_Group);
+	pdf_obj *group = pdf_dict_get(ctx, xobj, PDF_NAME(Group));
 	if (group)
-		return pdf_to_bool(ctx, pdf_dict_get(ctx, group, PDF_NAME_I));
+		return pdf_dict_get_bool(ctx, group, PDF_NAME(I));
 	return 0;
 }
 
 int pdf_xobject_knockout(fz_context *ctx, pdf_obj *xobj)
 {
-	pdf_obj *group = pdf_dict_get(ctx, xobj, PDF_NAME_Group);
+	pdf_obj *group = pdf_dict_get(ctx, xobj, PDF_NAME(Group));
 	if (group)
-		return pdf_to_bool(ctx, pdf_dict_get(ctx, group, PDF_NAME_K));
+		return pdf_dict_get_bool(ctx, group, PDF_NAME(K));
 	return 0;
 }
 
 int pdf_xobject_transparency(fz_context *ctx, pdf_obj *xobj)
 {
-	pdf_obj *group = pdf_dict_get(ctx, xobj, PDF_NAME_Group);
+	pdf_obj *group = pdf_dict_get(ctx, xobj, PDF_NAME(Group));
 	if (group)
-		if (pdf_name_eq(ctx, pdf_dict_get(ctx, group, PDF_NAME_S), PDF_NAME_Transparency))
+		if (pdf_name_eq(ctx, pdf_dict_get(ctx, group, PDF_NAME(S)), PDF_NAME(Transparency)))
 			return 1;
 	return 0;
 }
@@ -47,10 +47,10 @@ int pdf_xobject_transparency(fz_context *ctx, pdf_obj *xobj)
 fz_colorspace *
 pdf_xobject_colorspace(fz_context *ctx, pdf_obj *xobj)
 {
-	pdf_obj *group = pdf_dict_get(ctx, xobj, PDF_NAME_Group);
+	pdf_obj *group = pdf_dict_get(ctx, xobj, PDF_NAME(Group));
 	if (group)
 	{
-		pdf_obj *cs = pdf_dict_get(ctx, group, PDF_NAME_CS);
+		pdf_obj *cs = pdf_dict_get(ctx, group, PDF_NAME(CS));
 		if (cs)
 		{
 			fz_colorspace *colorspace = NULL;
@@ -65,51 +65,35 @@ pdf_xobject_colorspace(fz_context *ctx, pdf_obj *xobj)
 }
 
 pdf_obj *
-pdf_new_xobject(fz_context *ctx, pdf_document *doc, const fz_rect *bbox, const fz_matrix *mat)
+pdf_new_xobject(fz_context *ctx, pdf_document *doc, fz_rect bbox, fz_matrix matrix, pdf_obj *res, fz_buffer *contents)
 {
-	pdf_obj *form = NULL;
-	pdf_obj *dict = NULL;
-	pdf_obj *res = NULL;
-	pdf_obj *procset;
-
-	fz_var(dict);
-	fz_var(res);
-
+	pdf_obj *ind = NULL;
+	pdf_obj *form = pdf_new_dict(ctx, doc, 5);
 	fz_try(ctx)
 	{
-		dict = pdf_new_dict(ctx, doc, 0);
-		pdf_dict_put_rect(ctx, dict, PDF_NAME_BBox, bbox);
-		pdf_dict_put_int(ctx, dict, PDF_NAME_FormType, 1);
-		pdf_dict_put_int(ctx, dict, PDF_NAME_Length, 0);
-		pdf_dict_put_matrix(ctx, dict, PDF_NAME_Matrix, mat);
-
-		res = pdf_new_dict(ctx, doc, 0);
-		pdf_dict_put(ctx, dict, PDF_NAME_Resources, res);
-
-		procset = pdf_new_array(ctx, doc, 2);
-		pdf_dict_put_drop(ctx, res, PDF_NAME_ProcSet, procset);
-		pdf_array_push(ctx, procset, PDF_NAME_PDF);
-		pdf_array_push(ctx, procset, PDF_NAME_Text);
-
-		pdf_dict_put(ctx, dict, PDF_NAME_Subtype, PDF_NAME_Form);
-		pdf_dict_put(ctx, dict, PDF_NAME_Type, PDF_NAME_XObject);
-
-		form = pdf_add_object(ctx, doc, dict);
+		pdf_dict_put(ctx, form, PDF_NAME(Type), PDF_NAME(XObject));
+		pdf_dict_put(ctx, form, PDF_NAME(Subtype), PDF_NAME(Form));
+		pdf_dict_put_rect(ctx, form, PDF_NAME(BBox), bbox);
+		pdf_dict_put_matrix(ctx, form, PDF_NAME(Matrix), matrix);
+		if (res)
+			pdf_dict_put(ctx, form, PDF_NAME(Resources), res);
+		ind = pdf_add_stream(ctx, doc, contents, form, 0);
 	}
 	fz_always(ctx)
-	{
-		pdf_drop_obj(ctx, dict);
-		pdf_drop_obj(ctx, res);
-	}
+		pdf_drop_obj(ctx, form);
 	fz_catch(ctx)
-	{
 		fz_rethrow(ctx);
-	}
-
-	return form;
+	return ind;
 }
 
-void pdf_update_xobject_contents(fz_context *ctx, pdf_document *doc, pdf_obj *form, fz_buffer *buffer)
+void
+pdf_update_xobject(fz_context *ctx, pdf_document *doc, pdf_obj *form, fz_rect bbox, fz_matrix matrix, pdf_obj *res, fz_buffer *contents)
 {
-	pdf_update_stream(ctx, doc, form, buffer, 0);
+	pdf_dict_put_rect(ctx, form, PDF_NAME(BBox), bbox);
+	pdf_dict_put_matrix(ctx, form, PDF_NAME(Matrix), matrix);
+	if (res)
+		pdf_dict_put(ctx, form, PDF_NAME(Resources), res);
+	else
+		pdf_dict_del(ctx, form, PDF_NAME(Resources));
+	pdf_update_stream(ctx, doc, form, contents, 0);
 }

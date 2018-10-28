@@ -31,7 +31,7 @@ load_icc_based(fz_context *ctx, pdf_obj *dict, int alt)
 	*/
 	fz_try(ctx)
 	{
-		obj = pdf_dict_get(ctx, dict, PDF_NAME_Alternate);
+		obj = pdf_dict_get(ctx, dict, PDF_NAME(Alternate));
 		if (obj)
 		{
 			cs_alt = pdf_load_colorspace(ctx, obj);
@@ -52,33 +52,36 @@ load_icc_based(fz_context *ctx, pdf_obj *dict, int alt)
 		cs_alt = NULL;
 	}
 
-	n = pdf_to_int(ctx, pdf_dict_get(ctx, dict, PDF_NAME_N));
+	n = pdf_dict_get_int(ctx, dict, PDF_NAME(N));
 
 	fz_try(ctx)
 	{
 		if (fz_get_cmm_engine(ctx))
 		{
-			const char *name;
-			if (n == 1) name = "ICCBased-Gray";
-			else if (n == 3) name = "ICCBased-RGB";
-			else if (n == 4) name = "ICCBased-CMYK";
-			else name = "ICCBased";
+			enum fz_colorspace_type type;
+			if (n == 1) type = FZ_COLORSPACE_GRAY;
+			else if (n == 3) type = FZ_COLORSPACE_RGB;
+			else if (n == 4) type = FZ_COLORSPACE_CMYK;
+			else type = FZ_COLORSPACE_NONE;
 			buffer = pdf_load_stream(ctx, dict);
-			cs = fz_new_icc_colorspace(ctx, name, n, buffer);
+			cs = fz_new_icc_colorspace(ctx, type, buffer);
 		}
 	}
 	fz_always(ctx)
 		fz_drop_buffer(ctx, buffer);
 	fz_catch(ctx)
 	{
-		if (!alt)
+		if (!alt) {
+			fz_drop_colorspace(ctx, cs_alt);
 			fz_rethrow(ctx);
+		}
 	}
 
 	if (cs)
 	{
 		if (n != 1 && n != 3 && n != 4)
 		{
+			fz_drop_colorspace(ctx, cs_alt);
 			fz_drop_colorspace(ctx, cs);
 			fz_throw(ctx, FZ_ERROR_GENERIC, "ICC Based must have 1, 3 or 4 components");
 		}
@@ -94,7 +97,10 @@ load_icc_based(fz_context *ctx, pdf_obj *dict, int alt)
 	 * or because we aren't in an ICC workflow. If we aren't allowed
 	 * to return the alternate, then that's all she wrote. */
 	if (!alt)
+	{
+		fz_drop_colorspace(ctx, cs_alt);
 		fz_throw(ctx, FZ_ERROR_GENERIC, "Unable to read ICC workflow");
+	}
 
 	/* If we have an alternate we are allowed to use, return that. */
 	if (cs_alt)
@@ -314,31 +320,31 @@ pdf_load_cal_common(fz_context *ctx, pdf_obj *dict, float *wp, float *bp, float 
 	pdf_obj *obj;
 	int i;
 
-	obj = pdf_dict_get(ctx, dict, PDF_NAME_WhitePoint);
+	obj = pdf_dict_get(ctx, dict, PDF_NAME(WhitePoint));
 	if (pdf_array_len(ctx, obj) != 3)
 		fz_throw(ctx, FZ_ERROR_SYNTAX, "WhitePoint must be a 3-element array");
 
 	for (i = 0; i < 3; i++)
 	{
-		wp[i] = pdf_to_real(ctx, pdf_array_get(ctx, obj, i));
+		wp[i] = pdf_array_get_real(ctx, obj, i);
 		if (wp[i] < 0)
 			fz_throw(ctx, FZ_ERROR_SYNTAX, "WhitePoint numbers must be positive");
 	}
 	if (wp[1] != 1)
 		fz_throw(ctx, FZ_ERROR_SYNTAX, "WhitePoint Yw must be 1.0");
 
-	obj = pdf_dict_get(ctx, dict, PDF_NAME_BlackPoint);
+	obj = pdf_dict_get(ctx, dict, PDF_NAME(BlackPoint));
 	if (pdf_array_len(ctx, obj) == 3)
 	{
 		for (i = 0; i < 3; i++)
 		{
-			bp[i] = pdf_to_real(ctx, pdf_array_get(ctx, obj, i));
+			bp[i] = pdf_array_get_real(ctx, obj, i);
 			if (bp[i] < 0)
 				fz_throw(ctx, FZ_ERROR_SYNTAX, "BlackPoint numbers must be positive");
 		}
 	}
 
-	obj = pdf_dict_get(ctx, dict, PDF_NAME_Gamma);
+	obj = pdf_dict_get(ctx, dict, PDF_NAME(Gamma));
 	if (pdf_is_number(ctx, obj))
 	{
 		gamma[0] = pdf_to_real(ctx, obj);
@@ -350,7 +356,7 @@ pdf_load_cal_common(fz_context *ctx, pdf_obj *dict, float *wp, float *bp, float 
 	{
 		for (i = 0; i < 3; i++)
 		{
-			gamma[i] = pdf_to_real(ctx, pdf_array_get(ctx, obj, i));
+			gamma[i] = pdf_array_get_real(ctx, obj, i);
 			if (gamma[i] <= 0)
 				fz_throw(ctx, FZ_ERROR_SYNTAX, "Gamma must be greater than zero");
 		}
@@ -394,11 +400,11 @@ pdf_load_cal_rgb(fz_context *ctx, pdf_obj *dict)
 	{
 		pdf_load_cal_common(ctx, dict, wp, bp, gamma);
 
-		obj = pdf_dict_get(ctx, dict, PDF_NAME_Matrix);
+		obj = pdf_dict_get(ctx, dict, PDF_NAME(Matrix));
 		if (pdf_array_len(ctx, obj) == 9)
 		{
 			for (i = 0; i < 9; i++)
-				matrix[i] = pdf_to_real(ctx, pdf_array_get(ctx, obj, i));
+				matrix[i] = pdf_array_get_real(ctx, obj, i);
 		}
 	}
 	fz_catch(ctx)
@@ -416,19 +422,19 @@ pdf_load_colorspace_imp(fz_context *ctx, pdf_obj *obj)
 
 	if (pdf_is_name(ctx, obj))
 	{
-		if (pdf_name_eq(ctx, obj, PDF_NAME_Pattern))
+		if (pdf_name_eq(ctx, obj, PDF_NAME(Pattern)))
 			return fz_keep_colorspace(ctx, fz_device_gray(ctx));
-		else if (pdf_name_eq(ctx, obj, PDF_NAME_G))
+		else if (pdf_name_eq(ctx, obj, PDF_NAME(G)))
 			return fz_keep_colorspace(ctx, fz_device_gray(ctx));
-		else if (pdf_name_eq(ctx, obj, PDF_NAME_RGB))
+		else if (pdf_name_eq(ctx, obj, PDF_NAME(RGB)))
 			return fz_keep_colorspace(ctx, fz_device_rgb(ctx));
-		else if (pdf_name_eq(ctx, obj, PDF_NAME_CMYK))
+		else if (pdf_name_eq(ctx, obj, PDF_NAME(CMYK)))
 			return fz_keep_colorspace(ctx, fz_device_cmyk(ctx));
-		else if (pdf_name_eq(ctx, obj, PDF_NAME_DeviceGray))
+		else if (pdf_name_eq(ctx, obj, PDF_NAME(DeviceGray)))
 			return fz_keep_colorspace(ctx, fz_device_gray(ctx));
-		else if (pdf_name_eq(ctx, obj, PDF_NAME_DeviceRGB))
+		else if (pdf_name_eq(ctx, obj, PDF_NAME(DeviceRGB)))
 			return fz_keep_colorspace(ctx, fz_device_rgb(ctx));
-		else if (pdf_name_eq(ctx, obj, PDF_NAME_DeviceCMYK))
+		else if (pdf_name_eq(ctx, obj, PDF_NAME(DeviceCMYK)))
 			return fz_keep_colorspace(ctx, fz_device_cmyk(ctx));
 		else
 			fz_throw(ctx, FZ_ERROR_SYNTAX, "unknown colorspace: %s", pdf_to_name(ctx, obj));
@@ -441,35 +447,35 @@ pdf_load_colorspace_imp(fz_context *ctx, pdf_obj *obj)
 		if (pdf_is_name(ctx, name))
 		{
 			/* load base colorspace instead */
-			if (pdf_name_eq(ctx, name, PDF_NAME_G))
+			if (pdf_name_eq(ctx, name, PDF_NAME(G)))
 				return fz_keep_colorspace(ctx, fz_device_gray(ctx));
-			else if (pdf_name_eq(ctx, name, PDF_NAME_RGB))
+			else if (pdf_name_eq(ctx, name, PDF_NAME(RGB)))
 				return fz_keep_colorspace(ctx, fz_device_rgb(ctx));
-			else if (pdf_name_eq(ctx, name, PDF_NAME_CMYK))
+			else if (pdf_name_eq(ctx, name, PDF_NAME(CMYK)))
 				return fz_keep_colorspace(ctx, fz_device_cmyk(ctx));
-			else if (pdf_name_eq(ctx, name, PDF_NAME_DeviceGray))
+			else if (pdf_name_eq(ctx, name, PDF_NAME(DeviceGray)))
 				return fz_keep_colorspace(ctx, fz_device_gray(ctx));
-			else if (pdf_name_eq(ctx, name, PDF_NAME_DeviceRGB))
+			else if (pdf_name_eq(ctx, name, PDF_NAME(DeviceRGB)))
 				return fz_keep_colorspace(ctx, fz_device_rgb(ctx));
-			else if (pdf_name_eq(ctx, name, PDF_NAME_DeviceCMYK))
+			else if (pdf_name_eq(ctx, name, PDF_NAME(DeviceCMYK)))
 				return fz_keep_colorspace(ctx, fz_device_cmyk(ctx));
-			else if (pdf_name_eq(ctx, name, PDF_NAME_CalGray))
+			else if (pdf_name_eq(ctx, name, PDF_NAME(CalGray)))
 			{
 				if (fz_get_cmm_engine(ctx))
 					return pdf_load_cal_gray(ctx, pdf_array_get(ctx, obj, 1));
 				else
 					return fz_keep_colorspace(ctx, fz_device_gray(ctx));
 			}
-			else if (pdf_name_eq(ctx, name, PDF_NAME_CalRGB))
+			else if (pdf_name_eq(ctx, name, PDF_NAME(CalRGB)))
 			{
 				if (fz_get_cmm_engine(ctx))
 					return pdf_load_cal_rgb(ctx, pdf_array_get(ctx, obj, 1));
 				else
 					return fz_keep_colorspace(ctx, fz_device_rgb(ctx));
 			}
-			else if (pdf_name_eq(ctx, name, PDF_NAME_CalCMYK))
+			else if (pdf_name_eq(ctx, name, PDF_NAME(CalCMYK)))
 				return fz_keep_colorspace(ctx, fz_device_cmyk(ctx));
-			else if (pdf_name_eq(ctx, name, PDF_NAME_Lab))
+			else if (pdf_name_eq(ctx, name, PDF_NAME(Lab)))
 				return fz_keep_colorspace(ctx, fz_device_lab(ctx));
 			else
 			{
@@ -478,20 +484,20 @@ pdf_load_colorspace_imp(fz_context *ctx, pdf_obj *obj)
 				{
 					if (pdf_mark_obj(ctx, obj))
 						fz_throw(ctx, FZ_ERROR_SYNTAX, "recursive colorspace");
-					if (pdf_name_eq(ctx, name, PDF_NAME_ICCBased))
+					if (pdf_name_eq(ctx, name, PDF_NAME(ICCBased)))
 						cs = load_icc_based(ctx, pdf_array_get(ctx, obj, 1), 1);
 
-					else if (pdf_name_eq(ctx, name, PDF_NAME_Indexed))
+					else if (pdf_name_eq(ctx, name, PDF_NAME(Indexed)))
 						cs = load_indexed(ctx, obj);
-					else if (pdf_name_eq(ctx, name, PDF_NAME_I))
+					else if (pdf_name_eq(ctx, name, PDF_NAME(I)))
 						cs = load_indexed(ctx, obj);
 
-					else if (pdf_name_eq(ctx, name, PDF_NAME_Separation))
+					else if (pdf_name_eq(ctx, name, PDF_NAME(Separation)))
 						cs = load_devicen(ctx, obj);
 
-					else if (pdf_name_eq(ctx, name, PDF_NAME_DeviceN))
+					else if (pdf_name_eq(ctx, name, PDF_NAME(DeviceN)))
 						cs = load_devicen(ctx, obj);
-					else if (pdf_name_eq(ctx, name, PDF_NAME_Pattern))
+					else if (pdf_name_eq(ctx, name, PDF_NAME(Pattern)))
 					{
 						pdf_obj *pobj;
 
@@ -553,8 +559,8 @@ pdf_load_colorspace(fz_context *ctx, pdf_obj *obj)
 static fz_colorspace *
 pdf_load_output_intent(fz_context *ctx, pdf_document *doc)
 {
-	pdf_obj *root = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME_Root);
-	pdf_obj *intents = pdf_dict_get(ctx, root, PDF_NAME_OutputIntents);
+	pdf_obj *root = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(Root));
+	pdf_obj *intents = pdf_dict_get(ctx, root, PDF_NAME(OutputIntents));
 	pdf_obj *intent_dict;
 	pdf_obj *dest_profile;
 	fz_colorspace *cs = NULL;
@@ -568,7 +574,7 @@ pdf_load_output_intent(fz_context *ctx, pdf_document *doc)
 	intent_dict = pdf_array_get(ctx, intents, 0);
 	if (!intent_dict)
 		return NULL;
-	dest_profile = pdf_dict_get(ctx, intent_dict, PDF_NAME_DestOutputProfile);
+	dest_profile = pdf_dict_get(ctx, intent_dict, PDF_NAME(DestOutputProfile));
 	if (!dest_profile)
 		return NULL;
 

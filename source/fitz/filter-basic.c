@@ -2,22 +2,11 @@
 
 #include <string.h>
 
-/* Pretend we have a filter that just copies data forever */
-
-fz_stream *
-fz_open_copy(fz_context *ctx, fz_stream *chain)
-{
-	return fz_keep_stream(ctx, chain);
-}
-
-/* Null filter copies a specified amount of data */
+/* The null filter reads a specified amount of data from the substream. */
 
 struct null_filter
 {
 	fz_stream *chain;
-	fz_range *ranges;
-	int nranges;
-	int next_range;
 	size_t remain;
 	int64_t offset;
 	unsigned char buffer[4096];
@@ -29,10 +18,69 @@ next_null(fz_context *ctx, fz_stream *stm, size_t max)
 	struct null_filter *state = stm->state;
 	size_t n;
 
+	if (state->remain == 0)
+		return EOF;
+
+	fz_seek(ctx, state->chain, state->offset, 0);
+	n = fz_available(ctx, state->chain, max);
+	if (n == 0)
+		return EOF;
+	if (n > state->remain)
+		n = state->remain;
+	if (n > sizeof(state->buffer))
+		n = sizeof(state->buffer);
+
+	memcpy(state->buffer, state->chain->rp, n);
+	stm->rp = state->buffer;
+	stm->wp = stm->rp + n;
+	state->chain->rp += n;
+	state->remain -= n;
+	state->offset += n;
+	stm->pos += n;
+	return *stm->rp++;
+}
+
+static void
+close_null(fz_context *ctx, void *state_)
+{
+	struct null_filter *state = (struct null_filter *)state_;
+	fz_drop_stream(ctx, state->chain);
+	fz_free(ctx, state);
+}
+
+fz_stream *
+fz_open_null_filter(fz_context *ctx, fz_stream *chain, int len, int64_t offset)
+{
+	struct null_filter *state = fz_malloc_struct(ctx, struct null_filter);
+	state->chain = fz_keep_stream(ctx, chain);
+	state->remain = len;
+	state->offset = offset;
+	return fz_new_stream(ctx, state, next_null, close_null);
+}
+
+/* The range filter copies data from specified ranges of the chained stream */
+
+struct range_filter
+{
+	fz_stream *chain;
+	fz_range *ranges;
+	int nranges;
+	int next_range;
+	size_t remain;
+	int64_t offset;
+	unsigned char buffer[4096];
+};
+
+static int
+next_range(fz_context *ctx, fz_stream *stm, size_t max)
+{
+	struct range_filter *state = stm->state;
+	size_t n;
+
 	while (state->remain == 0 && state->next_range < state->nranges)
 	{
 		fz_range *range = &state->ranges[state->next_range++];
-		state->remain = range->len;
+		state->remain = range->length;
 		state->offset = range->offset;
 	}
 
@@ -51,26 +99,26 @@ next_null(fz_context *ctx, fz_stream *stm, size_t max)
 		return EOF;
 	state->chain->rp += n;
 	state->remain -= n;
-	state->offset += (int64_t)n;
-	stm->pos += (int64_t)n;
+	state->offset += n;
+	stm->pos += n;
 	return *stm->rp++;
 }
 
 static void
-close_null(fz_context *ctx, void *state_)
+close_range(fz_context *ctx, void *state_)
 {
-	struct null_filter *state = (struct null_filter *)state_;
+	struct range_filter *state = (struct range_filter *)state_;
 	fz_drop_stream(ctx, state->chain);
 	fz_free(ctx, state->ranges);
 	fz_free(ctx, state);
 }
 
 fz_stream *
-fz_open_null_n(fz_context *ctx, fz_stream *chain, fz_range *ranges, int nranges)
+fz_open_range_filter(fz_context *ctx, fz_stream *chain, fz_range *ranges, int nranges)
 {
-	struct null_filter *state = NULL;
+	struct range_filter *state = NULL;
 
-	state = fz_malloc_struct(ctx, struct null_filter);
+	state = fz_malloc_struct(ctx, struct range_filter);
 	fz_try(ctx)
 	{
 		if (nranges > 0)
@@ -79,7 +127,7 @@ fz_open_null_n(fz_context *ctx, fz_stream *chain, fz_range *ranges, int nranges)
 			memcpy(state->ranges, ranges, nranges * sizeof(*ranges));
 			state->nranges = nranges;
 			state->next_range = 1;
-			state->remain = ranges[0].len;
+			state->remain = ranges[0].length;
 			state->offset = ranges[0].offset;
 		}
 		else
@@ -99,22 +147,148 @@ fz_open_null_n(fz_context *ctx, fz_stream *chain, fz_range *ranges, int nranges)
 		fz_rethrow(ctx);
 	}
 
-	return fz_new_stream(ctx, state, next_null, close_null);
+	return fz_new_stream(ctx, state, next_range, close_range);
+}
+
+/*
+ * The endstream filter reads a PDF substream, and starts to look for an 'endstream' token
+ * after the specified length.
+ */
+
+#define END_CHECK_SIZE 32
+
+struct endstream_filter
+{
+	fz_stream *chain;
+	size_t remain, extras, size;
+	int64_t offset;
+	int warned;
+	unsigned char buffer[4096];
+};
+
+static int
+next_endstream(fz_context *ctx, fz_stream *stm, size_t max)
+{
+	struct endstream_filter *state = stm->state;
+	size_t n, nbytes_in_buffer, size;
+	unsigned char *rp;
+
+	if (state->remain == 0)
+		goto look_for_endstream;
+
+	fz_seek(ctx, state->chain, state->offset, 0);
+	n = fz_available(ctx, state->chain, max);
+	if (n == 0)
+		return EOF;
+	if (n > state->remain)
+		n = state->remain;
+	if (n > sizeof(state->buffer))
+		n = sizeof(state->buffer);
+	memcpy(state->buffer, state->chain->rp, n);
+	stm->rp = state->buffer;
+	stm->wp = stm->rp + n;
+	state->chain->rp += n;
+	state->remain -= n;
+	state->offset += n;
+	stm->pos += n;
+	return *stm->rp++;
+
+look_for_endstream:
+	/* We should distrust the stream length, and check for end
+	 * marker before terminating the stream - this is to cope
+	 * with files with duff "Length" values. */
+
+	/* Move any data left over in our buffer down to the start.
+	 * Ordinarily, there won't be any, but this allows for the
+	 * case where we were part way through matching a stream end
+	 * marker when the buffer filled before. */
+	nbytes_in_buffer = state->extras;
+	if (nbytes_in_buffer)
+		memmove(state->buffer, stm->rp, nbytes_in_buffer);
+	stm->rp = state->buffer;
+	stm->wp = stm->rp + nbytes_in_buffer;
+
+	/* In most sane files, we'll get "\nendstream" instantly. We
+	 * should only need (say) 32 bytes to be sure. For crap files
+	 * where we overread regularly, don't harm performance by
+	 * working in small chunks. */
+	size = state->size * 2;
+	if (size > sizeof(state->buffer))
+		size = sizeof(state->buffer);
+	state->size = size;
+
+	/* Read enough data into our buffer to start looking for the 'endstream' token. */
+	fz_seek(ctx, state->chain, state->offset, 0);
+	while (nbytes_in_buffer < size)
+	{
+		n = fz_available(ctx, state->chain, size - nbytes_in_buffer);
+		if (n == 0)
+			break;
+		if (n > size - nbytes_in_buffer)
+			n = size - nbytes_in_buffer;
+		memcpy(stm->wp, state->chain->rp, n);
+		stm->wp += n;
+		state->chain->rp += n;
+		nbytes_in_buffer += n;
+		state->offset += n;
+	}
+
+	/* Look for the 'endstream' token. */
+	rp = fz_memmem(state->buffer, nbytes_in_buffer, "endstream", 9);
+	if (rp)
+	{
+		/* Include newline (CR|LF|CRLF) before 'endstream' token */
+		if (rp > state->buffer && rp[-1] == '\n') --rp;
+		if (rp > state->buffer && rp[-1] == '\r') --rp;
+		n = rp - state->buffer;
+		stm->eof = 1; /* We're done, don't call us again! */
+	}
+	else if (nbytes_in_buffer > 11) /* 11 covers enough data to detect "\r?\n?endstream" */
+		n = nbytes_in_buffer - 11; /* no endstream, but there is more data */
+	else
+		n = nbytes_in_buffer; /* no endstream, but at the end of the file */
+
+	/* We have at least n bytes before we hit an end marker */
+	state->extras = nbytes_in_buffer - n;
+	stm->wp = stm->rp + n;
+	stm->pos += n;
+
+	if (n == 0)
+		return EOF;
+
+	if (!state->warned)
+	{
+		state->warned = 1;
+		fz_warn(ctx, "PDF stream Length incorrect");
+	}
+	return *stm->rp++;
+}
+
+static void
+close_endstream(fz_context *ctx, void *state_)
+{
+	struct endstream_filter *state = (struct endstream_filter *)state_;
+	fz_drop_stream(ctx, state->chain);
+	fz_free(ctx, state);
 }
 
 fz_stream *
-fz_open_null(fz_context *ctx, fz_stream *chain, int len, int64_t offset)
+fz_open_endstream_filter(fz_context *ctx, fz_stream *chain, int len, int64_t offset)
 {
-	fz_range range;
+	struct endstream_filter *state;
 
 	if (len < 0)
 		len = 0;
 
-	range.offset = offset;
-	range.len = len;
-	return fz_open_null_n(ctx, chain, &range, 1);
-}
+	state = fz_malloc_struct(ctx, struct endstream_filter);
+	state->chain = fz_keep_stream(ctx, chain);
+	state->remain = len;
+	state->offset = offset;
+	state->extras = 0;
+	state->size = END_CHECK_SIZE >> 1; /* size is doubled first thing when used */
 
+	return fz_new_stream(ctx, state, next_endstream, close_endstream);
+}
 
 /* Concat filter concatenates several streams into one */
 
@@ -144,7 +318,7 @@ next_concat(fz_context *ctx, fz_stream *stm, size_t max)
 		{
 			stm->rp = state->chain[state->current]->rp;
 			stm->wp = state->chain[state->current]->wp;
-			stm->pos += (int64_t)n;
+			stm->pos += n;
 			return *stm->rp++;
 		}
 		else
@@ -581,7 +755,7 @@ next_arc4(fz_context *ctx, fz_stream *stm, size_t max)
 	stm->wp = state->buffer + n;
 	fz_arc4_encrypt(&state->arc4, stm->rp, state->chain->rp, n);
 	state->chain->rp += n;
-	stm->pos += (int64_t)n;
+	stm->pos += n;
 
 	return *stm->rp++;
 }

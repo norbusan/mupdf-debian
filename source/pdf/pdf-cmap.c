@@ -362,7 +362,7 @@ dump_splay(cmap_splay *tree, unsigned int node, int depth, const char *pre)
 {
 	int i;
 
-	if (node == EMPTY)
+	if (tree == NULL || node == EMPTY)
 		return;
 
 	for (i = 0; i < depth; i++)
@@ -440,6 +440,19 @@ static void walk_splay(cmap_splay *tree, unsigned int node, void (*fn)(cmap_spla
 }
 
 #ifdef CHECK_SPLAY
+
+static int
+tree_has_overlap(cmap_splay *tree, int node, int low, int high)
+{
+	if (tree[node].left != EMPTY)
+		if (tree_has_overlap(tree, tree[node].left, low, high))
+			return 1;
+	if (tree[node].right != EMPTY)
+		if (tree_has_overlap(tree, tree[node].right, low, high))
+			return 1;
+	return (tree[node].low < low && low < tree[node].high) || (tree[node].low < high && high < tree[node].high);
+}
+
 static void
 do_check(cmap_splay *node, void *arg)
 {
@@ -451,6 +464,7 @@ do_check(cmap_splay *node, void *arg)
 		tree[node->left].high < node->low));
 	assert(node->right == EMPTY || (tree[node->right].parent == num &&
 		node->high < tree[node->right].low));
+	assert(!tree_has_overlap(tree, num, node->low, node->high));
 }
 
 static void
@@ -471,12 +485,33 @@ add_range(fz_context *ctx, pdf_cmap *cmap, unsigned int low, unsigned int high, 
 {
 	int current;
 	cmap_splay *tree;
+	int i;
+	int inrange = 0;
+	unsigned int k, count;
 
 	if (low > high)
 	{
 		fz_warn(ctx, "range limits out of range in cmap %s", cmap->cmap_name);
 		return;
 	}
+
+	count = high - low + 1;
+	for (k = 0; k < count; k++) {
+		unsigned int c = low + k;
+
+		inrange = 0;
+		for (i = 0; i < cmap->codespace_len; i++) {
+			if (cmap->codespace[i].low <= c && c <= cmap->codespace[i].high)
+				inrange = 1;
+		}
+		if (!inrange)
+		{
+			fz_warn(ctx, "ignoring CMap range (%u-%u) that is outside of the codespace", low, high);
+			return;
+		}
+	}
+
+
 
 	tree = cmap->tree;
 
@@ -508,6 +543,12 @@ add_range(fz_context *ctx, pdf_cmap *cmap, unsigned int low, unsigned int high, 
 					tree[current].low = high + 1;
 					if (tree[current].low > tree[current].high)
 					{
+						/* update lt/gt references that will be moved/stale after deleting current */
+						if (gt == cmap->tlen - 1)
+							gt = current;
+						if (lt == cmap->tlen - 1)
+							lt = current;
+						/* delete_node() moves the element at cmap->tlen-1 into current */
 						move = delete_node(cmap, current);
 						current = EMPTY;
 						continue;

@@ -176,7 +176,7 @@ static void filter_flush(fz_context *ctx, pdf_filter_processor *p, int flush)
 					gstate->pending.ctm.e,
 					gstate->pending.ctm.f);
 
-			fz_concat(&gstate->sent.ctm, &current, &gstate->pending.ctm);
+			gstate->sent.ctm = fz_concat(current, gstate->pending.ctm);
 			gstate->pending.ctm.a = 1;
 			gstate->pending.ctm.b = 0;
 			gstate->pending.ctm.c = 0;
@@ -404,6 +404,7 @@ done_SC:
 				p->chain->op_Ts(ctx, p->chain, gstate->pending.text.rise);
 		}
 		pdf_drop_font(ctx, gstate->sent.text.font);
+		gstate->sent.text = gstate->pending.text;
 		gstate->sent.text.font = pdf_keep_font(ctx, gstate->pending.text.font);
 	}
 }
@@ -435,7 +436,7 @@ filter_show_char(fz_context *ctx, pdf_filter_processor *p, int cid)
 	}
 
 	if (p->text_filter)
-		remove = p->text_filter(ctx, p->opaque, ucsbuf, ucslen, &trm, &p->tos.char_bbox);
+		remove = p->text_filter(ctx, p->opaque, ucsbuf, ucslen, trm, p->tos.char_bbox);
 
 	pdf_tos_move_after_char(ctx, &p->tos);
 
@@ -449,9 +450,9 @@ filter_show_space(fz_context *ctx, pdf_filter_processor *p, float tadj)
 	pdf_font_desc *fontdesc = gstate->pending.text.font;
 
 	if (fontdesc->wmode == 0)
-		fz_pre_translate(&p->tos.tm, tadj * gstate->pending.text.scale, 0);
+		p->tos.tm = fz_pre_translate(p->tos.tm, tadj * gstate->pending.text.scale, 0);
 	else
-		fz_pre_translate(&p->tos.tm, 0, tadj);
+		p->tos.tm = fz_pre_translate(p->tos.tm, 0, tadj);
 }
 
 /* Process a string (from buf, of length len), from position *pos onwards.
@@ -504,7 +505,7 @@ send_adjustment(fz_context *ctx, pdf_filter_processor *p, fz_point skip)
 	{
 		float skip_dist = p->tos.fontdesc->wmode == 1 ? -skip.y : -skip.x;
 		skip_dist = skip_dist / p->gstate->pending.text.size;
-		skip_obj = pdf_new_real(ctx, p->doc, skip_dist * 1000);
+		skip_obj = pdf_new_real(ctx, skip_dist * 1000);
 
 		pdf_array_insert(ctx, arr, skip_obj, 0);
 
@@ -632,12 +633,12 @@ filter_show_text(fz_context *ctx, pdf_filter_processor *p, pdf_obj *text)
 				if (fontdesc->wmode == 0)
 				{
 					skip.x += tadj;
-					fz_pre_translate(&p->tos.tm, tadj * p->gstate->pending.text.scale, 0);
+					p->tos.tm = fz_pre_translate(p->tos.tm, tadj * p->gstate->pending.text.scale, 0);
 				}
 				else
 				{
 					skip.y += tadj;
-					fz_pre_translate(&p->tos.tm, 0, tadj);
+					p->tos.tm = fz_pre_translate(p->tos.tm, 0, tadj);
 				}
 
 			}
@@ -757,7 +758,7 @@ pdf_filter_gs_begin(fz_context *ctx, pdf_processor *proc, const char *name, pdf_
 	filter_flush(ctx, p, FLUSH_ALL);
 	if (p->chain->op_gs_begin)
 		p->chain->op_gs_begin(ctx, p->chain, name, extgstate);
-	copy_resource(ctx, p, PDF_NAME_ExtGState, name);
+	copy_resource(ctx, p, PDF_NAME(ExtGState), name);
 }
 
 static void
@@ -821,7 +822,7 @@ pdf_filter_cm(fz_context *ctx, pdf_processor *proc, float a, float b, float c, f
 {
 	pdf_filter_processor *p = (pdf_filter_processor*)proc;
 	filter_gstate *gstate = gstate_to_update(ctx, p);
-	fz_matrix old, ctm;
+	fz_matrix ctm;
 
 	/* If we're being given an identity matrix, don't bother sending it */
 	if (a == 1 && b == 0 && c == 0 && d == 1 && e == 0 && f == 0)
@@ -834,8 +835,7 @@ pdf_filter_cm(fz_context *ctx, pdf_processor *proc, float a, float b, float c, f
 	ctm.e = e;
 	ctm.f = f;
 
-	old = gstate->pending.ctm;
-	fz_concat(&gstate->pending.ctm, &ctm, &old);
+	gstate->pending.ctm = fz_concat(ctm, gstate->pending.ctm);
 }
 
 /* path construction */
@@ -1037,12 +1037,10 @@ pdf_filter_ET(fz_context *ctx, pdf_processor *proc)
 		p->chain->op_ET(ctx, p->chain);
 	if (p->after_text)
 	{
-		fz_matrix ctm;
-
-		fz_concat(&ctm, &p->gstate->sent.ctm, &p->gstate->pending.ctm);
+		fz_matrix ctm = fz_concat(p->gstate->sent.ctm, p->gstate->pending.ctm);
 		if (p->chain->op_q)
 			p->chain->op_q(ctx, p->chain);
-		p->after_text(ctx, p->opaque, p->doc, p->chain, &ctm);
+		p->after_text(ctx, p->opaque, p->doc, p->chain, ctm);
 		if (p->chain->op_Q)
 			p->chain->op_Q(ctx, p->chain);
 	}
@@ -1093,7 +1091,7 @@ pdf_filter_Tf(fz_context *ctx, pdf_processor *proc, const char *name, pdf_font_d
 	pdf_drop_font(ctx, p->gstate->pending.text.font);
 	p->gstate->pending.text.font = pdf_keep_font(ctx, font);
 	p->gstate->pending.text.size = size;
-	copy_resource(ctx, p, PDF_NAME_Font, name);
+	copy_resource(ctx, p, PDF_NAME(Font), name);
 }
 
 static void
@@ -1225,7 +1223,7 @@ pdf_filter_CS(fz_context *ctx, pdf_processor *proc, const char *name, fz_colorsp
 	filter_gstate *gstate = gstate_to_update(ctx, p);
 	fz_strlcpy(gstate->pending.CS.name, name, sizeof gstate->pending.CS.name);
 	gstate->pending.CS.cs = cs;
-	copy_resource(ctx, p, PDF_NAME_ColorSpace, name);
+	copy_resource(ctx, p, PDF_NAME(ColorSpace), name);
 }
 
 static void
@@ -1235,7 +1233,7 @@ pdf_filter_cs(fz_context *ctx, pdf_processor *proc, const char *name, fz_colorsp
 	filter_gstate *gstate = gstate_to_update(ctx, p);
 	fz_strlcpy(gstate->pending.cs.name, name, sizeof gstate->pending.cs.name);
 	gstate->pending.cs.cs = cs;
-	copy_resource(ctx, p, PDF_NAME_ColorSpace, name);
+	copy_resource(ctx, p, PDF_NAME(ColorSpace), name);
 }
 
 static void
@@ -1250,7 +1248,7 @@ pdf_filter_SC_pattern(fz_context *ctx, pdf_processor *proc, const char *name, pd
 	gstate->pending.SC.n = n;
 	for (i = 0; i < n; ++i)
 		gstate->pending.SC.c[i] = color[i];
-	copy_resource(ctx, p, PDF_NAME_Pattern, name);
+	copy_resource(ctx, p, PDF_NAME(Pattern), name);
 }
 
 static void
@@ -1265,7 +1263,7 @@ pdf_filter_sc_pattern(fz_context *ctx, pdf_processor *proc, const char *name, pd
 	gstate->pending.sc.n = n;
 	for (i = 0; i < n; ++i)
 		gstate->pending.sc.c[i] = color[i];
-	copy_resource(ctx, p, PDF_NAME_Pattern, name);
+	copy_resource(ctx, p, PDF_NAME(Pattern), name);
 }
 
 static void
@@ -1277,7 +1275,7 @@ pdf_filter_SC_shade(fz_context *ctx, pdf_processor *proc, const char *name, fz_s
 	gstate->pending.SC.pat = NULL;
 	gstate->pending.SC.shd = shade;
 	gstate->pending.SC.n = 0;
-	copy_resource(ctx, p, PDF_NAME_Pattern, name);
+	copy_resource(ctx, p, PDF_NAME(Pattern), name);
 }
 
 static void
@@ -1289,7 +1287,7 @@ pdf_filter_sc_shade(fz_context *ctx, pdf_processor *proc, const char *name, fz_s
 	gstate->pending.sc.pat = NULL;
 	gstate->pending.sc.shd = shade;
 	gstate->pending.sc.n = 0;
-	copy_resource(ctx, p, PDF_NAME_Pattern, name);
+	copy_resource(ctx, p, PDF_NAME(Pattern), name);
 }
 
 static void
@@ -1386,7 +1384,7 @@ pdf_filter_sh(fz_context *ctx, pdf_processor *proc, const char *name, fz_shade *
 	filter_flush(ctx, p, FLUSH_ALL);
 	if (p->chain->op_sh)
 		p->chain->op_sh(ctx, p->chain, name, shade);
-	copy_resource(ctx, p, PDF_NAME_Shading, name);
+	copy_resource(ctx, p, PDF_NAME(Shading), name);
 }
 
 static void
@@ -1396,7 +1394,7 @@ pdf_filter_Do_image(fz_context *ctx, pdf_processor *proc, const char *name, fz_i
 	filter_flush(ctx, p, FLUSH_ALL);
 	if (p->chain->op_Do_image)
 		p->chain->op_Do_image(ctx, p->chain, name, image);
-	copy_resource(ctx, p, PDF_NAME_XObject, name);
+	copy_resource(ctx, p, PDF_NAME(XObject), name);
 }
 
 static void
@@ -1406,7 +1404,7 @@ pdf_filter_Do_form(fz_context *ctx, pdf_processor *proc, const char *name, pdf_o
 	filter_flush(ctx, p, FLUSH_ALL);
 	if (p->chain->op_Do_form)
 		p->chain->op_Do_form(ctx, p->chain, name, xobj, page_resources);
-	copy_resource(ctx, p, PDF_NAME_XObject, name);
+	copy_resource(ctx, p, PDF_NAME(XObject), name);
 }
 
 /* marked content */

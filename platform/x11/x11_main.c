@@ -184,7 +184,7 @@ char *wintextinput(pdfapp_t *app, char *inittext, int retry)
 	return NULL;
 }
 
-int winchoiceinput(pdfapp_t *app, int nopts, char *opts[], int *nvals, char *vals[])
+int winchoiceinput(pdfapp_t *app, int nopts, const char *opts[], int *nvals, const char *vals[])
 {
 	/* FIXME: temporary dummy implementation */
 	return 0;
@@ -539,7 +539,7 @@ static void winblit(pdfapp_t *app)
 
 		if (gapp.iscopying || justcopied)
 		{
-			pdfapp_invert(&gapp, &gapp.selr);
+			pdfapp_invert(&gapp, gapp.selr);
 			justcopied = 1;
 		}
 
@@ -582,7 +582,7 @@ static void winblit(pdfapp_t *app)
 
 		if (gapp.iscopying || justcopied)
 		{
-			pdfapp_invert(&gapp, &gapp.selr);
+			pdfapp_invert(&gapp, gapp.selr);
 			justcopied = 1;
 		}
 	}
@@ -778,6 +778,16 @@ void winopenuri(pdfapp_t *app, char *buf)
 		exit(0);
 	}
 	waitpid(pid, NULL, 0);
+}
+
+int winquery(pdfapp_t *app, const char *query)
+{
+	return QUERY_NO;
+}
+
+int wingetcertpath(char *buf, int len)
+{
+	return 0;
 }
 
 static void onkey(int c, int modifiers)

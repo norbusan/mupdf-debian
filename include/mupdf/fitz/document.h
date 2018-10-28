@@ -127,14 +127,14 @@ typedef void (fz_page_drop_page_fn)(fz_context *ctx, fz_page *page);
 	bounding box of a page. See fz_bound_page for more
 	information.
 */
-typedef fz_rect *(fz_page_bound_page_fn)(fz_context *ctx, fz_page *page, fz_rect *);
+typedef fz_rect (fz_page_bound_page_fn)(fz_context *ctx, fz_page *page);
 
 /*
 	fz_page_run_page_contents_fn: Type for a function to run the
 	contents of a page. See fz_run_page_contents for more
 	information.
 */
-typedef void (fz_page_run_page_contents_fn)(fz_context *ctx, fz_page *page, fz_device *dev, const fz_matrix *transform, fz_cookie *cookie);
+typedef void (fz_page_run_page_contents_fn)(fz_context *ctx, fz_page *page, fz_device *dev, fz_matrix transform, fz_cookie *cookie);
 
 /*
 	fz_page_load_links_fn: Type for a function to load the links
@@ -186,8 +186,8 @@ typedef int (fz_page_uses_overprint_fn)(fz_context *ctx, fz_page *page);
 
 typedef void (fz_annot_drop_fn)(fz_context *ctx, fz_annot *annot);
 typedef fz_annot *(fz_annot_next_fn)(fz_context *ctx, fz_annot *annot);
-typedef fz_rect *(fz_annot_bound_fn)(fz_context *ctx, fz_annot *annot, fz_rect *rect);
-typedef void (fz_annot_run_fn)(fz_context *ctx, fz_annot *annot, fz_device *dev, const fz_matrix *transform, fz_cookie *cookie);
+typedef fz_rect (fz_annot_bound_fn)(fz_context *ctx, fz_annot *annot);
+typedef void (fz_annot_run_fn)(fz_context *ctx, fz_annot *annot, fz_device *dev, fz_matrix transform, fz_cookie *cookie);
 
 /*
 	Structure definition is public so other classes can
@@ -209,6 +209,7 @@ struct fz_annot_s
 struct fz_page_s
 {
 	int refs;
+	int number; /* page number */
 	fz_page_drop_page_fn *drop_page;
 	fz_page_bound_page_fn *bound_page;
 	fz_page_run_page_contents_fn *run_page_contents;
@@ -219,6 +220,7 @@ struct fz_page_s
 	fz_page_separation_disabled_fn *separation_disabled;
 	fz_page_separations_fn *separations;
 	fz_page_uses_overprint_fn *overprint;
+	fz_page **prev, *next; /* linked list of currently open pages */
 };
 
 /*
@@ -245,6 +247,7 @@ struct fz_document_s
 	fz_document_output_intent_fn *get_output_intent;
 	int did_layout;
 	int is_reflowable;
+	fz_page *open; /* linked list of currently open pages */
 };
 
 /*
@@ -309,7 +312,7 @@ void fz_register_document_handlers(fz_context *ctx);
 	fz_recognize_document: Given a magic find a document
 	handler that can handle a document of this type.
 
-	magic: Can be a file extension (including initial period) or
+	magic: Can be a filename extension (including initial period) or
 	a mimetype.
 */
 const fz_document_handler *fz_recognize_document(fz_context *ctx, const char *magic);
@@ -469,7 +472,7 @@ fz_page *fz_new_page_of_size(fz_context *ctx, int size);
 	fz_bound_page: Determine the size of a page at 72 dpi.
 
 */
-fz_rect *fz_bound_page(fz_context *ctx, fz_page *page, fz_rect *rect);
+fz_rect fz_bound_page(fz_context *ctx, fz_page *page);
 
 /*
 	fz_run_page: Run a page through a device.
@@ -490,7 +493,7 @@ fz_rect *fz_bound_page(fz_context *ctx, fz_page *page, fz_rect *rect);
 	fields inside cookie are continually updated while the page is
 	rendering.
 */
-void fz_run_page(fz_context *ctx, fz_page *page, fz_device *dev, const fz_matrix *transform, fz_cookie *cookie);
+void fz_run_page(fz_context *ctx, fz_page *page, fz_device *dev, fz_matrix transform, fz_cookie *cookie);
 
 /*
 	fz_run_page_contents: Run a page through a device. Just the main
@@ -512,7 +515,7 @@ void fz_run_page(fz_context *ctx, fz_page *page, fz_device *dev, const fz_matrix
 	fields inside cookie are continually updated while the page is
 	rendering.
 */
-void fz_run_page_contents(fz_context *ctx, fz_page *page, fz_device *dev, const fz_matrix *transform, fz_cookie *cookie);
+void fz_run_page_contents(fz_context *ctx, fz_page *page, fz_device *dev, fz_matrix transform, fz_cookie *cookie);
 
 /*
 	fz_run_annot: Run an annotation through a device.
@@ -535,7 +538,7 @@ void fz_run_page_contents(fz_context *ctx, fz_page *page, fz_device *dev, const 
 	fields inside cookie are continually updated while the page is
 	rendering.
 */
-void fz_run_annot(fz_context *ctx, fz_annot *annot, fz_device *dev, const fz_matrix *transform, fz_cookie *cookie);
+void fz_run_annot(fz_context *ctx, fz_annot *annot, fz_device *dev, fz_matrix transform, fz_cookie *cookie);
 
 /*
 	fz_keep_page: Keep a reference to a loaded page.

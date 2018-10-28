@@ -356,6 +356,11 @@ static void Sp_match(js_State *J)
 		if (c - b == 0)
 			++a;
 	}
+
+	if (len == 0) {
+		js_pop(J, 1);
+		js_pushnull(J);
+	}
 }
 
 static void Sp_search(js_State *J)
@@ -421,7 +426,8 @@ loop:
 		while (*r) {
 			if (*r == '$') {
 				switch (*(++r)) {
-				case 0: --r; /* end of string; back up and fall through */
+				case 0: --r; /* end of string; back up */
+				/* fallthrough */
 				case '$': js_putc(J, &sb, '$'); break;
 				case '`': js_putm(J, &sb, source, s); break;
 				case '\'': js_puts(J, &sb, s + n); break;
@@ -517,7 +523,8 @@ static void Sp_replace_string(js_State *J)
 		while (*r) {
 			if (*r == '$') {
 				switch (*(++r)) {
-				case 0: --r; /* end of string; back up and fall through */
+				case 0: --r; /* end of string; back up */
+				/* fallthrough */
 				case '$': js_putc(J, &sb, '$'); break;
 				case '&': js_putm(J, &sb, s, s + n); break;
 				case '`': js_putm(J, &sb, source, s); break;

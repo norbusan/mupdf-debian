@@ -1,12 +1,12 @@
 # Optional thirdparty libraryes
 thirdparty/luratech
 thirdparty/jpegxr
+thirdparty/mapping-resources-pdf
+thirdparty/cmap-resources
 
 # Generated files:
 build
 generated
-include/mupdf/pdf/name-table.h
-source/pdf/pdf-name-table.h
 tags
 cscope.*
 
@@ -21,6 +21,7 @@ cscope.*
 .gradle
 *.xcworkspace
 *.xcuserdatad
+user.make
 
 # Test files:
 *.pdf

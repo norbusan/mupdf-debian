@@ -174,6 +174,7 @@ int js_isregexp(js_State *J, int idx);
 int js_iscoercible(js_State *J, int idx);
 int js_iscallable(js_State *J, int idx);
 int js_isuserdata(js_State *J, int idx, const char *tag);
+int js_iserror(js_State *J, int idx);
 
 int js_toboolean(js_State *J, int idx);
 double js_tonumber(js_State *J, int idx);
@@ -181,6 +182,9 @@ const char *js_tostring(js_State *J, int idx);
 void *js_touserdata(js_State *J, int idx, const char *tag);
 
 const char *js_trystring(js_State *J, int idx, const char *error);
+double js_trynumber(js_State *J, int idx, double error);
+int js_tryinteger(js_State *J, int idx, int error);
+int js_tryboolean(js_State *J, int idx, int error);
 
 int js_tointeger(js_State *J, int idx);
 int js_toint32(js_State *J, int idx);

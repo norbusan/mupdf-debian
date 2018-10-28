@@ -40,7 +40,7 @@ fz_drop_text(fz_context *ctx, const fz_text *textc)
 }
 
 static fz_text_span *
-fz_new_text_span(fz_context *ctx, fz_font *font, int wmode, int bidi_level, fz_bidi_direction markup_dir, fz_text_language language, const fz_matrix *trm)
+fz_new_text_span(fz_context *ctx, fz_font *font, int wmode, int bidi_level, fz_bidi_direction markup_dir, fz_text_language language, fz_matrix trm)
 {
 	fz_text_span *span = fz_malloc_struct(ctx, fz_text_span);
 	span->font = fz_keep_font(ctx, font);
@@ -48,14 +48,14 @@ fz_new_text_span(fz_context *ctx, fz_font *font, int wmode, int bidi_level, fz_b
 	span->bidi_level = bidi_level;
 	span->markup_dir = markup_dir;
 	span->language = language;
-	span->trm = *trm;
+	span->trm = trm;
 	span->trm.e = 0;
 	span->trm.f = 0;
 	return span;
 }
 
 static fz_text_span *
-fz_add_text_span(fz_context *ctx, fz_text *text, fz_font *font, int wmode, int bidi_level, fz_bidi_direction markup_dir, fz_text_language language, const fz_matrix *trm)
+fz_add_text_span(fz_context *ctx, fz_text *text, fz_font *font, int wmode, int bidi_level, fz_bidi_direction markup_dir, fz_text_language language, fz_matrix trm)
 {
 	if (!text->tail)
 	{
@@ -66,10 +66,10 @@ fz_add_text_span(fz_context *ctx, fz_text *text, fz_font *font, int wmode, int b
 		text->tail->bidi_level != bidi_level ||
 		text->tail->markup_dir != markup_dir ||
 		text->tail->language != language ||
-		text->tail->trm.a != trm->a ||
-		text->tail->trm.b != trm->b ||
-		text->tail->trm.c != trm->c ||
-		text->tail->trm.d != trm->d)
+		text->tail->trm.a != trm.a ||
+		text->tail->trm.b != trm.b ||
+		text->tail->trm.c != trm.c ||
+		text->tail->trm.d != trm.d)
 	{
 		text->tail = text->tail->next = fz_new_text_span(ctx, font, wmode, bidi_level, markup_dir, language, trm);
 	}
@@ -89,7 +89,7 @@ fz_grow_text_span(fz_context *ctx, fz_text_span *span, int n)
 }
 
 void
-fz_show_glyph(fz_context *ctx, fz_text *text, fz_font *font, const fz_matrix *trm, int gid, int ucs, int wmode, int bidi_level, fz_bidi_direction markup_dir, fz_text_language lang)
+fz_show_glyph(fz_context *ctx, fz_text *text, fz_font *font, fz_matrix trm, int gid, int ucs, int wmode, int bidi_level, fz_bidi_direction markup_dir, fz_text_language lang)
 {
 	fz_text_span *span;
 
@@ -102,13 +102,13 @@ fz_show_glyph(fz_context *ctx, fz_text *text, fz_font *font, const fz_matrix *tr
 
 	span->items[span->len].ucs = ucs;
 	span->items[span->len].gid = gid;
-	span->items[span->len].x = trm->e;
-	span->items[span->len].y = trm->f;
+	span->items[span->len].x = trm.e;
+	span->items[span->len].y = trm.f;
 	span->len++;
 }
 
-void
-fz_show_string(fz_context *ctx, fz_text *text, fz_font *user_font, fz_matrix *trm, const char *s, int wmode, int bidi_level, fz_bidi_direction markup_dir, fz_text_language language)
+fz_matrix
+fz_show_string(fz_context *ctx, fz_text *text, fz_font *user_font, fz_matrix trm, const char *s, int wmode, int bidi_level, fz_bidi_direction markup_dir, fz_text_language language)
 {
 	fz_font *font;
 	int gid, ucs;
@@ -121,21 +121,24 @@ fz_show_string(fz_context *ctx, fz_text *text, fz_font *user_font, fz_matrix *tr
 		fz_show_glyph(ctx, text, font, trm, gid, ucs, wmode, bidi_level, markup_dir, language);
 		adv = fz_advance_glyph(ctx, font, gid, wmode);
 		if (wmode == 0)
-			fz_pre_translate(trm, adv, 0);
+			trm = fz_pre_translate(trm, adv, 0);
 		else
-			fz_pre_translate(trm, 0, -adv);
+			trm = fz_pre_translate(trm, 0, -adv);
 	}
+
+	return trm;
 }
 
-fz_rect *
-fz_bound_text(fz_context *ctx, const fz_text *text, const fz_stroke_state *stroke, const fz_matrix *ctm, fz_rect *bbox)
+fz_rect
+fz_bound_text(fz_context *ctx, const fz_text *text, const fz_stroke_state *stroke, fz_matrix ctm)
 {
 	fz_text_span *span;
 	fz_matrix tm, trm;
 	fz_rect gbox;
+	fz_rect bbox;
 	int i;
 
-	*bbox = fz_empty_rect;
+	bbox = fz_empty_rect;
 
 	for (span = text->head; span; span = span->next)
 	{
@@ -148,9 +151,9 @@ fz_bound_text(fz_context *ctx, const fz_text *text, const fz_stroke_state *strok
 				{
 					tm.e = span->items[i].x;
 					tm.f = span->items[i].y;
-					fz_concat(&trm, &tm, ctm);
-					fz_bound_glyph(ctx, span->font, span->items[i].gid, &trm, &gbox);
-					fz_union_rect(bbox, &gbox);
+					trm = fz_concat(tm, ctm);
+					gbox = fz_bound_glyph(ctx, span->font, span->items[i].gid, trm);
+					bbox = fz_union_rect(bbox, gbox);
 				}
 			}
 		}
@@ -159,66 +162,16 @@ fz_bound_text(fz_context *ctx, const fz_text *text, const fz_stroke_state *strok
 	if (!fz_is_empty_rect(bbox))
 	{
 		if (stroke)
-			fz_adjust_rect_for_stroke(ctx, bbox, stroke, ctm);
+			bbox = fz_adjust_rect_for_stroke(ctx, bbox, stroke, ctm);
 
 		/* Compensate for the glyph cache limited positioning precision */
-		bbox->x0 -= 1;
-		bbox->y0 -= 1;
-		bbox->x1 += 1;
-		bbox->y1 += 1;
+		bbox.x0 -= 1;
+		bbox.y0 -= 1;
+		bbox.x1 += 1;
+		bbox.y1 += 1;
 	}
 
 	return bbox;
-}
-
-fz_text *
-fz_clone_text(fz_context *ctx, const fz_text *text)
-{
-	fz_text *new_text;
-	fz_text_span *span;
-	fz_text_span **tail;
-
-	new_text = fz_malloc_struct(ctx, fz_text);
-	new_text->refs = 1;
-	span = text->head;
-	tail = &new_text->head;
-
-	fz_var(span);
-
-	fz_try(ctx)
-	{
-		while (span != NULL)
-		{
-			fz_text_span *new_span = fz_malloc_struct(ctx, fz_text_span);
-			*tail = new_span;
-			tail = &new_span->next;
-			new_text->tail = new_span;
-			new_span->font = fz_keep_font(ctx, span->font);
-			new_span->trm = span->trm;
-			new_span->wmode = span->wmode;
-			new_span->len = span->len;
-			new_span->cap = span->len;
-			new_span->items = fz_malloc(ctx, span->len * sizeof(*span->items));
-			memcpy(new_span->items, span->items, span->len * sizeof(*span->items));
-			span = span->next;
-		}
-	}
-	fz_catch(ctx)
-	{
-		span = new_text->head;
-		while (span != NULL)
-		{
-			fz_text_span *next = span->next;
-			fz_drop_font(ctx, span->font);
-			fz_free(ctx, span->items);
-			fz_free(ctx, span);
-			span = next;
-		}
-		fz_free(ctx, new_text);
-		fz_rethrow(ctx);
-	}
-
-	return new_text;
 }
 
 fz_text_language fz_text_language_from_string(const char *str)
