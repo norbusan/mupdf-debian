@@ -143,12 +143,22 @@ lex_number(fz_context *ctx, fz_stream *f, pdf_lexbuf *buf, int c)
 	char *e = buf->scratch + buf->size - 1; /* leave space for zero terminator */
 	char *isreal = (c == '.' ? s : NULL);
 	int neg = (c == '-');
+	int isbad = 0;
 
 	*s++ = c;
 
+
+	c = fz_read_byte(ctx, f);
+
+	/* skip extra '-' signs at start of number */
+	if (neg)
+	{
+		while (c == '-')
+			c = fz_read_byte(ctx, f);
+	}
+
 	while (s < e)
 	{
-		int c = fz_read_byte(ctx, f);
 		switch (c)
 		{
 		case IS_WHITE:
@@ -157,21 +167,27 @@ lex_number(fz_context *ctx, fz_stream *f, pdf_lexbuf *buf, int c)
 			goto end;
 		case EOF:
 			goto end;
-		case '-':
-			neg++;
+		case '.':
+			if (isreal)
+				isbad = 1;
+			isreal = s;
 			*s++ = c;
 			break;
-		case '.':
-			isreal = s;
-			/* Fall through */
+		case RANGE_0_9:
+			*s++ = c;
+			break;
 		default:
+			isbad = 1;
 			*s++ = c;
 			break;
 		}
+		c = fz_read_byte(ctx, f);
 	}
 
 end:
 	*s = '\0';
+	if (isbad)
+		return PDF_TOK_ERROR;
 	if (isreal)
 	{
 		/* We'd like to use the fastest possible atof
