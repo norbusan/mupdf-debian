@@ -635,7 +635,8 @@ expand_lists(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, int num)
 {
 	int i;
 
-	num++;
+	/* objects are numbered 0..num and maybe two additional objects for linearization */
+	num += 3;
 	opts->use_list = fz_resize_array(ctx, opts->use_list, num, sizeof(*opts->use_list));
 	opts->ofs_list = fz_resize_array(ctx, opts->ofs_list, num, sizeof(*opts->ofs_list));
 	opts->gen_list = fz_resize_array(ctx, opts->gen_list, num, sizeof(*opts->gen_list));
@@ -1538,9 +1539,9 @@ static void preloadobjstms(fz_context *ctx, pdf_document *doc)
 {
 	pdf_obj *obj;
 	int num;
-	int xref_len = pdf_xref_len(ctx, doc);
 
-	for (num = 0; num < xref_len; num++)
+	/* xref_len may change due to repair, so check it every iteration */
+	for (num = 0; num < pdf_xref_len(ctx, doc); num++)
 	{
 		if (pdf_get_xref_entry(ctx, doc, num)->type == 'o')
 		{
@@ -2719,7 +2720,7 @@ static void initialise_write_state(fz_context *ctx, pdf_document *doc, const pdf
 	opts->continue_on_error = in_opts->continue_on_error;
 	opts->errors = in_opts->errors;
 
-	expand_lists(ctx, doc, opts, xref_len + 3);
+	expand_lists(ctx, doc, opts, xref_len);
 }
 
 /* Free the resources held by the dynamic write options */
@@ -2803,7 +2804,9 @@ void pdf_save_document(fz_context *ctx, pdf_document *doc, const char *filename,
 		if (!opts.do_incremental)
 		{
 			pdf_ensure_solid_xref(ctx, doc, xref_len);
-			preloadobjstms(ctx, doc);
+
+			xref_len = pdf_xref_len(ctx, doc); /* May have changed due to repair */
+			expand_lists(ctx, doc, &opts, xref_len);
 		}
 
 		/* Sweep & mark objects from the trailer */
@@ -2812,6 +2815,7 @@ void pdf_save_document(fz_context *ctx, pdf_document *doc, const char *filename,
 		else
 		{
 			xref_len = pdf_xref_len(ctx, doc); /* May have changed due to repair */
+			expand_lists(ctx, doc, &opts, xref_len);
 			for (num = 0; num < xref_len; num++)
 				opts.use_list[num] = 1;
 		}
@@ -2832,6 +2836,7 @@ void pdf_save_document(fz_context *ctx, pdf_document *doc, const char *filename,
 		if ((opts.do_garbage >= 2 || opts.do_linear) && !opts.do_incremental)
 		{
 			xref_len = pdf_xref_len(ctx, doc); /* May have changed due to repair */
+			expand_lists(ctx, doc, &opts, xref_len);
 			while (xref_len > 0 && !opts.use_list[xref_len-1])
 				xref_len--;
 		}
