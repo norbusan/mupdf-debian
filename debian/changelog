@@ -1,3 +1,13 @@
+mupdf (1.14.0+ds1-1) unstable; urgency=medium
+
+  * New upstream version 1.14.0+ds1
+    - Fixes CVE-2018-1000036 (Closes: #900129, upstream bug 699695)
+  * d/patches: fresh patches
+  * d/rules: adjust to work with updated upstream Makefile
+  * d/rules: Set CC_FOR_BUILD (Closes: #903319)
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sun, 28 Oct 2018 14:48:12 +0900
+
 mupdf (1.13.0+ds1-3) unstable; urgency=medium
 
   * debian/patches: import upstream patch for CVE-2018-10289 (Closes: 896545)
