@@ -15,10 +15,15 @@ include /usr/share/dpkg/architecture.mk
 # The build system doesn't use CPPFLAGS, pass them to CFLAGS to enable the
 # missing (hardening) flags.
 CFLAGS += $(CPPFLAGS)
-CFLAGS += -DJBIG_NO_MEMENTO
+# ICC support needs patched thirdparty liblcms2-art
+CFLAGS += -DNO_ICC
 CFLAGS += -fPIC
 
-BUILD_FLAGS=build=debian OS=Linux verbose=yes XCFLAGS="$(CFLAGS)" XLDFLAGS="$(LDFLAGS)" prefix=/usr
+BUILD_FLAGS = build=debian OS=Linux verbose=yes XCFLAGS="$(CFLAGS)" XLDFLAGS="$(LDFLAGS)" prefix=/usr
+# Force using system library
+BUILD_FLAGS += USE_SYSTEM_LIBS=yes
+# Force using system lcms2 (was not included in default system library set)
+BUILD_FLAGS += USE_SYSTEM_LCMS2=yes
 
 override_dh_auto_build:
 	dh_auto_build -- $(BUILD_FLAGS)
@@ -30,7 +35,6 @@ override_dh_auto_install:
 override_dh_auto_clean:
 	-rm -rf build
 	-rm -rf generated
-	-rm -f include/mupdf/pdf/name-table.h source/pdf/pdf-name-table.h
 
 %:
 	dh $@ --parallel
