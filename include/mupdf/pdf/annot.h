@@ -87,7 +87,7 @@ pdf_annot *pdf_next_annot(fz_context *ctx, pdf_annot *annot);
 /*
 	pdf_bound_annot: Return the rectangle for an annotation on a page.
 */
-fz_rect *pdf_bound_annot(fz_context *ctx, pdf_annot *annot, fz_rect *rect);
+fz_rect pdf_bound_annot(fz_context *ctx, pdf_annot *annot);
 
 /*
 	pdf_annot_type: Return the type of an annotation
@@ -106,7 +106,7 @@ int pdf_annot_type(fz_context *ctx, pdf_annot *annot);
 	ctm: A transformation matrix applied to the objects on the page,
 	e.g. to scale or rotate the page contents as desired.
 */
-void pdf_run_annot(fz_context *ctx, pdf_annot *annot, fz_device *dev, const fz_matrix *ctm, fz_cookie *cookie);
+void pdf_run_annot(fz_context *ctx, pdf_annot *annot, fz_device *dev, fz_matrix ctm, fz_cookie *cookie);
 
 struct pdf_annot_s
 {
@@ -130,11 +130,10 @@ pdf_obj *pdf_lookup_name(fz_context *ctx, pdf_document *doc, pdf_obj *which, pdf
 pdf_obj *pdf_load_name_tree(fz_context *ctx, pdf_document *doc, pdf_obj *which);
 
 int pdf_resolve_link(fz_context *ctx, pdf_document *doc, const char *uri, float *xp, float *yp);
-fz_link *pdf_load_link_annots(fz_context *ctx, pdf_document *, pdf_obj *annots, int pagenum, const fz_matrix *page_ctm);
+fz_link *pdf_load_link_annots(fz_context *ctx, pdf_document *, pdf_obj *annots, int pagenum, fz_matrix page_ctm);
 
-void pdf_annot_transform(fz_context *ctx, pdf_annot *annot, fz_matrix *annot_ctm);
+fz_matrix pdf_annot_transform(fz_context *ctx, pdf_annot *annot);
 void pdf_load_annots(fz_context *ctx, pdf_page *page, pdf_obj *annots);
-void pdf_update_annot(fz_context *ctx, pdf_annot *annot);
 void pdf_drop_annots(fz_context *ctx, pdf_annot *annot_list);
 
 /*
@@ -160,12 +159,15 @@ int pdf_annot_has_open(fz_context *ctx, pdf_annot *annot);
 int pdf_annot_has_author(fz_context *ctx, pdf_annot *annot);
 
 int pdf_annot_flags(fz_context *ctx, pdf_annot *annot);
-void pdf_annot_rect(fz_context *ctx, pdf_annot *annot, fz_rect *rect);
+fz_rect pdf_annot_rect(fz_context *ctx, pdf_annot *annot);
 float pdf_annot_border(fz_context *ctx, pdf_annot *annot);
 float pdf_annot_opacity(fz_context *ctx, pdf_annot *annot);
 void pdf_annot_color(fz_context *ctx, pdf_annot *annot, int *n, float color[4]);
 void pdf_annot_interior_color(fz_context *ctx, pdf_annot *annot, int *n, float color[4]);
 int pdf_annot_quadding(fz_context *ctx, pdf_annot *annot);
+
+void pdf_annot_MK_BG(fz_context *ctx, pdf_annot *annot, int *n, float color[4]);
+void pdf_annot_MK_BC(fz_context *ctx, pdf_annot *annot, int *n, float color[4]);
 
 int pdf_annot_quad_point_count(fz_context *ctx, pdf_annot *annot);
 void pdf_annot_quad_point(fz_context *ctx, pdf_annot *annot, int i, float qp[8]);
@@ -175,7 +177,7 @@ int pdf_annot_ink_list_stroke_count(fz_context *ctx, pdf_annot *annot, int i);
 fz_point pdf_annot_ink_list_stroke_vertex(fz_context *ctx, pdf_annot *annot, int i, int k);
 
 void pdf_set_annot_flags(fz_context *ctx, pdf_annot *annot, int flags);
-void pdf_set_annot_rect(fz_context *ctx, pdf_annot *annot, const fz_rect *rect);
+void pdf_set_annot_rect(fz_context *ctx, pdf_annot *annot, fz_rect rect);
 void pdf_set_annot_border(fz_context *ctx, pdf_annot *annot, float width);
 void pdf_set_annot_opacity(fz_context *ctx, pdf_annot *annot, float opacity);
 void pdf_set_annot_color(fz_context *ctx, pdf_annot *annot, int n, const float color[4]);
@@ -184,7 +186,7 @@ void pdf_set_annot_quadding(fz_context *ctx, pdf_annot *annot, int q);
 
 void pdf_set_annot_quad_points(fz_context *ctx, pdf_annot *annot, int n, const float *v);
 void pdf_clear_annot_quad_points(fz_context *ctx, pdf_annot *annot);
-void pdf_add_annot_quad_point(fz_context *ctx, pdf_annot *annot, fz_rect bbox);
+void pdf_add_annot_quad_point(fz_context *ctx, pdf_annot *annot, fz_quad quad);
 
 void pdf_set_annot_ink_list(fz_context *ctx, pdf_annot *annot, int n, const int *count, const fz_point *v);
 void pdf_clear_annot_ink_list(fz_context *ctx, pdf_annot *annot);
@@ -220,9 +222,9 @@ void pdf_set_annot_vertex(fz_context *ctx, pdf_annot *annot, int i, fz_point p);
 void pdf_set_text_annot_position(fz_context *ctx, pdf_annot *annot, fz_point pt);
 
 /*
-	pdf_copy_annot_contents: return a copy of the contents of an annotation.
+	pdf_annot_contents: return the contents of an annotation.
 */
-char *pdf_copy_annot_contents(fz_context *ctx, pdf_annot *annot);
+const char *pdf_annot_contents(fz_context *ctx, pdf_annot *annot);
 
 /*
 	pdf_set_annot_contents: set the contents of an annotation.
@@ -230,9 +232,9 @@ char *pdf_copy_annot_contents(fz_context *ctx, pdf_annot *annot);
 void pdf_set_annot_contents(fz_context *ctx, pdf_annot *annot, const char *text);
 
 /*
-	pdf_copy_annot_author: return a copy of the author of an annotation.
+	pdf_annot_author: return the author of an annotation.
 */
-char *pdf_copy_annot_author(fz_context *ctx, pdf_annot *annot);
+const char *pdf_annot_author(fz_context *ctx, pdf_annot *annot);
 
 /*
 	pdf_set_annot_author: set the author of an annotation.
@@ -249,18 +251,50 @@ int64_t pdf_annot_modification_date(fz_context *ctx, pdf_annot *annot);
 */
 void pdf_set_annot_modification_date(fz_context *ctx, pdf_annot *annot, int64_t time);
 
-/*
-	pdf_set_free_text_details: set the position, text, font and color for a free text annotation.
-	Only base 14 fonts are supported and are specified by name.
-*/
-void pdf_set_free_text_details(fz_context *ctx, pdf_annot *annot, fz_point *pos, char *text, char *font_name, float font_size, float color[3]);
+void pdf_parse_default_appearance(fz_context *ctx, const char *da, const char **font, float *size, float color[3]);
+void pdf_print_default_appearance(fz_context *ctx, char *buf, int nbuf, const char *font, float size, const float color[3]);
+void pdf_annot_default_appearance(fz_context *ctx, pdf_annot *annot, const char **font, float *size, float color[3]);
+void pdf_set_annot_default_appearance(fz_context *ctx, pdf_annot *annot, const char *font, float size, const float color[3]);
 
 /*
 	pdf_new_annot: Internal function for creating a new pdf annotation.
 */
 pdf_annot *pdf_new_annot(fz_context *ctx, pdf_page *page, pdf_obj *obj);
-
-void pdf_update_appearance(fz_context *ctx, pdf_annot *annot);
 void pdf_dirty_annot(fz_context *ctx, pdf_annot *annot);
+
+/*
+	Recreate the appearance stream for an annotation.
+*/
+void pdf_update_appearance(fz_context *ctx, pdf_annot *annot);
+void pdf_update_signature_appearance(fz_context *ctx, pdf_annot *annot, const char *name, const char *text, const char *date);
+
+/*
+	Regenerate any appearance streams that are out of date and check for
+	cases where a different appearance stream should be selected because of
+	state changes.
+
+	Note that a call to pdf_pass_event for one page may lead to changes on
+	any other, so an app should call pdf_update_annot for every annotation
+	it currently displays. Also it is important that the pdf_annot object
+	is the one used to last render the annotation. If instead the app were
+	to drop the page or annotations and reload them then a call to
+	pdf_update_annot would not reliably be able to report all changed
+	annotations.
+
+	Returns true if the annotation appearance has changed since the last time
+	pdf_update_annot was called or the annotation was first loaded.
+*/
+int pdf_update_annot(fz_context *ctx, pdf_annot *annot);
+
+/*
+	Loop through all annotations on the page and update them. Return true
+	if any of them were changed (by either event or javascript actions, or
+	by annotation editing) and need re-rendering.
+
+	If you need more granularity, loop through the annotations and call
+	pdf_update_annot for each one to detect changes on a per-annotation
+	basis.
+*/
+int pdf_update_page(fz_context *ctx, pdf_page *page);
 
 #endif

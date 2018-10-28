@@ -89,11 +89,6 @@ void fz_add_separation_equivalents(fz_context *ctx, fz_separations *sep, uint32_
 	sep->num_separations++;
 }
 
-int fz_separations_controllable(fz_context *ctx, const fz_separations *sep)
-{
-	return (!sep || sep->controllable);
-}
-
 void fz_set_separation_behavior(fz_context *ctx, fz_separations *sep, int separation, fz_separation_behavior beh)
 {
 	int shift;
@@ -145,20 +140,6 @@ fz_separation_behavior fz_separation_current_behavior(fz_context *ctx, const fz_
 	if (beh == FZ_SEPARATION_DISABLED_RENDER)
 		return FZ_SEPARATION_DISABLED;
 	return beh;
-}
-
-int fz_separations_all_composite(fz_context *ctx, const fz_separations *sep)
-{
-	int i;
-
-	if (!sep)
-		return 1;
-
-	for (i = 0; i < (FZ_MAX_SEPARATIONS + 31) / 32; i++)
-		if (sep_state(sep, i) != FZ_SEPARATION_COMPOSITE)
-			return 0;
-
-	return 1;
 }
 
 const char *fz_separation_name(fz_context *ctx, const fz_separations *sep, int separation)
@@ -260,7 +241,7 @@ fz_clone_pixmap_area_with_different_seps(fz_context *ctx, fz_pixmap *src, const 
 		bbox = &local_bbox;
 	}
 
-	dst = fz_new_pixmap_with_bbox(ctx, dcs, bbox, dseps, src->alpha);
+	dst = fz_new_pixmap_with_bbox(ctx, dcs, *bbox, dseps, src->alpha);
 	if (src->flags & FZ_PIXMAP_FLAG_INTERPOLATE)
 		dst->flags |= FZ_PIXMAP_FLAG_INTERPOLATE;
 	else

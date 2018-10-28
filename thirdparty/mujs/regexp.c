@@ -110,7 +110,7 @@ static int nextrune(struct cstate *g)
 	if (g->yychar == '\\') {
 		g->source += chartorune(&g->yychar, g->source);
 		switch (g->yychar) {
-		case 0: die(g, "unterminated escape sequence");
+		case 0: die(g, "unterminated escape sequence"); break;
 		case 'f': g->yychar = '\f'; return 0;
 		case 'n': g->yychar = '\n'; return 0;
 		case 'r': g->yychar = '\r'; return 0;
@@ -481,7 +481,7 @@ static Renode *parseatom(struct cstate *g)
 	}
 	if (g->lookahead == L_REF) {
 		atom = newnode(g, P_REF);
-		if (g->yychar == 0 || g->yychar > g->nsub || !g->sub[g->yychar])
+		if (g->yychar == 0 || g->yychar >= g->nsub || !g->sub[g->yychar])
 			die(g, "invalid back-reference");
 		atom->n = g->yychar;
 		atom->x = g->sub[g->yychar];
@@ -550,16 +550,19 @@ static Renode *parserep(struct cstate *g)
 
 static Renode *parsecat(struct cstate *g)
 {
-	Renode *cat, *x;
+	Renode *cat, *head, **tail;
 	if (g->lookahead && g->lookahead != '|' && g->lookahead != ')') {
-		cat = parserep(g);
+		/* Build a right-leaning tree by splicing in new 'cat' at the tail. */
+		head = parserep(g);
+		tail = &head;
 		while (g->lookahead && g->lookahead != '|' && g->lookahead != ')') {
-			x = cat;
 			cat = newnode(g, P_CAT);
-			cat->x = x;
+			cat->x = *tail;
 			cat->y = parserep(g);
+			*tail = cat;
+			tail = &cat->y;
 		}
-		return cat;
+		return head;
 	}
 	return NULL;
 }
@@ -636,11 +639,12 @@ static void compile(Reprog *prog, Renode *node)
 	if (!node)
 		return;
 
+loop:
 	switch (node->type) {
 	case P_CAT:
 		compile(prog, node->x);
-		compile(prog, node->y);
-		break;
+		node = node->y;
+		goto loop;
 
 	case P_ALT:
 		split = emit(prog, I_SPLIT);
@@ -831,9 +835,12 @@ Reprog *regcompx(void *(*alloc)(void *ctx, void *p, int n), void *ctx,
 	g.prog = alloc(ctx, NULL, sizeof (Reprog));
 	if (!g.prog)
 		die(&g, "cannot allocate regular expression");
-	g.pstart = g.pend = alloc(ctx, NULL, sizeof (Renode) * strlen(pattern) * 2);
-	if (!g.pstart)
-		die(&g, "cannot allocate regular expression parse list");
+	n = strlen(pattern) * 2;
+	if (n > 0) {
+		g.pstart = g.pend = alloc(ctx, NULL, sizeof (Renode) * n);
+		if (!g.pstart)
+			die(&g, "cannot allocate regular expression parse list");
+	}
 
 	g.source = pattern;
 	g.ncclass = 0;

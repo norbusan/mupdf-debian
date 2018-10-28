@@ -121,35 +121,35 @@ epub_drop_page(fz_context *ctx, fz_page *page_)
 {
 }
 
-static fz_rect *
-epub_bound_page(fz_context *ctx, fz_page *page_, fz_rect *bbox)
+static fz_rect
+epub_bound_page(fz_context *ctx, fz_page *page_)
 {
 	epub_page *page = (epub_page*)page_;
 	epub_document *doc = page->doc;
 	epub_chapter *ch;
 	int n = page->number;
 	int count = 0;
+	fz_rect bbox;
 
 	for (ch = doc->spine; ch; ch = ch->next)
 	{
 		int cn = count_chapter_pages(ch);
 		if (n < count + cn)
 		{
-			bbox->x0 = 0;
-			bbox->y0 = 0;
-			bbox->x1 = ch->html->page_w + ch->html->page_margin[L] + ch->html->page_margin[R];
-			bbox->y1 = ch->html->page_h + ch->html->page_margin[T] + ch->html->page_margin[B];
+			bbox.x0 = 0;
+			bbox.y0 = 0;
+			bbox.x1 = ch->html->page_w + ch->html->page_margin[L] + ch->html->page_margin[R];
+			bbox.y1 = ch->html->page_h + ch->html->page_margin[T] + ch->html->page_margin[B];
 			return bbox;
 		}
 		count += cn;
 	}
 
-	*bbox = fz_unit_rect;
-	return bbox;
+	return fz_unit_rect;
 }
 
 static void
-epub_run_page(fz_context *ctx, fz_page *page_, fz_device *dev, const fz_matrix *ctm, fz_cookie *cookie)
+epub_run_page(fz_context *ctx, fz_page *page_, fz_device *dev, fz_matrix ctm, fz_cookie *cookie)
 {
 	epub_page *page = (epub_page*)page_;
 	epub_document *doc = page->doc;

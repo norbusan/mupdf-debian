@@ -48,17 +48,17 @@
 
 
 static void
-line(fz_context *ctx, fz_rasterizer *rast, const fz_matrix *ctm, float x0, float y0, float x1, float y1)
+line(fz_context *ctx, fz_rasterizer *rast, fz_matrix ctm, float x0, float y0, float x1, float y1)
 {
-	float tx0 = ctm->a * x0 + ctm->c * y0 + ctm->e;
-	float ty0 = ctm->b * x0 + ctm->d * y0 + ctm->f;
-	float tx1 = ctm->a * x1 + ctm->c * y1 + ctm->e;
-	float ty1 = ctm->b * x1 + ctm->d * y1 + ctm->f;
+	float tx0 = ctm.a * x0 + ctm.c * y0 + ctm.e;
+	float ty0 = ctm.b * x0 + ctm.d * y0 + ctm.f;
+	float tx1 = ctm.a * x1 + ctm.c * y1 + ctm.e;
+	float ty1 = ctm.b * x1 + ctm.d * y1 + ctm.f;
 	fz_insert_rasterizer(ctx, rast, tx0, ty0, tx1, ty1, 0);
 }
 
 static void
-bezier(fz_context *ctx, fz_rasterizer *rast, const fz_matrix *ctm, float flatness,
+bezier(fz_context *ctx, fz_rasterizer *rast, fz_matrix ctm, float flatness,
 	float xa, float ya,
 	float xb, float yb,
 	float xc, float yc,
@@ -112,7 +112,7 @@ bezier(fz_context *ctx, fz_rasterizer *rast, const fz_matrix *ctm, float flatnes
 }
 
 static void
-quad(fz_context *ctx, fz_rasterizer *rast, const fz_matrix *ctm, float flatness,
+quad(fz_context *ctx, fz_rasterizer *rast, fz_matrix ctm, float flatness,
 	float xa, float ya,
 	float xb, float yb,
 	float xc, float yc, int depth)
@@ -153,7 +153,7 @@ quad(fz_context *ctx, fz_rasterizer *rast, const fz_matrix *ctm, float flatness,
 typedef struct
 {
 	fz_rasterizer *rast;
-	const fz_matrix *ctm;
+	fz_matrix ctm;
 	float flatness;
 	fz_point b;
 	fz_point c;
@@ -218,7 +218,7 @@ static void
 flatten_rectto(fz_context *ctx, void *arg_, float x0, float y0, float x1, float y1)
 {
 	flatten_arg *arg = (flatten_arg *)arg_;
-	const fz_matrix *ctm = arg->ctm;
+	fz_matrix ctm = arg->ctm;
 
 	flatten_moveto(ctx, arg_, x0, y0);
 
@@ -226,21 +226,21 @@ flatten_rectto(fz_context *ctx, void *arg_, float x0, float y0, float x1, float 
 	{
 		/* In the case where we have an axis aligned rectangle, do some
 		 * horrid antidropout stuff. */
-		if (ctm->b == 0 && ctm->c == 0)
+		if (ctm.b == 0 && ctm.c == 0)
 		{
-			float tx0 = ctm->a * x0 + ctm->e;
-			float ty0 = ctm->d * y0 + ctm->f;
-			float tx1 = ctm->a * x1 + ctm->e;
-			float ty1 = ctm->d * y1 + ctm->f;
+			float tx0 = ctm.a * x0 + ctm.e;
+			float ty0 = ctm.d * y0 + ctm.f;
+			float tx1 = ctm.a * x1 + ctm.e;
+			float ty1 = ctm.d * y1 + ctm.f;
 			fz_insert_rasterizer_rect(ctx, arg->rast, tx0, ty0, tx1, ty1);
 			return;
 		}
-		else if (ctm->a == 0 && ctm->d == 0)
+		else if (ctm.a == 0 && ctm.d == 0)
 		{
-			float tx0 = ctm->c * y0 + ctm->e;
-			float ty0 = ctm->b * x0 + ctm->f;
-			float tx1 = ctm->c * y1 + ctm->e;
-			float ty1 = ctm->b * x1 + ctm->f;
+			float tx0 = ctm.c * y0 + ctm.e;
+			float ty0 = ctm.b * x0 + ctm.f;
+			float tx1 = ctm.c * y1 + ctm.e;
+			float ty1 = ctm.b * x1 + ctm.f;
 			fz_insert_rasterizer_rect(ctx, arg->rast, tx0, ty1, tx1, ty0);
 			return;
 		}
@@ -265,12 +265,11 @@ static const fz_path_walker flatten_proc =
 };
 
 int
-fz_flatten_fill_path(fz_context *ctx, fz_rasterizer *rast, const fz_path *path, const fz_matrix *ctm, float flatness, const fz_irect *scissor, fz_irect *bbox)
+fz_flatten_fill_path(fz_context *ctx, fz_rasterizer *rast, const fz_path *path, fz_matrix ctm, float flatness, const fz_irect *scissor, fz_irect *bbox)
 {
 	flatten_arg arg;
-	fz_irect local_bbox;
 
-	if (fz_reset_rasterizer(ctx, rast, scissor))
+	if (fz_reset_rasterizer(ctx, rast, *scissor))
 	{
 		arg.rast = rast;
 		arg.ctm = ctm;
@@ -300,9 +299,8 @@ fz_flatten_fill_path(fz_context *ctx, fz_rasterizer *rast, const fz_path *path, 
 	if (!bbox)
 		return 0;
 
-	local_bbox = *scissor;
-	fz_bound_rasterizer(ctx, rast, bbox);
-	return fz_is_empty_irect(fz_intersect_irect(bbox, &local_bbox));
+	*bbox = fz_bound_rasterizer(ctx, rast);
+	return fz_is_empty_irect(fz_intersect_irect(*bbox, *scissor));
 }
 
 enum {
@@ -314,7 +312,7 @@ enum {
 typedef struct sctx
 {
 	fz_rasterizer *rast;
-	const fz_matrix *ctm;
+	fz_matrix ctm;
 	float flatness;
 	const fz_stroke_state *stroke;
 
@@ -343,10 +341,10 @@ typedef struct sctx
 static void
 fz_add_line(fz_context *ctx, sctx *s, float x0, float y0, float x1, float y1, int rev)
 {
-	float tx0 = s->ctm->a * x0 + s->ctm->c * y0 + s->ctm->e;
-	float ty0 = s->ctm->b * x0 + s->ctm->d * y0 + s->ctm->f;
-	float tx1 = s->ctm->a * x1 + s->ctm->c * y1 + s->ctm->e;
-	float ty1 = s->ctm->b * x1 + s->ctm->d * y1 + s->ctm->f;
+	float tx0 = s->ctm.a * x0 + s->ctm.c * y0 + s->ctm.e;
+	float ty0 = s->ctm.b * x0 + s->ctm.d * y0 + s->ctm.f;
+	float tx1 = s->ctm.a * x1 + s->ctm.c * y1 + s->ctm.e;
+	float ty1 = s->ctm.b * x1 + s->ctm.d * y1 + s->ctm.f;
 
 	fz_insert_rasterizer(ctx, s->rast, tx0, ty0, tx1, ty1, rev);
 }
@@ -355,21 +353,21 @@ static void
 fz_add_horiz_rect(fz_context *ctx, sctx *s, float x0, float y0, float x1, float y1)
 {
 	if (fz_antidropout_rasterizer(ctx, s->rast)) {
-		if (s->ctm->b == 0 && s->ctm->c == 0)
+		if (s->ctm.b == 0 && s->ctm.c == 0)
 		{
-			float tx0 = s->ctm->a * x0 + s->ctm->e;
-			float ty0 = s->ctm->d * y0 + s->ctm->f;
-			float tx1 = s->ctm->a * x1 + s->ctm->e;
-			float ty1 = s->ctm->d * y1 + s->ctm->f;
+			float tx0 = s->ctm.a * x0 + s->ctm.e;
+			float ty0 = s->ctm.d * y0 + s->ctm.f;
+			float tx1 = s->ctm.a * x1 + s->ctm.e;
+			float ty1 = s->ctm.d * y1 + s->ctm.f;
 			fz_insert_rasterizer_rect(ctx, s->rast, tx1, ty1, tx0, ty0);
 			return;
 		}
-		else if (s->ctm->a == 0 && s->ctm->d == 0)
+		else if (s->ctm.a == 0 && s->ctm.d == 0)
 		{
-			float tx0 = s->ctm->c * y0 + s->ctm->e;
-			float ty0 = s->ctm->b * x0 + s->ctm->f;
-			float tx1 = s->ctm->c * y1 + s->ctm->e;
-			float ty1 = s->ctm->b * x1 + s->ctm->f;
+			float tx0 = s->ctm.c * y0 + s->ctm.e;
+			float ty0 = s->ctm.b * x0 + s->ctm.f;
+			float tx1 = s->ctm.c * y1 + s->ctm.e;
+			float ty1 = s->ctm.b * x1 + s->ctm.f;
 			fz_insert_rasterizer_rect(ctx, s->rast, tx1, ty0, tx0, ty1);
 			return;
 		}
@@ -384,21 +382,21 @@ fz_add_vert_rect(fz_context *ctx, sctx *s, float x0, float y0, float x1, float y
 {
 	if (fz_antidropout_rasterizer(ctx, s->rast))
 	{
-		if (s->ctm->b == 0 && s->ctm->c == 0)
+		if (s->ctm.b == 0 && s->ctm.c == 0)
 		{
-			float tx0 = s->ctm->a * x0 + s->ctm->e;
-			float ty0 = s->ctm->d * y0 + s->ctm->f;
-			float tx1 = s->ctm->a * x1 + s->ctm->e;
-			float ty1 = s->ctm->d * y1 + s->ctm->f;
+			float tx0 = s->ctm.a * x0 + s->ctm.e;
+			float ty0 = s->ctm.d * y0 + s->ctm.f;
+			float tx1 = s->ctm.a * x1 + s->ctm.e;
+			float ty1 = s->ctm.d * y1 + s->ctm.f;
 			fz_insert_rasterizer_rect(ctx, s->rast, tx0, ty1, tx1, ty0);
 			return;
 		}
-		else if (s->ctm->a == 0 && s->ctm->d == 0)
+		else if (s->ctm.a == 0 && s->ctm.d == 0)
 		{
-			float tx0 = s->ctm->c * y0 + s->ctm->e;
-			float ty0 = s->ctm->b * x0 + s->ctm->f;
-			float tx1 = s->ctm->c * y1 + s->ctm->e;
-			float ty1 = s->ctm->b * x1 + s->ctm->f;
+			float tx0 = s->ctm.c * y0 + s->ctm.e;
+			float ty0 = s->ctm.b * x0 + s->ctm.f;
+			float tx1 = s->ctm.c * y1 + s->ctm.e;
+			float ty1 = s->ctm.b * x1 + s->ctm.f;
 			fz_insert_rasterizer_rect(ctx, s->rast, tx0, ty0, tx1, ty1);
 			return;
 		}
@@ -1421,7 +1419,7 @@ static const fz_path_walker dash_proc =
 };
 
 static int
-do_flatten_stroke(fz_context *ctx, fz_rasterizer *rast, const fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, float flatness, float linewidth, const fz_irect *scissor, fz_irect *bbox)
+do_flatten_stroke(fz_context *ctx, fz_rasterizer *rast, const fz_path *path, const fz_stroke_state *stroke, fz_matrix ctm, float flatness, float linewidth, const fz_irect *scissor, fz_irect *bbox)
 {
 	struct sctx s;
 	const fz_path_walker *proc = &stroke_proc;
@@ -1456,10 +1454,10 @@ do_flatten_stroke(fz_context *ctx, fz_rasterizer *rast, const fz_path *path, con
 		if (s.dash_total == 0)
 			return 1;
 
-		fz_scissor_rasterizer(ctx, rast, &s.rect);
+		s.rect = fz_scissor_rasterizer(ctx, rast);
 		if (fz_try_invert_matrix(&inv, ctm))
 			return 1;
-		fz_transform_rect(&s.rect, &inv);
+		s.rect = fz_transform_rect(s.rect, inv);
 		s.rect.x0 -= linewidth;
 		s.rect.x1 += linewidth;
 		s.rect.y0 -= linewidth;
@@ -1481,14 +1479,14 @@ do_flatten_stroke(fz_context *ctx, fz_rasterizer *rast, const fz_path *path, con
 	if (!bbox)
 		return 0;
 
-	return fz_is_empty_irect(fz_bound_rasterizer(ctx, rast, bbox));
+	*bbox = fz_bound_rasterizer(ctx, rast);
+	return fz_is_empty_irect(*bbox);
 }
 
 int
-fz_flatten_stroke_path(fz_context *ctx, fz_rasterizer *rast, const fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, float flatness, float linewidth, const fz_irect *scissor, fz_irect *bbox)
+fz_flatten_stroke_path(fz_context *ctx, fz_rasterizer *rast, const fz_path *path, const fz_stroke_state *stroke, fz_matrix ctm, float flatness, float linewidth, const fz_irect *scissor, fz_irect *bbox)
 {
-
-	if (fz_reset_rasterizer(ctx, rast, scissor))
+	if (fz_reset_rasterizer(ctx, rast, *scissor))
 	{
 		if (do_flatten_stroke(ctx, rast, path, stroke, ctm, flatness, linewidth, scissor, bbox))
 			return 1;

@@ -34,7 +34,7 @@ static void retainpage(fz_context *ctx, pdf_document *doc, pdf_obj *parent, pdf_
 
 	pdf_flatten_inheritable_page_items(ctx, pageref);
 
-	pdf_dict_put(ctx, pageref, PDF_NAME_Parent, parent);
+	pdf_dict_put(ctx, pageref, PDF_NAME(Parent), parent);
 
 	/* Store page object in new kids array */
 	pdf_array_push(ctx, kids, pageref);
@@ -59,18 +59,16 @@ static int dest_is_valid(fz_context *ctx, pdf_obj *o, int page_count, int *page_
 {
 	pdf_obj *p;
 
-	p = pdf_dict_get(ctx, o, PDF_NAME_A);
-	if (pdf_name_eq(ctx, pdf_dict_get(ctx, p, PDF_NAME_S), PDF_NAME_GoTo) &&
-		!string_in_names_list(ctx, pdf_dict_get(ctx, p, PDF_NAME_D), names_list))
+	p = pdf_dict_get(ctx, o, PDF_NAME(A));
+	if (pdf_name_eq(ctx, pdf_dict_get(ctx, p, PDF_NAME(S)), PDF_NAME(GoTo)) &&
+		!string_in_names_list(ctx, pdf_dict_get(ctx, p, PDF_NAME(D)), names_list))
 		return 0;
 
-	p = pdf_dict_get(ctx, o, PDF_NAME_Dest);
+	p = pdf_dict_get(ctx, o, PDF_NAME(Dest));
 	if (p == NULL)
 	{}
 	else if (pdf_is_string(ctx, p))
-	{
 		return string_in_names_list(ctx, p, names_list);
-	}
 	else if (!dest_is_valid_page(ctx, pdf_array_get(ctx, p, 0), page_object_nums, page_count))
 		return 0;
 
@@ -100,30 +98,30 @@ static int strip_outline(fz_context *ctx, pdf_document *doc, pdf_obj *outlines, 
 			{
 				/* Outline with invalid dest and no children. Drop it by
 				 * pulling the next one in here. */
-				pdf_obj *next = pdf_dict_get(ctx, current, PDF_NAME_Next);
+				pdf_obj *next = pdf_dict_get(ctx, current, PDF_NAME(Next));
 				if (next == NULL)
 				{
 					/* There is no next one to pull in */
 					if (prev != NULL)
-						pdf_dict_del(ctx, prev, PDF_NAME_Next);
+						pdf_dict_del(ctx, prev, PDF_NAME(Next));
 				}
 				else if (prev != NULL)
 				{
-					pdf_dict_put(ctx, prev, PDF_NAME_Next, next);
-					pdf_dict_put(ctx, next, PDF_NAME_Prev, prev);
+					pdf_dict_put(ctx, prev, PDF_NAME(Next), next);
+					pdf_dict_put(ctx, next, PDF_NAME(Prev), prev);
 				}
 				else
 				{
-					pdf_dict_del(ctx, next, PDF_NAME_Prev);
+					pdf_dict_del(ctx, next, PDF_NAME(Prev));
 				}
 				current = next;
 			}
 			else
 			{
 				/* Outline with invalid dest, but children. Just drop the dest. */
-				pdf_dict_del(ctx, current, PDF_NAME_Dest);
-				pdf_dict_del(ctx, current, PDF_NAME_A);
-				current = pdf_dict_get(ctx, current, PDF_NAME_Next);
+				pdf_dict_del(ctx, current, PDF_NAME(Dest));
+				pdf_dict_del(ctx, current, PDF_NAME(A));
+				current = pdf_dict_get(ctx, current, PDF_NAME(Next));
 			}
 		}
 		else
@@ -132,7 +130,7 @@ static int strip_outline(fz_context *ctx, pdf_document *doc, pdf_obj *outlines, 
 			if (first == NULL)
 				first = current;
 			prev = current;
-			current = pdf_dict_get(ctx, current, PDF_NAME_Next);
+			current = pdf_dict_get(ctx, current, PDF_NAME(Next));
 			count++;
 		}
 	}
@@ -152,7 +150,7 @@ static int strip_outlines(fz_context *ctx, pdf_document *doc, pdf_obj *outlines,
 	if (outlines == NULL)
 		return 0;
 
-	first = pdf_dict_get(ctx, outlines, PDF_NAME_First);
+	first = pdf_dict_get(ctx, outlines, PDF_NAME(First));
 	if (first == NULL)
 		nc = 0;
 	else
@@ -160,16 +158,16 @@ static int strip_outlines(fz_context *ctx, pdf_document *doc, pdf_obj *outlines,
 
 	if (nc == 0)
 	{
-		pdf_dict_del(ctx, outlines, PDF_NAME_First);
-		pdf_dict_del(ctx, outlines, PDF_NAME_Last);
-		pdf_dict_del(ctx, outlines, PDF_NAME_Count);
+		pdf_dict_del(ctx, outlines, PDF_NAME(First));
+		pdf_dict_del(ctx, outlines, PDF_NAME(Last));
+		pdf_dict_del(ctx, outlines, PDF_NAME(Count));
 	}
 	else
 	{
-		int old_count = pdf_to_int(ctx, pdf_dict_get(ctx, outlines, PDF_NAME_Count));
-		pdf_dict_put(ctx, outlines, PDF_NAME_First, first);
-		pdf_dict_put(ctx, outlines, PDF_NAME_Last, last);
-		pdf_dict_put_int(ctx, outlines, PDF_NAME_Count, old_count > 0 ? nc : -nc);
+		int old_count = pdf_dict_get_int(ctx, outlines, PDF_NAME(Count));
+		pdf_dict_put(ctx, outlines, PDF_NAME(First), first);
+		pdf_dict_put(ctx, outlines, PDF_NAME(Last), last);
+		pdf_dict_put_int(ctx, outlines, PDF_NAME(Count), old_count > 0 ? nc : -nc);
 	}
 
 	return nc;
@@ -189,19 +187,19 @@ static void retainpages(fz_context *ctx, globals *glo, int argc, char **argv)
 
 	/* Keep only pages/type and (reduced) dest entries to avoid
 	 * references to unretained pages */
-	oldroot = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME_Root);
-	pages = pdf_dict_get(ctx, oldroot, PDF_NAME_Pages);
-	olddests = pdf_load_name_tree(ctx, doc, PDF_NAME_Dests);
-	outlines = pdf_dict_get(ctx, oldroot, PDF_NAME_Outlines);
-	ocproperties = pdf_dict_get(ctx, oldroot, PDF_NAME_OCProperties);
+	oldroot = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(Root));
+	pages = pdf_dict_get(ctx, oldroot, PDF_NAME(Pages));
+	olddests = pdf_load_name_tree(ctx, doc, PDF_NAME(Dests));
+	outlines = pdf_dict_get(ctx, oldroot, PDF_NAME(Outlines));
+	ocproperties = pdf_dict_get(ctx, oldroot, PDF_NAME(OCProperties));
 
 	root = pdf_new_dict(ctx, doc, 3);
-	pdf_dict_put(ctx, root, PDF_NAME_Type, pdf_dict_get(ctx, oldroot, PDF_NAME_Type));
-	pdf_dict_put(ctx, root, PDF_NAME_Pages, pdf_dict_get(ctx, oldroot, PDF_NAME_Pages));
+	pdf_dict_put(ctx, root, PDF_NAME(Type), pdf_dict_get(ctx, oldroot, PDF_NAME(Type)));
+	pdf_dict_put(ctx, root, PDF_NAME(Pages), pdf_dict_get(ctx, oldroot, PDF_NAME(Pages)));
 	if (outlines)
-		pdf_dict_put(ctx, root, PDF_NAME_Outlines, outlines);
+		pdf_dict_put(ctx, root, PDF_NAME(Outlines), outlines);
 	if (ocproperties)
-		pdf_dict_put(ctx, root, PDF_NAME_OCProperties, ocproperties);
+		pdf_dict_put(ctx, root, PDF_NAME(OCProperties), ocproperties);
 
 	pdf_update_object(ctx, doc, pdf_to_num(ctx, oldroot), root);
 
@@ -230,9 +228,9 @@ static void retainpages(fz_context *ctx, globals *glo, int argc, char **argv)
 	}
 
 	/* Update page count and kids array */
-	countobj = pdf_new_int(ctx, doc, pdf_array_len(ctx, kids));
-	pdf_dict_put_drop(ctx, pages, PDF_NAME_Count, countobj);
-	pdf_dict_put_drop(ctx, pages, PDF_NAME_Kids, kids);
+	countobj = pdf_new_int(ctx, pdf_array_len(ctx, kids));
+	pdf_dict_put_drop(ctx, pages, PDF_NAME(Count), countobj);
+	pdf_dict_put_drop(ctx, pages, PDF_NAME(Kids), kids);
 
 	pagecount = pdf_count_pages(ctx, doc);
 	page_object_nums = fz_calloc(ctx, pagecount, sizeof(*page_object_nums));
@@ -258,33 +256,32 @@ static void retainpages(fz_context *ctx, globals *glo, int argc, char **argv)
 		{
 			pdf_obj *key = pdf_dict_get_key(ctx, olddests, i);
 			pdf_obj *val = pdf_dict_get_val(ctx, olddests, i);
-			pdf_obj *dest = pdf_dict_get(ctx, val, PDF_NAME_D);
+			pdf_obj *dest = pdf_dict_get(ctx, val, PDF_NAME(D));
 
 			dest = pdf_array_get(ctx, dest ? dest : val, 0);
 			if (dest_is_valid_page(ctx, dest, page_object_nums, pagecount))
 			{
-				pdf_obj *key_str = pdf_new_string(ctx, doc, pdf_to_name(ctx, key), strlen(pdf_to_name(ctx, key)));
+				pdf_obj *key_str = pdf_new_string(ctx, pdf_to_name(ctx, key), strlen(pdf_to_name(ctx, key)));
 				pdf_array_push_drop(ctx, names_list, key_str);
 				pdf_array_push(ctx, names_list, val);
 			}
 		}
 
-		pdf_dict_put(ctx, dests, PDF_NAME_Names, names_list);
-		pdf_dict_put(ctx, names, PDF_NAME_Dests, dests);
-		pdf_dict_put(ctx, root, PDF_NAME_Names, names);
+		pdf_dict_put(ctx, dests, PDF_NAME(Names), names_list);
+		pdf_dict_put(ctx, names, PDF_NAME(Dests), dests);
+		pdf_dict_put(ctx, root, PDF_NAME(Names), names);
 
 		pdf_drop_obj(ctx, names);
 		pdf_drop_obj(ctx, dests);
 		pdf_drop_obj(ctx, olddests);
 	}
 
-	/* Edit each pages /Annot list to remove any links that point to
-	 * nowhere. */
+	/* Edit each pages /Annot list to remove any links that point to nowhere. */
 	for (i = 0; i < pagecount; i++)
 	{
 		pdf_obj *pageref = pdf_lookup_page_obj(ctx, doc, i);
 
-		pdf_obj *annots = pdf_dict_get(ctx, pageref, PDF_NAME_Annots);
+		pdf_obj *annots = pdf_dict_get(ctx, pageref, PDF_NAME(Annots));
 
 		int len = pdf_array_len(ctx, annots);
 		int j;
@@ -293,7 +290,7 @@ static void retainpages(fz_context *ctx, globals *glo, int argc, char **argv)
 		{
 			pdf_obj *o = pdf_array_get(ctx, annots, j);
 
-			if (!pdf_name_eq(ctx, pdf_dict_get(ctx, o, PDF_NAME_Subtype), PDF_NAME_Link))
+			if (!pdf_name_eq(ctx, pdf_dict_get(ctx, o, PDF_NAME(Subtype)), PDF_NAME(Link)))
 				continue;
 
 			if (!dest_is_valid(ctx, o, pagecount, page_object_nums, names_list))
@@ -308,7 +305,7 @@ static void retainpages(fz_context *ctx, globals *glo, int argc, char **argv)
 
 	if (strip_outlines(ctx, doc, outlines, pagecount, page_object_nums, names_list) == 0)
 	{
-		pdf_dict_del(ctx, root, PDF_NAME_Outlines);
+		pdf_dict_del(ctx, root, PDF_NAME(Outlines));
 	}
 
 	fz_free(ctx, page_object_nums);

@@ -7,12 +7,14 @@
 
 void pdf_write_digest(fz_context *ctx, fz_output *out, pdf_obj *byte_range, int hexdigest_offset, int hexdigest_length, pdf_pkcs7_signer *signer)
 {
+	fz_stream *stm = NULL;
 	fz_stream *in = NULL;
 	fz_range *brange = NULL;
 	int brange_len = pdf_array_len(ctx, byte_range)/2;
 	unsigned char *digest = NULL;
 	int digest_len;
 
+	fz_var(stm);
 	fz_var(in);
 	fz_var(brange);
 
@@ -26,11 +28,12 @@ void pdf_write_digest(fz_context *ctx, fz_output *out, pdf_obj *byte_range, int 
 		brange = fz_calloc(ctx, brange_len, sizeof(*brange));
 		for (i = 0; i < brange_len; i++)
 		{
-			brange[i].offset = pdf_to_int(ctx, pdf_array_get(ctx, byte_range, 2*i));
-			brange[i].len = pdf_to_int(ctx, pdf_array_get(ctx, byte_range, 2*i+1));
+			brange[i].offset = pdf_array_get_int(ctx, byte_range, 2*i);
+			brange[i].length = pdf_array_get_int(ctx, byte_range, 2*i+1);
 		}
 
-		in = fz_open_null_n(ctx, fz_stream_from_output(ctx, out), brange, brange_len);
+		stm = fz_stream_from_output(ctx, out);
+		in = fz_open_range_filter(ctx, stm, brange, brange_len);
 
 		digest_len = (hexdigest_length - 2) / 2;
 		digest = fz_malloc(ctx, digest_len);
@@ -40,6 +43,8 @@ void pdf_write_digest(fz_context *ctx, fz_output *out, pdf_obj *byte_range, int 
 
 		fz_drop_stream(ctx, in);
 		in = NULL;
+		fz_drop_stream(ctx, stm);
+		stm = NULL;
 
 		fz_seek_output(ctx, out, hexdigest_offset+1, SEEK_SET);
 
@@ -50,6 +55,7 @@ void pdf_write_digest(fz_context *ctx, fz_output *out, pdf_obj *byte_range, int 
 	{
 		fz_free(ctx, digest);
 		fz_free(ctx, brange);
+		fz_drop_stream(ctx, stm);
 		fz_drop_stream(ctx, in);
 	}
 	fz_catch(ctx)
@@ -67,13 +73,12 @@ void pdf_sign_signature(fz_context *ctx, pdf_document *doc, pdf_widget *widget, 
 	{
 		const char *dn_str;
 		pdf_obj *wobj = ((pdf_annot *)widget)->obj;
-		fz_rect rect = fz_empty_rect;
+		fz_rect rect;
 
-		pdf_signature_set_value(ctx, doc, wobj, signer);
+		rect = pdf_dict_get_rect(ctx, wobj, PDF_NAME(Rect));
 
-		pdf_to_rect(ctx, pdf_dict_get(ctx, wobj, PDF_NAME_Rect), &rect);
 		/* Create an appearance stream only if the signature is intended to be visible */
-		if (!fz_is_empty_rect(&rect))
+		if (!fz_is_empty_rect(rect))
 		{
 			dn = signer->designated_name(signer);
 			fzbuf = fz_new_buffer(ctx, 256);
@@ -95,8 +100,10 @@ void pdf_sign_signature(fz_context *ctx, pdf_document *doc, pdf_widget *widget, 
 				fz_append_printf(ctx, fzbuf, ", c=%s", dn->c);
 
 			dn_str = fz_string_from_buffer(ctx, fzbuf);
-			pdf_set_signature_appearance(ctx, doc, (pdf_annot *)widget, dn->cn, dn_str, NULL);
+			pdf_update_signature_appearance(ctx, (pdf_annot *)widget, dn->cn, dn_str, NULL);
 		}
+
+		pdf_signature_set_value(ctx, doc, wobj, signer);
 	}
 	fz_always(ctx)
 	{

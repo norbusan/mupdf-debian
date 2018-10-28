@@ -61,6 +61,16 @@ void winprint(pdfapp_t *app)
 	fprintf(stderr, "The MuPDF library supports printing, but this application currently does not\n");
 }
 
+int winquery(pdfapp_t *app, const char *query)
+{
+	return QUERY_NO;
+}
+
+int wingetcertpath(char *buf, int len)
+{
+	return 0;
+}
+
 static char pd_password[256] = "";
 static char td_textinput[LONGLINE] = "";
 
@@ -81,7 +91,7 @@ char *wintextinput(pdfapp_t *app, char *inittext, int retry)
 	return inittext;
 }
 
-int winchoiceinput(pdfapp_t *app, int nopts, char *opts[], int *nvals, char *vals[])
+int winchoiceinput(pdfapp_t *app, int nopts, const char *opts[], int *nvals, const char *vals[])
 {
 	return 0;
 }

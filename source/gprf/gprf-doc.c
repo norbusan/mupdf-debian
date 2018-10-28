@@ -1,4 +1,9 @@
 #include "mupdf/fitz.h"
+#include "../fitz/fitz-imp.h"
+#include <string.h>
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #if FZ_ENABLE_GPRF
 /* Choose whether to call gs via an exe or via an API */
@@ -9,8 +14,6 @@
 #ifdef GSVIEW_WIN
 #define GS_API_NULL_STDIO
 #endif
-
-#include "mupdf/fitz.h"
 
 #if defined(USE_GS_API)
 
@@ -99,7 +102,7 @@ fz_drop_gprf_file(fz_context *ctx, gprf_file *file)
 {
 	if (fz_drop_imp(ctx, file, &file->refs))
 	{
-		unlink(file->filename);
+		remove(file->filename);
 		fz_free(ctx, file->filename);
 		fz_free(ctx, file);
 	}
@@ -153,17 +156,18 @@ gprf_drop_page_imp(fz_context *ctx, fz_page *page_)
 	fz_drop_gprf_file(ctx, page->file);
 }
 
-static fz_rect *
-gprf_bound_page(fz_context *ctx, fz_page *page_, fz_rect *bbox)
+static fz_rect
+gprf_bound_page(fz_context *ctx, fz_page *page_)
 {
 	gprf_page *page = (gprf_page*)page_;
 	gprf_document *doc = page->doc;
+	fz_rect bbox;
 
 	/* BBox is in points, not pixels */
-	bbox->x0 = 0;
-	bbox->y0 = 0;
-	bbox->x1 = 72.0f * page->width / doc->res;
-	bbox->y1 = 72.0f * page->height / doc->res;
+	bbox.x0 = 0;
+	bbox.y0 = 0;
+	bbox.x1 = 72.0f * page->width / doc->res;
+	bbox.y1 = 72.0f * page->height / doc->res;
 
 	return bbox;
 }
@@ -583,7 +587,6 @@ generate_page(fz_context *ctx, gprf_page *page)
 	char *filename;
 	char *disp_profile = NULL;
 	char *print_profile = NULL;
-	int len;
 
 	/* put the page file in the same directory as the gproof file */
 	fz_snprintf(nameroot, sizeof(nameroot), "gprf_%d_", page->number);
@@ -602,30 +605,14 @@ generate_page(fz_context *ctx, gprf_page *page)
 
 	/* Set up the icc profiles */
 	if (strlen(doc->display_profile) == 0)
-	{
-		len = sizeof("-sPostRenderProfile=srgb.icc");
-		disp_profile = (char*)fz_malloc(ctx, len + 1);
-		fz_snprintf(disp_profile, sizeof(disp_profile), "-sPostRenderProfile=srgb.icc");
-	}
+		disp_profile = fz_asprintf(ctx, "-sPostRenderProfile=srgb.icc");
 	else
-	{
-		len = sizeof("-sPostRenderProfile=" QUOTE QUOTE); /* with quotes */
-		disp_profile = (char*)fz_malloc(ctx, len + strlen(doc->display_profile) + 1);
-		fz_snprintf(disp_profile, sizeof(disp_profile), "-sPostRenderProfile=" QUOTE "%s" QUOTE, doc->display_profile);
-	}
+		disp_profile = fz_asprintf(ctx, "-sPostRenderProfile=" QUOTE "%s" QUOTE, doc->display_profile);
 
 	if (strlen(doc->print_profile) == 0)
-	{
-		len = sizeof("-sOutputICCProfile=default_cmyk.icc");
-		print_profile = (char*)fz_malloc(ctx, len + 1);
-		fz_snprintf(print_profile, sizeof(print_profile), "-sOutputICCProfile=default_cmyk.icc");
-	}
+		print_profile = fz_asprintf(ctx, "-sOutputICCProfile=default_cmyk.icc");
 	else if (strcmp(doc->print_profile, "<EMBEDDED>") != 0)
-	{
-		len = sizeof("-sOutputICCProfile=" QUOTE QUOTE); /* with quotes */
-		print_profile = (char*)fz_malloc(ctx, len + strlen(doc->print_profile) + 1);
-		fz_snprintf(print_profile, sizeof(print_profile), "-sOutputICCProfile=" QUOTE "%s" QUOTE, doc->print_profile);
-	}
+		print_profile = fz_asprintf(ctx, "-sOutputICCProfile=" QUOTE "%s" QUOTE, doc->print_profile);
 
 	fz_try(ctx)
 	{
@@ -653,6 +640,7 @@ generate_page(fz_context *ctx, gprf_page *page)
 		fz_snprintf(arg_lp, sizeof(arg_lp), "-dLastPage=%d", page->number+1);
 		argv[argc++] = arg_lp;
 		argv[argc++] = "-I%rom%Resource/Init/";
+		argv[argc++] = "-dSAFER";
 		fz_snprintf(arg_g, sizeof(arg_g), "-g%dx%d", page->width, page->height);
 		argv[argc++] = arg_g;
 		argv[argc++] = doc->pdf_filename;
@@ -680,7 +668,7 @@ generate_page(fz_context *ctx, gprf_page *page)
 #else
 		char gs_command[1024];
 		/* Invoke gs to convert to a temp file. */
-		fz_snprintf(gs_command, sizeof(gs_command), "gswin32c.exe -sDEVICE=gprf %s %s -dFitPage -o \"%s\" -dFirstPage=%d -dLastPage=%d -I%%rom%%Resource/Init/ -g%dx%d \"%s\"",
+		fz_snprintf(gs_command, sizeof(gs_command), "gswin32c.exe -sDEVICE=gprf %s %s -dSAFER -dFitPage -o \"%s\" -dFirstPage=%d -dLastPage=%d -I%%rom%%Resource/Init/ -g%dx%d \"%s\"",
 			print_profile == NULL ? "-dUsePDFX3Profile" : print_profile, disp_profile,
 			filename, page->number+1, page->number+1, page->width, page->height, doc->pdf_filename);
 		fz_system(ctx, gs_command);
@@ -695,7 +683,7 @@ generate_page(fz_context *ctx, gprf_page *page)
 	}
 	fz_catch(ctx)
 	{
-		unlink(filename);
+		remove(filename);
 		fz_free(ctx, filename);
 		fz_rethrow(ctx);
 	}
@@ -810,7 +798,7 @@ read_tiles(fz_context *ctx, gprf_page *page)
 }
 
 static void
-gprf_run_page(fz_context *ctx, fz_page *page_, fz_device *dev, const fz_matrix *ctm, fz_cookie *cookie)
+gprf_run_page(fz_context *ctx, fz_page *page_, fz_device *dev, fz_matrix ctm, fz_cookie *cookie)
 {
 	gprf_page *page = (gprf_page*)page_;
 	gprf_document *doc = page->doc;
@@ -844,8 +832,8 @@ gprf_run_page(fz_context *ctx, fz_page *page_, fz_device *dev, const fz_matrix *
 			local.d = scale_y;
 			local.e = x * scale;
 			local.f = y * scale;
-			fz_concat(&local, &local, ctm);
-			fz_fill_image(ctx, dev, page->tiles[i++], &local, 1.0f, NULL);
+			local = fz_concat(local, ctm);
+			fz_fill_image(ctx, dev, page->tiles[i++], local, 1.0f, NULL);
 		}
 	}
 	fz_render_flags(ctx, dev, 0, FZ_DEVFLAG_GRIDFIT_AS_TILED);

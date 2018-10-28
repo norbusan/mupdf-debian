@@ -11,6 +11,12 @@
 */
 
 /*
+	fz_strnlen: Return strlen(s), if that is less than maxlen, or maxlen if
+	there is no null byte ('\0') among the first maxlen bytes.
+*/
+size_t fz_strnlen(const char *s, size_t maxlen);
+
+/*
 	fz_strsep: Given a pointer to a C string (or a pointer to NULL) break
 	it at the first occurrence of a delimiter char (from a given set).
 
@@ -56,6 +62,11 @@ size_t fz_strlcpy(char *dst, const char *src, size_t n);
 size_t fz_strlcat(char *dst, const char *src, size_t n);
 
 /*
+	fz_memmem: Find the start of the first occurrence of the substring needle in haystack.
+*/
+void *fz_memmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen);
+
+/*
 	fz_dirname: extract the directory component from a path.
 */
 void fz_dirname(char *dir, const char *path, size_t dirsize);
@@ -69,8 +80,8 @@ char *fz_urldecode(char *url);
 	fz_format_output_path: create output file name using a template.
 		If the path contains %[0-9]*d, the first such pattern will be replaced
 		with the page number. If the template does not contain such a pattern, the page
-		number will be inserted before the file suffix. If the template does not have
-		a file suffix, the page number will be added to the end.
+		number will be inserted before the filename extension. If the template does not have
+		a filename extension, the page number will be added to the end.
 */
 void fz_format_output_path(fz_context *ctx, char *path, size_t size, const char *fmt, int page);
 
@@ -141,13 +152,6 @@ int fz_utflen(const char *s);
 */
 float fz_strtof(const char *s, char **es);
 
-/*
-	fz_strtof_no_exp: Like fz_strtof, but does not recognize exponent
-	format. So fz_strtof_no_exp("1.5e20", &tail) will return 1.5 and tail
-	will point to "e20".
-*/
-
-float fz_strtof_no_exp(const char *string, char **tailptr);
 /*
 	fz_grisu: Compute decimal integer m, exp such that:
 		f = m * 10^exp

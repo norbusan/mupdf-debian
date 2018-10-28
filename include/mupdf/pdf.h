@@ -7,7 +7,6 @@
 extern "C" {
 #endif
 
-#include "mupdf/pdf/name-table.h"
 #include "mupdf/pdf/object.h"
 #include "mupdf/pdf/document.h"
 #include "mupdf/pdf/parse.h"
@@ -23,7 +22,6 @@ extern "C" {
 #include "mupdf/pdf/annot.h"
 #include "mupdf/pdf/field.h"
 #include "mupdf/pdf/widget.h"
-#include "mupdf/pdf/appearance.h"
 #include "mupdf/pdf/event.h"
 #include "mupdf/pdf/javascript.h"
 

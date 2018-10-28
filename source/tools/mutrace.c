@@ -44,18 +44,18 @@ static void runpage(fz_context *ctx, fz_document *doc, int number)
 	fz_try(ctx)
 	{
 		page = fz_load_page(ctx, doc, number - 1);
-		fz_bound_page(ctx, page, &mediabox);
+		mediabox = fz_bound_page(ctx, page);
 		printf("<page number=\"%d\" mediabox=\"%g %g %g %g\">\n",
 				number, mediabox.x0, mediabox.y0, mediabox.x1, mediabox.y1);
 		dev = fz_new_trace_device(ctx, fz_stdout(ctx));
 		if (use_display_list)
 		{
 			list = fz_new_display_list_from_page(ctx, page);
-			fz_run_display_list(ctx, list, dev, &fz_identity, NULL, NULL);
+			fz_run_display_list(ctx, list, dev, fz_identity, fz_infinite_rect, NULL);
 		}
 		else
 		{
-			fz_run_page(ctx, page, dev, &fz_identity, NULL);
+			fz_run_page(ctx, page, dev, fz_identity, NULL);
 		}
 		printf("</page>\n");
 	}

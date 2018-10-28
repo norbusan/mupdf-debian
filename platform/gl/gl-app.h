@@ -1,11 +1,11 @@
 #ifdef _WIN32
 #include <windows.h>
 void win_install(void);
-int win_open_file(char *buf, int len);
 #endif
 
 #include "mupdf/fitz.h"
 #include "mupdf/ucdn.h"
+#include "mupdf/pdf.h" /* for pdf specifics and forms */
 
 #ifndef __APPLE__
 #include <GL/freeglut.h>
@@ -13,7 +13,7 @@ int win_open_file(char *buf, int len);
 #include <GLUT/glut.h>
 #endif
 
-extern fz_context *ctx;
+/* UI */
 
 enum
 {
@@ -55,33 +55,76 @@ enum
 	KEY_F12,
 };
 
+enum side { ALL, T, R, B, L };
+enum fill { NONE = 0, X = 1, Y = 2, BOTH = 3 };
+enum anchor { CENTER, N, NE, E, SE, S, SW, W, NW };
+
+struct layout
+{
+	enum side side;
+	enum fill fill;
+	enum anchor anchor;
+	int padx, pady;
+};
+
 struct ui
 {
+	int window_w, window_h;
+
 	int x, y;
-	int down, middle, right;
+	int down, down_x, down_y;
+	int middle, middle_x, middle_y;
+	int right, right_x, right_y;
+
 	int scroll_x, scroll_y;
 	int key, mod, plain;
 
-	void *hot, *active, *focus;
+	int grab_down, grab_middle, grab_right;
+	const void *hot, *active, *focus;
+	int last_cursor, cursor;
 
 	int fontsize;
 	int baseline;
 	int lineheight;
+	int gridsize;
+
+	struct layout *layout;
+	fz_irect *cavity;
+	struct layout layout_stack[32];
+	fz_irect cavity_stack[32];
+
+	int overlay;
+	GLuint overlay_list;
+
+	void (*dialog)(void);
 };
 
 extern struct ui ui;
 
+void ui_init(int w, int h, const char *title);
+void ui_quit(void);
+void ui_invalidate(void);
+void ui_finish(void);
+
 void ui_set_clipboard(const char *buf);
 const char *ui_get_clipboard(void);
 
-void ui_init_fonts(fz_context *ctx, float pixelsize);
-void ui_finish_fonts(fz_context *ctx);
-float ui_measure_character(fz_context *ctx, int ucs);
-void ui_begin_text(fz_context *ctx);
-float ui_draw_character(fz_context *ctx, int ucs, float x, float y);
-void ui_end_text(fz_context *ctx);
-float ui_draw_string(fz_context *ctx, float x, float y, const char *str);
-float ui_measure_string(fz_context *ctx, char *str);
+void ui_init_fonts(void);
+void ui_finish_fonts(void);
+float ui_measure_character(int ucs);
+void ui_begin_text(void);
+float ui_draw_character(int ucs, float x, float y);
+void ui_end_text(void);
+
+float ui_draw_string(float x, float y, const char *str);
+void ui_draw_string_part(float x, float y, const char *s, const char *e);
+float ui_measure_string(const char *str);
+float ui_measure_string_part(const char *s, const char *e);
+
+struct line { char *a, *b; };
+
+int ui_break_lines(char *a, struct line *lines, int nlines, int width, int *maxwidth);
+void ui_draw_lines(float x, float y, struct line *lines, int n);
 
 struct texture
 {
@@ -90,12 +133,118 @@ struct texture
 	float s, t;
 };
 
+void ui_texture_from_pixmap(struct texture *tex, fz_pixmap *pix);
 void ui_draw_image(struct texture *tex, float x, float y);
+
+enum
+{
+	UI_INPUT_NONE = 0,
+	UI_INPUT_EDIT = 1,
+	UI_INPUT_ACCEPT = 2,
+};
 
 struct input
 {
-	char text[256];
+	char text[16*1024];
 	char *end, *p, *q;
+	int scroll;
 };
 
-int ui_input(int x0, int y0, int x1, int y1, struct input *input);
+struct list
+{
+	fz_irect area;
+	int scroll_y;
+	int item_y;
+};
+
+void ui_begin(void);
+void ui_end(void);
+
+int ui_mouse_inside(fz_irect *area);
+
+void ui_layout(enum side side, enum fill fill, enum anchor anchor, int padx, int pady);
+fz_irect ui_pack_layout(int slave_w, int slave_h, enum side side, enum fill fill, enum anchor anchor, int padx, int pady);
+fz_irect ui_pack(int slave_w, int slave_h);
+int ui_available_width(void);
+int ui_available_height(void);
+void ui_pack_push(fz_irect cavity);
+void ui_pack_pop(void);
+
+void ui_dialog_begin(int w, int h);
+void ui_dialog_end(void);
+void ui_panel_begin(int w, int h, int padx, int pady, int opaque);
+void ui_panel_end(void);
+
+void ui_spacer(void);
+void ui_splitter(int *x, int min, int max, enum side side);
+void ui_label(const char *fmt, ...);
+int ui_button(const char *label);
+int ui_checkbox(const char *label, int *value);
+int ui_slider(int *value, int min, int max, int width);
+int ui_select(const void *id, const char *current, const char *options[], int n);
+
+void ui_input_init(struct input *input, const char *text);
+int ui_input(struct input *input, int width, int height);
+void ui_scrollbar(int x0, int y0, int x1, int y1, int *value, int page_size, int max);
+
+void ui_list_begin(struct list *list, int count, int req_w, int req_h);
+int ui_list_item(struct list *list, const void *id, const char *label, int selected);
+int ui_list_item_x(struct list *list, const void *id, int indent, const char *label, int selected);
+void ui_list_end(struct list *list);
+
+int ui_popup(const void *id, const char *label, int is_button, int count);
+int ui_popup_item(const char *title);
+void ui_popup_end(void);
+
+void ui_init_open_file(const char *dir, int (*filter)(const char *fn));
+int ui_open_file(char filename[]);
+void ui_init_save_file(const char *path, int (*filter)(const char *fn));
+int ui_save_file(char filename[], void (*extra_panel)(void));
+
+void ui_show_warning_dialog(const char *fmt, ...);
+void ui_show_error_dialog(const char *fmt, ...);
+
+/* Theming */
+
+enum
+{
+	UI_COLOR_PANEL = 0xc0c0c0,
+	UI_COLOR_BUTTON = 0xc0c0c0,
+	UI_COLOR_SCROLLBAR = 0xdfdfdf,
+	UI_COLOR_TEXT_BG = 0xffffff,
+	UI_COLOR_TEXT_FG = 0x000000,
+	UI_COLOR_TEXT_SEL_BG = 0x000080,
+	UI_COLOR_TEXT_SEL_FG = 0xffffff,
+	UI_COLOR_BEVEL_1 = 0x000000,
+	UI_COLOR_BEVEL_2 = 0x808080,
+	UI_COLOR_BEVEL_3 = 0xdfdfdf,
+	UI_COLOR_BEVEL_4 = 0xffffff,
+};
+
+void glColorHex(unsigned int hex);
+void ui_draw_bevel(fz_irect area, int depressed);
+void ui_draw_ibevel(fz_irect area, int depressed);
+void ui_draw_bevel_rect(fz_irect area, unsigned int fill, int depressed);
+void ui_draw_ibevel_rect(fz_irect area, unsigned int fill, int depressed);
+
+/* App */
+
+extern fz_context *ctx;
+extern pdf_document *pdf;
+extern pdf_page *page;
+extern fz_stext_page *page_text;
+extern pdf_annot *selected_annot;
+extern fz_matrix draw_page_ctm, view_page_ctm, view_page_inv_ctm;
+extern fz_rect page_bounds, draw_page_bounds, view_page_bounds;
+extern fz_irect view_page_area;
+extern char filename[];
+extern int showform;
+
+void run_main_loop(void);
+void do_annotate_panel(void);
+void do_annotate_canvas(fz_irect canvas_area);
+void do_widget_panel(void);
+void do_widget_canvas(fz_irect canvas_area);
+void render_page(void);
+void update_title(void);
+void reload(void);

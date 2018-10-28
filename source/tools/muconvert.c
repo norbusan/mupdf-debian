@@ -75,9 +75,9 @@ static void runpage(int number)
 
 	fz_try(ctx)
 	{
-		fz_bound_page(ctx, page, &mediabox);
-		dev = fz_begin_page(ctx, out, &mediabox);
-		fz_run_page(ctx, page, dev, &fz_identity, NULL);
+		mediabox = fz_bound_page(ctx, page);
+		dev = fz_begin_page(ctx, out, mediabox);
+		fz_run_page(ctx, page, dev, fz_identity, NULL);
 	}
 	fz_always(ctx)
 	{

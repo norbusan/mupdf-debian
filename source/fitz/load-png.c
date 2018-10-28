@@ -347,7 +347,7 @@ png_read_icc(fz_context *ctx, struct info *info, const unsigned char *p, unsigne
 	fz_stream *mstm = NULL, *zstm = NULL;
 	fz_colorspace *cs = NULL;
 	size_t m = fz_mini(80, size);
-	size_t n = strnlen((const char *)p, m);
+	size_t n = fz_strnlen((const char *)p, m);
 	if (n + 2 > m)
 	{
 		fz_warn(ctx, "invalid ICC profile name");
@@ -361,7 +361,7 @@ png_read_icc(fz_context *ctx, struct info *info, const unsigned char *p, unsigne
 	{
 		mstm = fz_open_memory(ctx, p + n + 2, size - n - 2);
 		zstm = fz_open_flated(ctx, mstm, 15);
-		cs = fz_new_icc_colorspace_from_stream(ctx, (const char *)p, zstm);
+		cs = fz_new_icc_colorspace_from_stream(ctx, info->type, zstm);
 		/* drop old one in case we have multiple ICC profiles */
 		fz_drop_colorspace(ctx, info->cs);
 		info->cs = cs;

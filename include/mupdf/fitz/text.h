@@ -113,7 +113,7 @@ void fz_drop_text(fz_context *ctx, const fz_text *text);
 
 	Throws exception on failure to allocate.
 */
-void fz_show_glyph(fz_context *ctx, fz_text *text, fz_font *font, const fz_matrix *trm, int glyph, int unicode, int wmode, int bidi_level, fz_bidi_direction markup_dir, fz_text_language language);
+void fz_show_glyph(fz_context *ctx, fz_text *text, fz_font *font, fz_matrix trm, int glyph, int unicode, int wmode, int bidi_level, fz_bidi_direction markup_dir, fz_text_language language);
 
 /*
 	fz_show_string: Add a UTF8 string to a text object.
@@ -122,8 +122,7 @@ void fz_show_glyph(fz_context *ctx, fz_text *text, fz_font *font, const fz_matri
 
 	font: The font the string should be added in.
 
-	trm: The transform to use. Will be updated according
-	to the advance of the string on exit.
+	trm: The transform to use.
 
 	s: The utf-8 string to add.
 
@@ -137,9 +136,9 @@ void fz_show_glyph(fz_context *ctx, fz_text *text, fz_font *font, const fz_matri
 	language: The language in use (if known, 0 otherwise)
 	(e.g. FZ_LANG_zh_Hans).
 
-	Throws exception on failure to allocate.
+	Returns the transform updated with the advance width of the string.
 */
-void fz_show_string(fz_context *ctx, fz_text *text, fz_font *font, fz_matrix *trm, const char *s, int wmode, int bidi_level, fz_bidi_direction markup_dir, fz_text_language language);
+fz_matrix fz_show_string(fz_context *ctx, fz_text *text, fz_font *font, fz_matrix trm, const char *s, int wmode, int bidi_level, fz_bidi_direction markup_dir, fz_text_language language);
 
 /*
 	fz_bound_text: Find the bounds of a given text object.
@@ -156,16 +155,7 @@ void fz_show_string(fz_context *ctx, fz_text *text, fz_font *font, fz_matrix *tr
 	Returns a pointer to r, which is updated to contain the
 	bounding box for the text object.
 */
-fz_rect *fz_bound_text(fz_context *ctx, const fz_text *text, const fz_stroke_state *stroke, const fz_matrix *ctm, fz_rect *r);
-
-/*
-	fz_clone_text: Clone a text object.
-
-	text: The text object to clone.
-
-	Throws an exception on allocation failure.
-*/
-fz_text *fz_clone_text(fz_context *ctx, const fz_text *text);
+fz_rect fz_bound_text(fz_context *ctx, const fz_text *text, const fz_stroke_state *stroke, fz_matrix ctm);
 
 /*
 	Convert ISO 639 (639-{1,2,3,5}) language specification

@@ -262,7 +262,7 @@ static int lowmemory = 0;
 static int errored = 0;
 static fz_colorspace *colorspace;
 static fz_colorspace *oi = NULL;
-#ifdef FZ_ENABLE_SPOT_RENDERING
+#if FZ_ENABLE_SPOT_RENDERING
 static int spots = SPOTS_OVERPRINT_SIM;
 #else
 static int spots = SPOTS_NONE;
@@ -363,7 +363,7 @@ static void usage(void)
 #endif
 		"\t-N\tdisable ICC workflow (\"N\"o color management)\n"
 		"\t-O -\tControl spot/overprint rendering\n"
-#ifdef FZ_ENABLE_SPOT_RENDERING
+#if FZ_ENABLE_SPOT_RENDERING
 		"\t\t 0 = No spot rendering\n"
 		"\t\t 1 = Overprint simulation (default)\n"
 		"\t\t 2 = Full spot rendering\n"
@@ -461,7 +461,7 @@ file_level_trailers(fz_context *ctx)
 
 }
 
-static void drawband(fz_context *ctx, fz_page *page, fz_display_list *list, const fz_matrix *ctm, const fz_rect *tbounds, fz_cookie *cookie, int band_start, fz_pixmap *pix, fz_bitmap **bit)
+static void drawband(fz_context *ctx, fz_page *page, fz_display_list *list, fz_matrix ctm, fz_rect tbounds, fz_cookie *cookie, int band_start, fz_pixmap *pix, fz_bitmap **bit)
 {
 	fz_device *dev = NULL;
 
@@ -476,7 +476,7 @@ static void drawband(fz_context *ctx, fz_page *page, fz_display_list *list, cons
 		else
 			fz_clear_pixmap_with_value(ctx, pix, 255);
 
-		dev = fz_new_draw_device_with_proof(ctx, NULL, pix, proof_cs);
+		dev = fz_new_draw_device_with_proof(ctx, fz_identity, pix, proof_cs);
 		if (lowmemory)
 			fz_enable_device_hints(ctx, dev, FZ_NO_CACHE);
 		if (alphabits_graphics == 0)
@@ -517,9 +517,9 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 	fz_try(ctx)
 	{
 		if (list)
-			fz_bound_display_list(ctx, list, &mediabox);
+			mediabox = fz_bound_display_list(ctx, list);
 		else
-			fz_bound_page(ctx, page, &mediabox);
+			mediabox = fz_bound_page(ctx, page);
 	}
 	fz_catch(ctx)
 	{
@@ -538,9 +538,9 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 			if (lowmemory)
 				fz_enable_device_hints(ctx, dev, FZ_NO_CACHE);
 			if (list)
-				fz_run_display_list(ctx, list, dev, &fz_identity, &fz_infinite_rect, cookie);
+				fz_run_display_list(ctx, list, dev, fz_identity, fz_infinite_rect, cookie);
 			else
-				fz_run_page(ctx, page, dev, &fz_identity, cookie);
+				fz_run_page(ctx, page, dev, fz_identity, cookie);
 			fz_write_printf(ctx, out, "</page>\n");
 			fz_close_device(ctx, dev);
 		}
@@ -564,7 +564,7 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 		fz_matrix ctm;
 
 		zoom = resolution / 72;
-		fz_pre_scale(fz_rotate(&ctm, rotation), zoom, zoom);
+		ctm = fz_pre_scale(fz_rotate(rotation), zoom, zoom);
 
 		fz_var(text);
 
@@ -573,14 +573,14 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 			fz_stext_options stext_options;
 
 			stext_options.flags = (output_format == OUT_HTML || output_format == OUT_XHTML) ? FZ_STEXT_PRESERVE_IMAGES : 0;
-			text = fz_new_stext_page(ctx, &mediabox);
+			text = fz_new_stext_page(ctx, mediabox);
 			dev = fz_new_stext_device(ctx,  text, &stext_options);
 			if (lowmemory)
 				fz_enable_device_hints(ctx, dev, FZ_NO_CACHE);
 			if (list)
-				fz_run_display_list(ctx, list, dev, &ctm, &fz_infinite_rect, cookie);
+				fz_run_display_list(ctx, list, dev, ctm, fz_infinite_rect, cookie);
 			else
-				fz_run_page(ctx, page, dev, &ctm, cookie);
+				fz_run_page(ctx, page, dev, ctm, cookie);
 			fz_close_device(ctx, dev);
 			fz_drop_device(ctx, dev);
 			dev = NULL;
@@ -629,16 +629,16 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 		{
 			pdf_obj *page_obj;
 
-			dev = pdf_page_write(ctx, pdfout, &mediabox, &resources, &contents);
+			dev = pdf_page_write(ctx, pdfout, mediabox, &resources, &contents);
 			if (list)
-				fz_run_display_list(ctx, list, dev, &fz_identity, NULL, cookie);
+				fz_run_display_list(ctx, list, dev, fz_identity, fz_infinite_rect, cookie);
 			else
-				fz_run_page(ctx, page, dev, &fz_identity, cookie);
+				fz_run_page(ctx, page, dev, fz_identity, cookie);
 			fz_close_device(ctx, dev);
 			fz_drop_device(ctx, dev);
 			dev = NULL;
 
-			page_obj = pdf_add_page(ctx, pdfout, &mediabox, rotation, resources, contents);
+			page_obj = pdf_add_page(ctx, pdfout, mediabox, rotation, resources, contents);
 			pdf_insert_page(ctx, pdfout, -1, page_obj);
 			pdf_drop_obj(ctx, page_obj);
 		}
@@ -669,9 +669,8 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 		fz_var(out);
 
 		zoom = resolution / 72;
-		fz_pre_rotate(fz_scale(&ctm, zoom, zoom), rotation);
-		tbounds = mediabox;
-		fz_transform_rect(&tbounds, &ctm);
+		ctm = fz_pre_rotate(fz_scale(zoom, zoom), rotation);
+		tbounds = fz_transform_rect(mediabox, ctm);
 
 		fz_try(ctx)
 		{
@@ -687,9 +686,9 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 			if (lowmemory)
 				fz_enable_device_hints(ctx, dev, FZ_NO_CACHE);
 			if (list)
-				fz_run_display_list(ctx, list, dev, &ctm, &tbounds, cookie);
+				fz_run_display_list(ctx, list, dev, ctm, tbounds, cookie);
 			else
-				fz_run_page(ctx, page, dev, &ctm, cookie);
+				fz_run_page(ctx, page, dev, ctm, cookie);
 			fz_close_device(ctx, dev);
 			fz_close_output(ctx, out);
 		}
@@ -721,15 +720,15 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 		fz_var(bit);
 
 		zoom = resolution / 72;
-		fz_pre_scale(fz_rotate(&ctm, rotation), zoom, zoom);
+		ctm = fz_pre_scale(fz_rotate(rotation), zoom, zoom);
 
 		if (output_format == OUT_TGA)
 		{
-			fz_pre_scale(fz_pre_translate(&ctm, 0, -height), 1, -1);
+			ctm = fz_pre_scale(fz_pre_translate(ctm, 0, -height), 1, -1);
 		}
 
-		tbounds = mediabox;
-		fz_round_rect(&ibounds, fz_transform_rect(&tbounds, &ctm));
+		tbounds = fz_transform_rect(mediabox, ctm);
+		ibounds = fz_round_rect(tbounds);
 
 		/* Make local copies of our width/height */
 		w = width;
@@ -776,13 +775,12 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 				else
 					scaley = scalex;
 			}
-			fz_scale(&scale_mat, scalex, scaley);
-			fz_concat(&ctm, &ctm, &scale_mat);
-			tbounds = mediabox;
-			fz_transform_rect(&tbounds, &ctm);
+			scale_mat = fz_scale(scalex, scaley);
+			ctm = fz_concat(ctm, scale_mat);
+			tbounds = fz_transform_rect(mediabox, ctm);
 		}
-		fz_round_rect(&ibounds, &tbounds);
-		fz_rect_from_irect(&tbounds, &ibounds);
+		ibounds = fz_round_rect(tbounds);
+		tbounds = fz_rect_from_irect(ibounds);
 
 		fz_try(ctx)
 		{
@@ -812,7 +810,7 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 					workers[band].tbounds = tbounds;
 					memset(&workers[band].cookie, 0, sizeof(fz_cookie));
 					workers[band].list = list;
-					workers[band].pix = fz_new_pixmap_with_bbox(ctx, colorspace, &band_ibounds, seps, alpha);
+					workers[band].pix = fz_new_pixmap_with_bbox(ctx, colorspace, band_ibounds, seps, alpha);
 					fz_set_pixmap_resolution(ctx, workers[band].pix, resolution, resolution);
 #ifndef DISABLE_MUTHREADS
 					DEBUG_THREADS(("Worker %d, Pre-triggering band %d\n", band, band));
@@ -824,7 +822,7 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 			}
 			else
 			{
-				pix = fz_new_pixmap_with_bbox(ctx, colorspace, &band_ibounds, seps, alpha);
+				pix = fz_new_pixmap_with_bbox(ctx, colorspace, band_ibounds, seps, alpha);
 				fz_set_pixmap_resolution(ctx, pix, resolution, resolution);
 			}
 
@@ -882,7 +880,7 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 					cookie->errors += w->cookie.errors;
 				}
 				else
-					drawband(ctx, page, list, &ctm, &tbounds, cookie, band * band_height, pix, &bit);
+					drawband(ctx, page, list, ctm, tbounds, cookie, band * band_height, pix, &bit);
 
 				if (output)
 				{
@@ -1030,7 +1028,6 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 	fz_device *dev = NULL;
 	int start;
 	fz_cookie cookie = { 0 };
-	fz_rect bounds;
 	fz_separations *seps = NULL;
 
 	fz_var(list);
@@ -1082,11 +1079,11 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 	{
 		fz_try(ctx)
 		{
-			list = fz_new_display_list(ctx, fz_bound_page(ctx, page, &bounds));
+			list = fz_new_display_list(ctx, fz_bound_page(ctx, page));
 			dev = fz_new_list_device(ctx, list);
 			if (lowmemory)
 				fz_enable_device_hints(ctx, dev, FZ_NO_CACHE);
-			fz_run_page(ctx, page, dev, &fz_identity, &cookie);
+			fz_run_page(ctx, page, dev, fz_identity, &cookie);
 			fz_close_device(ctx, dev);
 		}
 		fz_always(ctx)
@@ -1118,9 +1115,9 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 		fz_try(ctx)
 		{
 			if (list)
-				fz_run_display_list(ctx, list, dev, &fz_identity, &fz_infinite_rect, NULL);
+				fz_run_display_list(ctx, list, dev, fz_identity, fz_infinite_rect, NULL);
 			else
-				fz_run_page(ctx, page, dev, &fz_identity, &cookie);
+				fz_run_page(ctx, page, dev, fz_identity, &cookie);
 			fz_close_device(ctx, dev);
 		}
 		fz_always(ctx)
@@ -1317,7 +1314,7 @@ static void worker_thread(void *arg)
 		mu_wait_semaphore(&me->start);
 		DEBUG_THREADS(("Worker %d woken for band %d\n", me->num, me->band));
 		if (me->band >= 0)
-			drawband(me->ctx, NULL, me->list, &me->ctm, &me->tbounds, &me->cookie, me->band * band_height, me->pix, &me->bit);
+			drawband(me->ctx, NULL, me->list, me->ctm, me->tbounds, &me->cookie, me->band * band_height, me->pix, &me->bit);
 		DEBUG_THREADS(("Worker %d completed band %d\n", me->num, me->band));
 		mu_trigger_semaphore(&me->stop);
 	}
@@ -1596,7 +1593,7 @@ int mudraw_main(int argc, char **argv)
 	}
 
 	if (proof_filename)
-		proof_cs = fz_new_icc_colorspace_from_file(ctx, NULL, proof_filename);
+		proof_cs = fz_new_icc_colorspace_from_file(ctx, FZ_COLORSPACE_NONE, proof_filename);
 
 	fz_set_text_aa_level(ctx, alphabits_text);
 	fz_set_graphics_aa_level(ctx, alphabits_graphics);
@@ -1760,7 +1757,7 @@ int mudraw_main(int argc, char **argv)
 		break;
 	case CS_ICC:
 		fz_try(ctx)
-			colorspace = fz_new_icc_colorspace_from_file(ctx, NULL, icc_filename);
+			colorspace = fz_new_icc_colorspace_from_file(ctx, FZ_COLORSPACE_NONE, icc_filename);
 		fz_catch(ctx)
 		{
 			fprintf(stderr, "Invalid ICC destination color space\n");
@@ -1830,9 +1827,14 @@ int mudraw_main(int argc, char **argv)
 	}
 	else
 #endif
-	if (output_format == OUT_GPROOF || output_format == OUT_SVG)
+	if (output_format == OUT_GPROOF)
 	{
 		/* GPROOF files are saved direct. Do not open "output". */
+		if (!output)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "output filename required when saving GProof file");
+	}
+	else if (output_format == OUT_SVG)
+	{
 		/* SVG files are always opened for each page. Do not open "output". */
 	}
 	else if (output && (output[0] != '-' || output[1] != 0) && *output != 0)
@@ -1959,7 +1961,7 @@ int mudraw_main(int argc, char **argv)
 	}
 	else
 #endif
-	if (output_format == OUT_GPROOF)
+	if (output_format == OUT_GPROOF || output_format == OUT_SVG)
 	{
 		/* No output file to close */
 	}

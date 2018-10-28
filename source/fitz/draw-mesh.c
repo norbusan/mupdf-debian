@@ -6,7 +6,7 @@
 
 enum { MAXN = 2 + FZ_MAX_COLORS };
 
-static void paint_scan(fz_pixmap *restrict pix, int y, int fx0, int fx1, int cx0, int cx1, const int *restrict v0, const int *restrict v1, int n)
+static void paint_scan(fz_pixmap *FZ_RESTRICT pix, int y, int fx0, int fx1, int cx0, int cx1, const int *FZ_RESTRICT v0, const int *FZ_RESTRICT v1, int n)
 {
 	unsigned char *p;
 	int c[MAXN], dc[MAXN];
@@ -68,7 +68,7 @@ struct edge_data_s
 	int v[2*MAXN];
 };
 
-static inline void prepare_edge(const float *restrict vtop, const float *restrict vbot, edge_data *restrict edge, float y, int n)
+static inline void prepare_edge(const float *FZ_RESTRICT vtop, const float *FZ_RESTRICT vbot, edge_data *FZ_RESTRICT edge, float y, int n)
 {
 	float r = 1.0f / (vbot[1] - vtop[1]);
 	float t = (y - vtop[1]) * r;
@@ -99,7 +99,7 @@ static inline void step_edge(edge_data *edge, int n)
 }
 
 static void
-fz_paint_triangle(fz_pixmap *pix, float *v[3], int n, const fz_irect *bbox)
+fz_paint_triangle(fz_pixmap *pix, float *v[3], int n, fz_irect bbox)
 {
 	edge_data e0, e1;
 	int top, mid, bot;
@@ -113,19 +113,19 @@ fz_paint_triangle(fz_pixmap *pix, float *v[3], int n, const fz_irect *bbox)
 	if (v[top][1] == v[bot][1]) return;
 
 	/* Test if the triangle is completely outside the scissor rect */
-	if (v[bot][1] < bbox->y0) return;
-	if (v[top][1] > bbox->y1) return;
+	if (v[bot][1] < bbox.y0) return;
+	if (v[top][1] > bbox.y1) return;
 
 	/* Magic! Ensure that mid/top/bot are all different */
 	mid = 3^top^bot;
 
 	assert(top != bot && top != mid && mid != bot);
 
-	minx = fz_maxi(bbox->x0, pix->x);
-	maxx = fz_mini(bbox->x1, pix->x + pix->w);
+	minx = fz_maxi(bbox.x0, pix->x);
+	maxx = fz_mini(bbox.x1, pix->x + pix->w);
 
-	y = ceilf(fz_max(bbox->y0, v[top][1]));
-	y1 = ceilf(fz_min(bbox->y1, v[mid][1]));
+	y = ceilf(fz_max(bbox.y0, v[top][1]));
+	y1 = ceilf(fz_min(bbox.y1, v[mid][1]));
 
 	n -= 2;
 	prepare_edge(v[top], v[bot], &e0, y, n);
@@ -143,7 +143,7 @@ fz_paint_triangle(fz_pixmap *pix, float *v[3], int n, const fz_irect *bbox)
 		while (y < y1);
 	}
 
-	y1 = ceilf(fz_min(bbox->y1, v[bot][1]));
+	y1 = ceilf(fz_min(bbox.y1, v[bot][1]));
 	if (y < y1)
 	{
 		prepare_edge(v[mid], v[bot], &e1, y, n);
@@ -165,7 +165,7 @@ struct paint_tri_data
 {
 	const fz_shade *shade;
 	fz_pixmap *dest;
-	const fz_irect *bbox;
+	fz_irect bbox;
 	fz_color_converter cc;
 };
 
@@ -211,7 +211,7 @@ do_paint_tri(fz_context *ctx, void *arg, fz_vertex *av, fz_vertex *bv, fz_vertex
 }
 
 void
-fz_paint_shade(fz_context *ctx, fz_shade *shade, fz_colorspace *colorspace, const fz_matrix *ctm, fz_pixmap *dest, const fz_color_params *color_params, const fz_irect *bbox, const fz_overprint *op)
+fz_paint_shade(fz_context *ctx, fz_shade *shade, fz_colorspace *colorspace, fz_matrix ctm, fz_pixmap *dest, const fz_color_params *color_params, fz_irect bbox, const fz_overprint *eop)
 {
 	unsigned char clut[256][FZ_MAX_COLORS];
 	fz_pixmap *temp = NULL;
@@ -230,12 +230,11 @@ fz_paint_shade(fz_context *ctx, fz_shade *shade, fz_colorspace *colorspace, cons
 
 	fz_try(ctx)
 	{
-		fz_concat(&local_ctm, &shade->matrix, ctm);
+		local_ctm = fz_concat(shade->matrix, ctm);
 
 		if (shade->use_function)
 		{
-			/* We need to use alpha = 1 here, because the shade might not fill
-			 * the bbox. */
+			/* We need to use alpha = 1 here, because the shade might not fill the bbox. */
 			temp = fz_new_pixmap_with_bbox(ctx, fz_device_gray(ctx), bbox, NULL, 1);
 			fz_clear_pixmap(ctx, temp);
 		}
@@ -249,7 +248,7 @@ fz_paint_shade(fz_context *ctx, fz_shade *shade, fz_colorspace *colorspace, cons
 		ptd.bbox = bbox;
 
 		fz_init_cached_color_converter(ctx, &ptd.cc, NULL, temp->colorspace, colorspace, color_params);
-		fz_process_shade(ctx, shade, &local_ctm, prepare_mesh_vertex, &do_paint_tri, &ptd);
+		fz_process_shade(ctx, shade, local_ctm, prepare_mesh_vertex, &do_paint_tri, &ptd);
 
 		if (shade->use_function)
 		{
@@ -343,7 +342,7 @@ fz_paint_shade(fz_context *ctx, fz_shade *shade, fz_colorspace *colorspace, cons
 					s += temp->stride - temp->w * temp->n;
 				}
 			}
-			fz_paint_pixmap_with_overprint(dest, conv, op);
+			fz_paint_pixmap_with_overprint(dest, conv, eop);
 		}
 	}
 	fz_always(ctx)

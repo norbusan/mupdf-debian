@@ -26,6 +26,7 @@ static void jsB_Function(js_State *J)
 			js_puts(J, &sb, js_tostring(J, i));
 		}
 		js_putc(J, &sb, ')');
+		js_putc(J, &sb, 0);
 	}
 
 	/* body */
@@ -71,6 +72,7 @@ static void Fp_toString(js_State *J)
 			js_puts(J, &sb, F->vartab[i]);
 		}
 		js_puts(J, &sb, ") { ... }");
+		js_putc(J, &sb, 0);
 
 		js_pushstring(J, sb->s);
 		js_endtry(J);
@@ -84,6 +86,7 @@ static void Fp_toString(js_State *J)
 		js_puts(J, &sb, "function ");
 		js_puts(J, &sb, self->u.c.name);
 		js_puts(J, &sb, "() { ... }");
+		js_putc(J, &sb, 0);
 
 		js_pushstring(J, sb->s);
 		js_endtry(J);
@@ -209,8 +212,10 @@ static void Fp_bind(js_State *J)
 
 void jsB_initfunction(js_State *J)
 {
+	J->Function_prototype->u.c.name = "Function.prototype";
 	J->Function_prototype->u.c.function = jsB_Function_prototype;
 	J->Function_prototype->u.c.constructor = NULL;
+	J->Function_prototype->u.c.length = 0;
 
 	js_pushobject(J, J->Function_prototype);
 	{

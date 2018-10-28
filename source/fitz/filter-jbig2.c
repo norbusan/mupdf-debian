@@ -28,7 +28,13 @@ struct fz_jbig2d_s
 	int idx;
 };
 
-static void
+fz_jbig2_globals *
+fz_keep_jbig2_globals(fz_context *ctx, fz_jbig2_globals *globals)
+{
+	return fz_keep_storable(ctx, &globals->storable);
+}
+
+void
 fz_drop_jbig2_globals(fz_context *ctx, fz_jbig2_globals *globals)
 {
 	fz_drop_storable(ctx, &globals->storable);
@@ -220,16 +226,9 @@ fz_open_jbig2d(fz_context *ctx, fz_stream *chain, fz_jbig2_globals *globals)
 {
 	fz_jbig2d *state = NULL;
 
-	fz_try(ctx)
-		state = fz_malloc_struct(ctx, fz_jbig2d);
-	fz_catch(ctx)
-	{
-		fz_drop_jbig2_globals(ctx, globals);
-		fz_rethrow(ctx);
-	}
-
+	state = fz_malloc_struct(ctx, fz_jbig2d);
 	state->ctx = ctx;
-	state->gctx = globals;
+	state->gctx = fz_keep_jbig2_globals(ctx, globals);
 	state->chain = fz_keep_stream(ctx, chain);
 	state->idx = 0;
 	state->output = NULL;
@@ -268,7 +267,13 @@ struct fz_jbig2d_s
 	unsigned char buffer[4096];
 };
 
-static void
+fz_jbig2_globals *
+fz_keep_jbig2_globals(fz_context *ctx, fz_jbig2_globals *globals)
+{
+	return fz_keep_storable(ctx, &globals->storable);
+}
+
+void
 fz_drop_jbig2_globals(fz_context *ctx, fz_jbig2_globals *globals)
 {
 	fz_drop_storable(ctx, &globals->storable);
@@ -334,7 +339,7 @@ next_jbig2d(fz_context *ctx, fz_stream *stm, size_t len)
 	return *stm->rp++;
 }
 
-static int
+static void
 error_callback(void *data, const char *msg, Jbig2Severity severity, int32_t seg_idx)
 {
 	fz_context *ctx = data;
@@ -342,7 +347,6 @@ error_callback(void *data, const char *msg, Jbig2Severity severity, int32_t seg_
 		fz_warn(ctx, "jbig2dec error: %s (segment %d)", msg, seg_idx);
 	else if (severity == JBIG2_SEVERITY_WARNING)
 		fz_warn(ctx, "jbig2dec warning: %s (segment %d)", msg, seg_idx);
-	return 0;
 }
 
 static void *fz_jbig2_alloc(Jbig2Allocator *allocator, size_t size)
@@ -405,30 +409,16 @@ fz_open_jbig2d(fz_context *ctx, fz_stream *chain, fz_jbig2_globals *globals)
 
 	fz_var(state);
 
-	fz_try(ctx)
-	{
-		state = fz_malloc_struct(ctx, fz_jbig2d);
-		state->gctx = globals;
-		state->alloc.ctx = ctx;
-		state->alloc.alloc.alloc = fz_jbig2_alloc;
-		state->alloc.alloc.free = fz_jbig2_free;
-		state->alloc.alloc.realloc = fz_jbig2_realloc;
-		state->ctx = jbig2_ctx_new((Jbig2Allocator *) &state->alloc, JBIG2_OPTIONS_EMBEDDED, globals ? globals->gctx : NULL, error_callback, ctx);
-		state->page = NULL;
-		state->idx = 0;
-		state->chain = fz_keep_stream(ctx, chain);
-	}
-	fz_catch(ctx)
-	{
-		if (state)
-		{
-			fz_drop_jbig2_globals(ctx, state->gctx);
-			if (state->ctx)
-				jbig2_ctx_free(state->ctx);
-		}
-		fz_free(ctx, state);
-		fz_rethrow(ctx);
-	}
+	state = fz_malloc_struct(ctx, fz_jbig2d);
+	state->gctx = fz_keep_jbig2_globals(ctx, globals);
+	state->alloc.ctx = ctx;
+	state->alloc.alloc.alloc = fz_jbig2_alloc;
+	state->alloc.alloc.free = fz_jbig2_free;
+	state->alloc.alloc.realloc = fz_jbig2_realloc;
+	state->ctx = jbig2_ctx_new((Jbig2Allocator *) &state->alloc, JBIG2_OPTIONS_EMBEDDED, globals ? globals->gctx : NULL, error_callback, ctx);
+	state->page = NULL;
+	state->idx = 0;
+	state->chain = fz_keep_stream(ctx, chain);
 
 	return fz_new_stream(ctx, state, next_jbig2d, close_jbig2d);
 }
