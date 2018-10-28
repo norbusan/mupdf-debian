@@ -12,6 +12,10 @@ export DH_OPTIONS
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 include /usr/share/dpkg/buildflags.mk
 include /usr/share/dpkg/architecture.mk
+
+# Set CC for crossbuild
+export CC_FOR_BUILD ?= cc
+
 # The build system doesn't use CPPFLAGS, pass them to CFLAGS to enable the
 # missing (hardening) flags.
 CFLAGS += $(CPPFLAGS)
