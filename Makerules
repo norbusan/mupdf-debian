@@ -94,7 +94,7 @@ else ifeq ($(OS),MACOS)
   RANLIB = xcrun ranlib
 
 else ifeq ($(OS),Linux)
-  HAVE_OBJCOPY := yes
+  HAVE_OBJCOPY ?= yes
 
   ifeq ($(shell $(PKG_CONFIG) --exists freetype2 && echo yes),yes)
 	SYS_FREETYPE_CFLAGS := $(shell $(PKG_CONFIG) --cflags freetype2)
