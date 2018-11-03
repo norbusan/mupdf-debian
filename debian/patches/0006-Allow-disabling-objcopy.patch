@@ -1,0 +1,21 @@
+From: Kan-Ru Chen <koster@debian.org>
+Date: Sat, 3 Nov 2018 14:41:25 +0000
+Subject: Allow disabling objcopy
+
+---
+ Makerules | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makerules b/Makerules
+index 35c9cbe..54530cf 100644
+--- a/Makerules
++++ b/Makerules
+@@ -94,7 +94,7 @@ else ifeq ($(OS),MACOS)
+   RANLIB = xcrun ranlib
+ 
+ else ifeq ($(OS),Linux)
+-  HAVE_OBJCOPY := yes
++  HAVE_OBJCOPY ?= yes
+ 
+   ifeq ($(shell $(PKG_CONFIG) --exists freetype2 && echo yes),yes)
+ 	SYS_FREETYPE_CFLAGS := $(shell $(PKG_CONFIG) --cflags freetype2)

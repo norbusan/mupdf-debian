@@ -29,6 +29,10 @@ BUILD_FLAGS += USE_SYSTEM_LIBS=yes
 # Force using system lcms2 (was not included in default system library set)
 BUILD_FLAGS += USE_SYSTEM_LCMS2=yes
 
+ifeq ($(DEB_TARGET_ARCH),mips64el)
+	BUILD_FLAGS += HAVE_OBJCOPY=no
+endif
+
 override_dh_auto_build:
 	dh_auto_build -- $(BUILD_FLAGS)
 
