@@ -1,3 +1,12 @@
+mupdf (1.14.0+ds1-2) unstable; urgency=medium
+
+  * Fix FTBFS on mips64el
+    Disabled objcopy to avoid linking error.
+  * Bump Standards-Version to 4.2.1
+    Supports noopt and terse in DEB_BUILD_OPTIONS.
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sun, 04 Nov 2018 09:13:26 +0900
+
 mupdf (1.14.0+ds1-1) unstable; urgency=medium
 
   * New upstream version 1.14.0+ds1
