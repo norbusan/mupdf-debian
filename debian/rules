@@ -23,11 +23,22 @@ CFLAGS += $(CPPFLAGS)
 CFLAGS += -DNO_ICC
 CFLAGS += -fPIC
 
-BUILD_FLAGS = build=debian OS=Linux verbose=yes XCFLAGS="$(CFLAGS)" XLDFLAGS="$(LDFLAGS)" prefix=/usr
+BUILD_FLAGS = build=debian OS=Linux XCFLAGS="$(CFLAGS)" XLDFLAGS="$(LDFLAGS)" prefix=/usr
 # Force using system library
 BUILD_FLAGS += USE_SYSTEM_LIBS=yes
 # Force using system lcms2 (was not included in default system library set)
 BUILD_FLAGS += USE_SYSTEM_LCMS2=yes
+
+
+ifneq (,$(filter noopt,$(DEB_BUILD_OPTIONS)))
+    CFLAGS += -O0
+else
+    CFLAGS += -O2
+endif
+
+ifeq (,$(filter terse,$(DEB_BUILD_OPTIONS)))
+	BUILD_FLAGS += verbose=yes
+endif
 
 ifeq ($(DEB_TARGET_ARCH),mips64el)
 	BUILD_FLAGS += HAVE_OBJCOPY=no
