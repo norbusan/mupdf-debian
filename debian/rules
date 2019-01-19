@@ -47,6 +47,8 @@ ifeq ($(DEB_TARGET_ARCH),mips64el)
 endif
 
 override_dh_auto_build:
+	-mkdir source/pdf/cmaps
+	sh scripts/runcmapdump.sh
 	dh_auto_build -- $(BUILD_FLAGS)
 
 override_dh_auto_install:
@@ -56,6 +58,7 @@ override_dh_auto_install:
 override_dh_auto_clean:
 	-rm -rf build
 	-rm -rf generated
+	-rm -rf source/pdf/cmaps
 
 %:
 	dh $@ --parallel
