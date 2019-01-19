@@ -15,6 +15,7 @@ include /usr/share/dpkg/architecture.mk
 
 # Set CC for crossbuild
 export CC_FOR_BUILD ?= cc
+export PKG_CONFIG ?= $(DEB_HOST_GNU_TYPE)-pkg-config
 
 # The build system doesn't use CPPFLAGS, pass them to CFLAGS to enable the
 # missing (hardening) flags.
@@ -28,6 +29,7 @@ BUILD_FLAGS = build=debian OS=Linux XCFLAGS="$(CFLAGS)" XLDFLAGS="$(LDFLAGS)" pr
 BUILD_FLAGS += USE_SYSTEM_LIBS=yes
 # Force using system lcms2 (was not included in default system library set)
 BUILD_FLAGS += USE_SYSTEM_LCMS2=yes
+BUILD_FLAGS += LD=$(DEB_HOST_GNU_TYPE)-ld
 
 
 ifneq (,$(filter noopt,$(DEB_BUILD_OPTIONS)))
