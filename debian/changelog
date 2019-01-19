@@ -1,3 +1,21 @@
+mupdf (1.14.0+ds1-3) unstable; urgency=high
+
+  * d/patches: import upstream fixes for various bugs.
+    Fixes CVE-2018-18662, CVE-2019-6131, CVE-2019-6130
+    (Closes: #912013, #918970, #918971)
+  * d/control: Bump Standards-Version to 4.3.0, no changes required
+  * Fix FTCBFS
+    + Supply a cross LD for wrapping fonts.
+    + Supply PKG_CONFIG to all make targets.
+    Thanks to Helmut Grohne for the patch (Closes: #913515)
+  * Regenerate cmaps from source.
+    Thanks to Helmut Grohne for the suggestion
+  * d/patches/0007-typographical-and-formatting-fixes-to-the-manual.patch:
+    typographical and formatting fixes to the manual.
+    Thanks to Bjarni Ingi Gislason for the patch
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sat, 19 Jan 2019 12:01:19 +0900
+
 mupdf (1.14.0+ds1-2) unstable; urgency=medium
 
   * Fix FTBFS on mips64el
