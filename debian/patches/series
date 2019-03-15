@@ -10,3 +10,4 @@
 0010-PATCH-Throw-when-page-number-is-out-of-range.patch
 0011-Avoid-being-smart-about-keeping-only-a-single-refere.patch
 0012-Fix-text-used-as-clip-mask-in-pdfwrite-device.patch
+0013-Fix-typo-in-pdf-write-device.patch
