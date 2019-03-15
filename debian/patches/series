@@ -8,3 +8,6 @@
 0008-PATCH-Fix-700043-Don-t-assume-a-font-is-t3-just-beca.patch
 0009-PATCH-Bug-700442-Add-a-recursion-depth-check-to-prev.patch
 0010-PATCH-Throw-when-page-number-is-out-of-range.patch
+0011-Avoid-being-smart-about-keeping-only-a-single-refere.patch
+0012-Fix-text-used-as-clip-mask-in-pdfwrite-device.patch
+0013-Fix-typo-in-pdf-write-device.patch
