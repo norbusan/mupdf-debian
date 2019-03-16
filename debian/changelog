@@ -1,3 +1,18 @@
+mupdf (1.14.0+ds1-4) unstable; urgency=medium
+
+  [ Salvatore Bonaccorso ]
+  * Avoid being smart about keeping only a single reference to the buffer
+    (CVE-2018-16647)   
+    (Closes: #924351)
+  * Fix text used as clip mask in pdfwrite device (CVE-2018-16648)
+    (Closes: #924351)
+  * Fix typo in pdf write device
+
+  [ Kan-Ru Chen ]
+  * Add more options to mupdf wrapper and display usage correctly
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sat, 16 Mar 2019 09:42:00 +0900
+
 mupdf (1.14.0+ds1-3) unstable; urgency=high
 
   * d/patches: import upstream fixes for various bugs.
