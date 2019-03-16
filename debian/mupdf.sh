@@ -22,27 +22,30 @@ set -e
 
 file=""
 cmd="/usr/lib/mupdf/mupdf-x11"
-while getopts p:r:A:C:W:H:S:U: f
+while getopts p:r:A:C:W:H:IS:U:X f
 do
     case $f in
-        p|r|A|C|W|H|S|U)
+        p|r|A|C|W|H|I|S|U|X)
 	    cmd="$cmd -$f $OPTARG";;
     esac
 done
 shift `expr $OPTIND - 1`
+
+test "$1" || exec $cmd
+
 test -f "$1" && file="$1" ||
         ( echo "error: \"$1\" file not found" && exit 1 )
 
 tmp=$(tempfile -s .pdf)
 case "$file" in
-    *.gz|*.Z)  zcat -- "$file" > "$tmp" && exec 3< "$tmp" && file="$tmp";;
-    *.xz)     xzcat -- "$file" > "$tmp" && exec 3< "$tmp" && file="$tmp";;
-    *.bz2)    bzcat -- "$file" > "$tmp" && exec 3< "$tmp" && file="$tmp";;
+    *.gz|*.Z)  zcat -- "$file" > "$tmp" && file="$tmp";;
+    *.xz)     xzcat -- "$file" > "$tmp" && file="$tmp";;
+    *.bz2)    bzcat -- "$file" > "$tmp" && file="$tmp";;
 esac
 trap 'rm -f "$tmp"' EXIT
 
 if [ "$file" = "" ]; then
     $cmd || true
 else
-    $cmd "$file" || true
+    $cmd "$file" $2 || true
 fi
