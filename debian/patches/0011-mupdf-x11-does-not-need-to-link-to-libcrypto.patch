@@ -1,0 +1,21 @@
+From: Kan-Ru Chen <koster@debian.org>
+Date: Sun, 7 Jul 2019 22:25:03 +0900
+Subject: mupdf-x11 does not need to link to libcrypto
+
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 93b2902..e3d68f3 100644
+--- a/Makefile
++++ b/Makefile
+@@ -237,7 +237,7 @@ ifeq ($(HAVE_X11),yes)
+   MUVIEW_X11_OBJ += $(OUT)/platform/x11/x11_main.o
+   MUVIEW_X11_OBJ += $(OUT)/platform/x11/x11_image.o
+   $(MUVIEW_X11_EXE) : $(MUVIEW_X11_OBJ) $(MUPDF_LIB) $(THIRD_LIB) $(PKCS7_LIB)
+-	$(LINK_CMD) $(THIRD_LIBS) $(X11_LIBS) $(LIBCRYPTO_LIBS)
++	$(LINK_CMD) $(THIRD_LIBS) $(X11_LIBS)
+   VIEW_APPS += $(MUVIEW_X11_EXE)
+ endif
+ 
