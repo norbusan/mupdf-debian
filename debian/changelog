@@ -1,3 +1,19 @@
+mupdf (1.15.0+ds1-1) unstable; urgency=medium
+
+  * New upstream version 1.15.0+ds1
+  * debian/watch: Use stricter rule that only matches stable releases
+  * debian/rules: NO_ICC was renamed to FZ_ENABLE_ICC=0
+  * Fix pkg-config linked library (Closes: #930212)
+  * mupdf.sh: exec the actual mupdf from the shell script.
+    Thanks to Mike <lxc797@gmail.com> for the patch (Closes: #921607)
+  * Fix a heap-based buffer overflow in fz_append_display_node
+    (CVE-2019-13290) (Closes: #931475)
+  * Fix a infinite loop in the function svg_dev_end_tile
+    (CVE-2018-19777) (Closes: #915137)
+  * Add build dependency libssl-dev
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sun, 07 Jul 2019 22:30:07 +0900
+
 mupdf (1.14.0+ds1-4) unstable; urgency=medium
 
   [ Salvatore Bonaccorso ]
