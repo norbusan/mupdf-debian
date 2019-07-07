@@ -21,7 +21,7 @@ export PKG_CONFIG ?= $(DEB_HOST_GNU_TYPE)-pkg-config
 # missing (hardening) flags.
 CFLAGS += $(CPPFLAGS)
 # ICC support needs patched thirdparty liblcms2-art
-CFLAGS += -DNO_ICC
+CFLAGS += -DFZ_ENABLE_ICC=0
 CFLAGS += -fPIC
 
 BUILD_FLAGS = build=debian OS=Linux XCFLAGS="$(CFLAGS)" XLDFLAGS="$(LDFLAGS)" prefix=/usr
