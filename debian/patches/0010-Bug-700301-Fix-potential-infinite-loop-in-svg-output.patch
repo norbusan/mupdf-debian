@@ -1,0 +1,43 @@
+From: Robin Watts <Robin.Watts@artifex.com>
+Date: Mon, 13 May 2019 13:28:57 +0100
+Subject: Bug 700301: Fix potential infinite loop in svg output device.
+
+The POC in the bug no longer triggers the problem, but potentially
+the problem is there all the same.
+
+Spot an attempt to define a pattern with X or Y height of 0, and
+cope with it. We print a warning, and reset the X or Y step to 1.
+---
+ source/fitz/svg-device.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/source/fitz/svg-device.c b/source/fitz/svg-device.c
+index 7996a48..dae245f 100644
+--- a/source/fitz/svg-device.c
++++ b/source/fitz/svg-device.c
+@@ -3,6 +3,7 @@
+ 
+ #include <string.h>
+ #include <float.h>
++#include <math.h>
+ 
+ typedef struct svg_device_s svg_device;
+ 
+@@ -1108,6 +1109,17 @@ svg_dev_begin_tile(fz_context *ctx, fz_device *dev, fz_rect area, fz_rect view,
+ 	t->view = view;
+ 	t->ctm = ctm;
+ 	t->pattern = sdev->id++;
++
++	xstep = fabsf(xstep);
++	ystep = fabsf(ystep);
++	if (xstep == 0 || ystep == 0) {
++		fz_warn(ctx, "Pattern cannot have x or ystep == 0.");
++		if (xstep == 0)
++			xstep = 1;
++		if (ystep == 0)
++			ystep = 1;
++	}
++
+ 	t->step.x = xstep;
+ 	t->step.y = ystep;
+ 

@@ -7,3 +7,4 @@
 0007-typographical-and-formatting-fixes-to-the-manual.patch
 0008-Bug-701118-Handle-appending-large-display-list-nodes.patch
 0009-Bug-701118-Limit-size-of-begin-layer-nodes-in-displa.patch
+0010-Bug-700301-Fix-potential-infinite-loop-in-svg-output.patch
