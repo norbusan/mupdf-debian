@@ -1,4 +1,5 @@
 #!/bin/sh
+# Copyright (C) 2019 Mike <lxc797@gmail.com>
 # Copyright (C) 2017 by Kan-Ru Chen <koster@debian.org>
 # Copyright (c) 2001 Alcove (Yann Dirson <yann.dirson@fr.alcove.com>) - http://www.alcove.com/
 # Copyright (C) 2011 Michael Gilbert <michael.s.gilbert@gmail.com>
@@ -20,32 +21,39 @@
 
 set -e
 
-file=""
+
 cmd="/usr/lib/mupdf/mupdf-x11"
-while getopts p:r:A:C:W:H:IS:U:X f
-do
-    case $f in
-        p|r|A|C|W|H|I|S|U|X)
-	    cmd="$cmd -$f $OPTARG";;
-    esac
+ext=".gz .Z .xz .bz2"
+
+file=""
+cmdtmp=$cmd
+i=1
+while [ $i -le $# ]; do
+        arg=$(eval echo \$$i)
+        i=$((i += 1))
+
+        for j in $ext; do
+                if [ "${arg#${arg%$j}}" = $j ]; then
+                        file="$arg"
+                        page=$(eval echo \$$i)
+                        break 2
+                fi
+        done
+        cmdtmp="$cmdtmp $arg"
 done
-shift `expr $OPTIND - 1`
 
-test "$1" || exec $cmd
-
-test -f "$1" && file="$1" ||
-        ( echo "error: \"$1\" file not found" && exit 1 )
+test "$file" || exec $cmd "$@"
 
 tmp=$(tempfile -s .pdf)
-case "$file" in
-    *.gz|*.Z)  zcat -- "$file" > "$tmp" && file="$tmp";;
-    *.xz)     xzcat -- "$file" > "$tmp" && file="$tmp";;
-    *.bz2)    bzcat -- "$file" > "$tmp" && file="$tmp";;
-esac
-trap 'rm -f "$tmp"' EXIT
 
-if [ "$file" = "" ]; then
-    $cmd || true
-else
-    $cmd "$file" $2 || true
-fi
+case "$file" in
+    *.gz|*.Z)  zcat -- "$file" > $tmp && file=$tmp;;
+    *.xz)     xzcat -- "$file" > $tmp && file=$tmp;;
+    *.bz2)    bzcat -- "$file" > $tmp && file=$tmp;;
+esac
+
+trap 'rm -f $tmp' EXIT
+
+cmdtmp="$cmdtmp $file $page"
+
+$cmdtmp
