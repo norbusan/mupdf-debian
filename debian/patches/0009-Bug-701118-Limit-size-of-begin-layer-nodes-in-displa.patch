@@ -1,0 +1,27 @@
+From: Sebastian Rasmussen <sebras@gmail.com>
+Date: Sat, 1 Jun 2019 14:09:17 +0200
+Subject: Bug 701118: Limit size of begin layer nodes in display list.
+
+The size of the begin layer node depends on the size of the layer
+name. That name may be a string from the page's property resources,
+and is only bounded by memory when parsed by lex_string(). The
+layer name may cause a display node to be larger than the maximum
+size allowed. This condition is now checked for.
+---
+ source/fitz/list-device.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/source/fitz/list-device.c b/source/fitz/list-device.c
+index 9440551..82fa061 100644
+--- a/source/fitz/list-device.c
++++ b/source/fitz/list-device.c
+@@ -462,6 +462,9 @@ fz_append_display_node(
+ 	}
+ 	if (private_data != NULL)
+ 	{
++		int max = SIZE_IN_NODES(MAX_NODE_SIZE) - size;
++		if (SIZE_IN_NODES(private_data_len) > max)
++			fz_throw(ctx, FZ_ERROR_GENERIC, "Private data too large to pack into display list node");
+ 		private_off = size;
+ 		size += SIZE_IN_NODES(private_data_len);
+ 	}

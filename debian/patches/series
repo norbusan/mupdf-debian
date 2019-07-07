@@ -5,3 +5,5 @@
 0005-MuPDF-crossbuild-use-host-cc-for-utils.patch
 0006-Allow-disabling-objcopy.patch
 0007-typographical-and-formatting-fixes-to-the-manual.patch
+0008-Bug-701118-Handle-appending-large-display-list-nodes.patch
+0009-Bug-701118-Limit-size-of-begin-layer-nodes-in-displa.patch
