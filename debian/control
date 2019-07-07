@@ -3,7 +3,7 @@ Section: text
 Priority: optional
 Maintainer: Kan-Ru Chen (陳侃如) <koster@debian.org>
 Uploaders: Quoc-Viet Nguyen <afelion@gmail.com>
-Build-Depends: debhelper (>= 7.4.10~), dpkg-dev (>= 1.16.1.1~),
+Build-Depends: debhelper (>= 12), dpkg-dev (>= 1.16.1.1~),
  libfreetype6-dev, pkg-config, libjpeg-dev, libjbig2dec-dev,
  libopenjp2-7-dev, libx11-dev, libxext-dev, zlib1g-dev,
  libharfbuzz-dev, freeglut3-dev, libssl-dev,

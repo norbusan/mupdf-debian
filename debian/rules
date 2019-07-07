@@ -64,4 +64,4 @@ override_dh_auto_clean:
 	-rm -rf source/pdf/cmaps
 
 %:
-	dh $@ --parallel
+	dh $@
