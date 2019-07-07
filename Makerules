@@ -22,7 +22,7 @@ SANITIZE_FLAGS += -fsanitize=leak
 
 ifeq ($(build),debug)
   CFLAGS += -pipe -g
-  LDFLAGS += -g $(LDREMOVEUNREACH)
+  LDFLAGS += -g
 else ifeq ($(build),release)
   CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer
   LDFLAGS += $(LDREMOVEUNREACH) -Wl,-s
@@ -113,12 +113,6 @@ else ifeq ($(OS),Linux)
 	SYS_ZLIB_LIBS := $(shell pkg-config --libs zlib)
   endif
 
-  HAVE_CURL := $(shell pkg-config --exists libcurl && echo yes)
-  ifeq ($(HAVE_CURL),yes)
-	SYS_CURL_CFLAGS := $(shell pkg-config --cflags libcurl)
-	SYS_CURL_LIBS := $(shell pkg-config --libs libcurl)
-  endif
-
   HAVE_GLUT := yes
   ifeq ($(HAVE_GLUT),yes)
 	SYS_GLUT_CFLAGS :=
@@ -153,6 +147,16 @@ endif
 # This does rely on the generated directory being populated with the font files.
 # On a unix-like system, run 'make generate' before doing the cross compile.
 # On Windows, run 'nmake -f scripts\fontdump.nmake' in a Visual Studio command prompt.
+
+ifeq "$(OS)" "wasm"
+  OUT := build/wasm/$(build)
+  CC = emcc
+  CXX = em++
+  HAVE_GLUT=no
+  HAVE_X11=no
+  HAVE_OBJCOPY=no
+  HAVE_LIBCRYPTO=no
+endif
 
 ifeq "$(OS)" "mingw32-cross"
   OUT := build/$(OS)/$(build)

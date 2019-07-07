@@ -5,10 +5,6 @@
 #include "mupdf/fitz/context.h"
 #include "mupdf/fitz/geometry.h"
 
-/*
-	Links
-*/
-
 typedef struct fz_link_s fz_link;
 
 /*
@@ -42,14 +38,8 @@ struct fz_link_s
 fz_link *fz_new_link(fz_context *ctx, fz_rect bbox, void *doc, const char *uri);
 fz_link *fz_keep_link(fz_context *ctx, fz_link *link);
 
-/*
-	Checks if a link destination is external or internal.
-*/
 int fz_is_external_link(fz_context *ctx, const char *uri);
 
-/*
-	fz_drop_link: Drop and free a list of links.
-*/
 void fz_drop_link(fz_context *ctx, fz_link *link);
 
 #endif

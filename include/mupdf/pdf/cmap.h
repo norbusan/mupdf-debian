@@ -1,10 +1,6 @@
 #ifndef MUPDF_PDF_CMAP_H
 #define MUPDF_PDF_CMAP_H
 
-/*
- * CMap
- */
-
 typedef struct pdf_cmap_s pdf_cmap;
 typedef struct pdf_range_s pdf_range;
 typedef struct pdf_xrange_s pdf_xrange;
@@ -61,7 +57,6 @@ struct pdf_cmap_s
 
 	int tlen, tcap, ttop;
 	cmap_splay *tree;
-
 };
 
 pdf_cmap *pdf_new_cmap(fz_context *ctx);

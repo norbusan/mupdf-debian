@@ -26,6 +26,7 @@ static void usage(void)
 		"\t-ggg\tin addition to -gg merge duplicate objects\n"
 		"\t-gggg\tin addition to -ggg check streams for duplication\n"
 		"\t-l\tlinearize PDF\n"
+		"\t-D\tsave file without encryption\n"
 		"\t-a\tascii hex encode binary streams\n"
 		"\t-d\tdecompress streams\n"
 		"\t-z\tdeflate uncompressed streams\n"
@@ -33,6 +34,8 @@ static void usage(void)
 		"\t-i\tcompress image streams\n"
 		"\t-c\tclean content streams\n"
 		"\t-s\tsanitize content streams\n"
+		"\t-A\tcreate appearance streams for annotations\n"
+		"\t-AA\trecreate appearance streams for annotations\n"
 		"\tpages\tcomma separated list of page numbers and ranges\n"
 		);
 	exit(1);
@@ -48,10 +51,7 @@ int pdfclean_main(int argc, char **argv)
 	int errors = 0;
 	fz_context *ctx;
 
-	opts.continue_on_error = 1;
-	opts.errors = &errors;
-
-	while ((c = fz_getopt(argc, argv, "adfgilp:scz")) != -1)
+	while ((c = fz_getopt(argc, argv, "adfgilp:sczDA")) != -1)
 	{
 		switch (c)
 		{
@@ -66,6 +66,8 @@ int pdfclean_main(int argc, char **argv)
 		case 'l': opts.do_linear += 1; break;
 		case 'c': opts.do_clean += 1; break;
 		case 's': opts.do_sanitize += 1; break;
+		case 'D': opts.do_decrypt += 1; break;
+		case 'A': opts.do_appearance += 1; break;
 		default: usage(); break;
 		}
 	}

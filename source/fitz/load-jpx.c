@@ -312,6 +312,7 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_
 			}
 		}
 
+#if FZ_ENABLE_ICC
 		if (!state->cs && colorspace == cJP2_Colorspace_Palette_ICCa)
 		{
 			unsigned char *iccprofile = NULL;
@@ -334,7 +335,15 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_
 			{
 				fz_warn(ctx, "cannot load ICC profile: %s", fz_caught_message(ctx));
 			}
+
+			if (state->cs && fz_colorspace_n(ctx, state->cs) != n)
+			{
+				fz_warn(ctx, "invalid number of components in ICC profile, ignoring ICC profile");
+				fz_drop_colorspace(ctx, state->cs);
+				state->cs = NULL;
+			}
 		}
+#endif
 
 		if (!state->cs)
 		{
@@ -373,11 +382,11 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_
 		return NULL;
 	}
 
-	state->pix = fz_new_pixmap(ctx, state->cs, state->width, state->height, NULL, alphas);
-	fz_clear_pixmap_with_value(ctx, state->pix, 0);
-
 	fz_try(ctx)
 	{
+		state->pix = fz_new_pixmap(ctx, state->cs, state->width, state->height, NULL, alphas);
+		fz_clear_pixmap_with_value(ctx, state->pix, 0);
+
 		if (HAS_PALETTE(colorspace))
 		{
 			if (!fz_colorspace_is_indexed(ctx, state->cs))
@@ -624,13 +633,25 @@ void * opj_aligned_realloc(void *ptr, size_t size)
 static void fz_opj_error_callback(const char *msg, void *client_data)
 {
 	fz_context *ctx = (fz_context *)client_data;
-	fz_warn(ctx, "openjpeg error: %s", msg);
+	char buf[200];
+	int n;
+	fz_strlcpy(buf, msg, sizeof buf);
+	n = strlen(buf);
+	if (buf[n-1] == '\n')
+		buf[n-1] = 0;
+	fz_warn(ctx, "openjpeg error: %s", buf);
 }
 
 static void fz_opj_warning_callback(const char *msg, void *client_data)
 {
 	fz_context *ctx = (fz_context *)client_data;
-	fz_warn(ctx, "openjpeg warning: %s", msg);
+	char buf[200];
+	int n;
+	fz_strlcpy(buf, msg, sizeof buf);
+	n = strlen(buf);
+	if (buf[n-1] == '\n')
+		buf[n-1] = 0;
+	fz_warn(ctx, "openjpeg warning: %s", buf);
 }
 
 static void fz_opj_info_callback(const char *msg, void *client_data)
@@ -784,6 +805,7 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_
 		}
 	}
 
+#if FZ_ENABLE_ICC
 	if (!state->cs && jpx->icc_profile_buf)
 	{
 		fz_stream *cstm = NULL;
@@ -800,7 +822,15 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_
 		{
 			fz_warn(ctx, "cannot load ICC profile: %s", fz_caught_message(ctx));
 		}
+
+		if (state->cs && fz_colorspace_n(ctx, state->cs) != n)
+		{
+			fz_warn(ctx, "invalid number of components in ICC profile, ignoring ICC profile");
+			fz_drop_colorspace(ctx, state->cs);
+			state->cs = NULL;
+		}
 	}
+#endif
 
 	if (!state->cs)
 	{
@@ -842,6 +872,9 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_
 			int oy = comp->y0 * comp->dy - jpx->y0;
 			int ox = comp->x0 * comp->dx - jpx->x0;
 
+			if (comp->data == NULL)
+				fz_throw(ctx, FZ_ERROR_GENERIC, "No data for JP2 image component %d", k);
+
 			for (y = 0; y < comp->h; y++)
 			{
 				for (x = 0; x < comp->w; x++)
@@ -870,7 +903,6 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_
 								samples[yy * stride + xx * comps + k] = v;
 						}
 					}
-
 				}
 			}
 		}

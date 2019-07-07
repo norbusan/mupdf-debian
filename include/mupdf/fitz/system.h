@@ -15,6 +15,7 @@
 #include <stddef.h> /* needed for size_t */
 #include <stdarg.h> /* needed for va_list vararg functions */
 #include <setjmp.h> /* needed for the try/catch macros */
+#include <stdio.h> /* useful for debug printfs */
 
 #if defined(_MSC_VER) && (_MSC_VER < 1700) /* MSVC older than VS2012 */
 typedef signed char int8_t;
@@ -59,10 +60,19 @@ typedef unsigned __int64 uint64_t;
 
 #ifndef __STRICT_ANSI__
 #if defined(__APPLE__)
-#define HAVE_SIGSETJMP
-#elif defined(__unix)
-#define HAVE_SIGSETJMP
+#ifndef HAVE_SIGSETJMP
+#define HAVE_SIGSETJMP 1
 #endif
+#elif defined(__unix)
+#ifndef __EMSCRIPTEN__
+#ifndef HAVE_SIGSETJMP
+#define HAVE_SIGSETJMP 1
+#endif
+#endif
+#endif
+#endif
+#ifndef HAVE_SIGSETJMP
+#define HAVE_SIGSETJMP 0
 #endif
 
 /*
@@ -73,7 +83,7 @@ typedef unsigned __int64 uint64_t;
 	makes a large speed difference on MacOSX (and probably other
 	platforms too.
 */
-#ifdef HAVE_SIGSETJMP
+#if HAVE_SIGSETJMP
 #define fz_setjmp(BUF) sigsetjmp(BUF, 0)
 #define fz_longjmp(BUF,VAL) siglongjmp(BUF, VAL)
 #define fz_jmp_buf sigjmp_buf
@@ -362,5 +372,10 @@ static inline float my_atan2f(float o, float a)
 #define cosf(x) my_sinf(FZ_PI / 2.0f + (x))
 #define atan2f(x,y) my_atan2f((x),(y))
 #endif
+
+static inline int fz_is_pow2(int a)
+{
+	return (a != 0) && (a & (a-1)) == 0;
+}
 
 #endif

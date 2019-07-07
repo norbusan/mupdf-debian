@@ -3,10 +3,6 @@
 
 #include "mupdf/pdf/cmap.h"
 
-/*
- * Font
- */
-
 enum
 {
 	PDF_FD_FIXED_PITCH = 1 << 0,
@@ -21,21 +17,6 @@ enum
 };
 
 void pdf_load_encoding(const char **estrings, const char *encoding);
-int pdf_lookup_agl(const char *name);
-const char **pdf_lookup_agl_duplicates(int ucs);
-
-extern const unsigned short pdf_doc_encoding[256];
-extern const char *pdf_mac_roman[256];
-extern const char *pdf_mac_expert[256];
-extern const char *pdf_win_ansi[256];
-extern const char *pdf_standard[256];
-
-extern const char *pdf_glyph_name_from_koi8u[256];
-extern const char *pdf_glyph_name_from_iso8859_7[256];
-
-int pdf_cyrillic_from_unicode(int u);
-int pdf_greek_from_unicode(int u);
-int pdf_winansi_from_unicode(int u);
 
 typedef struct pdf_font_desc_s pdf_font_desc;
 typedef struct pdf_hmtx_s pdf_hmtx;
@@ -111,6 +92,7 @@ pdf_vmtx pdf_lookup_vmtx(fz_context *ctx, pdf_font_desc *font, int cid);
 void pdf_load_to_unicode(fz_context *ctx, pdf_document *doc, pdf_font_desc *font, const char **strings, char *collection, pdf_obj *cmapstm);
 
 int pdf_font_cid_to_gid(fz_context *ctx, pdf_font_desc *fontdesc, int cid);
+const char *pdf_clean_font_name(const char *fontname);
 
 const unsigned char *pdf_lookup_substitute_font(fz_context *ctx, int mono, int serif, int bold, int italic, int *len);
 

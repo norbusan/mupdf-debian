@@ -263,6 +263,18 @@ static const unsigned char pkm[256*8] =
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
 };
 
+/*
+	Create a new bitmap.
+
+	w, h: Width and Height for the bitmap
+
+	n: Number of color components (assumed to be a divisor of 8)
+
+	xres, yres: X and Y resolutions (in pixels per inch).
+
+	Returns pointer to created bitmap structure. The bitmap
+	data is uninitialised.
+*/
 fz_bitmap *
 fz_new_bitmap(fz_context *ctx, int w, int h, int n, int xres, int yres)
 {
@@ -307,7 +319,7 @@ fz_clear_bitmap(fz_context *ctx, fz_bitmap *bit)
 }
 
 static void
-pbm_write_header(fz_context *ctx, fz_band_writer *writer, const fz_colorspace *cs)
+pbm_write_header(fz_context *ctx, fz_band_writer *writer, fz_colorspace *cs)
 {
 	fz_output *out = writer->out;
 	int w = writer->w;
@@ -320,7 +332,7 @@ pbm_write_header(fz_context *ctx, fz_band_writer *writer, const fz_colorspace *c
 }
 
 static void
-pkm_write_header(fz_context *ctx, fz_band_writer *writer, const fz_colorspace *cs)
+pkm_write_header(fz_context *ctx, fz_band_writer *writer, fz_colorspace *cs)
 {
 	fz_output *out = writer->out;
 	int w = writer->w;
@@ -503,6 +515,19 @@ fz_save_pixmap_as_pkm(fz_context *ctx, fz_pixmap *pixmap, const char *filename)
 		fz_rethrow(ctx);
 }
 
+/*
+	Retrieve details of a given bitmap.
+
+	bitmap: The bitmap to query.
+
+	w: Pointer to storage to retrieve width (or NULL).
+
+	h: Pointer to storage to retrieve height (or NULL).
+
+	n: Pointer to storage to retrieve number of color components (or NULL).
+
+	stride: Pointer to storage to retrieve bitmap stride (or NULL).
+*/
 void fz_bitmap_details(fz_bitmap *bit, int *w, int *h, int *n, int *stride)
 {
 	if (!bit)

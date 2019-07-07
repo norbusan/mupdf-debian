@@ -2,6 +2,20 @@
 
 #include <zlib.h>
 
+/*
+	Compression and other filtering outputs.
+
+	These outputs write encoded data to another output. Create a filter
+	output with the destination, write to the filter, then close and drop
+	it when you're done. These can also be chained together, for example to
+	write ASCII Hex encoded, Deflate compressed, and RC4 encrypted data to
+	a buffer output.
+
+	Output streams don't use reference counting, so make sure to close all
+	of the filters in the reverse order of creation so that data is flushed
+	properly.
+*/
+
 struct ahx
 {
 	fz_output *chain;
@@ -309,16 +323,6 @@ struct deflate
 	z_stream z;
 };
 
-static void *z_alloc(void *ctx, unsigned int count, unsigned int size)
-{
-	return fz_malloc_no_throw(ctx, count * size);
-}
-
-static void z_free(void *ctx, void *addr)
-{
-	fz_free(ctx, addr);
-}
-
 static void deflate_write(fz_context *ctx, void *opaque, const void *data, size_t n)
 {
 	struct deflate *state = opaque;
@@ -375,8 +379,8 @@ fz_new_deflate_output(fz_context *ctx, fz_output *chain, int effort, int raw)
 	struct deflate *state = fz_malloc_struct(ctx, struct deflate);
 	state->chain = chain;
 	state->z.opaque = ctx;
-	state->z.zalloc = z_alloc;
-	state->z.zfree = z_free;
+	state->z.zalloc = fz_zlib_alloc;
+	state->z.zfree = fz_zlib_free;
 	err = deflateInit2(&state->z, effort, Z_DEFLATED, raw ? -15 : 15, 8, Z_DEFAULT_STRATEGY);
 	if (err != Z_OK)
 	{

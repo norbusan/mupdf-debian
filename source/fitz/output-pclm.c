@@ -10,6 +10,15 @@ const char *fz_pclm_write_options_usage =
 	"\tstrip-height=N: Strip height (default 16)\n"
 	"\n";
 
+/*
+	Parse PCLm options.
+
+	Currently defined options and values are as follows:
+
+		compression=none: No compression
+		compression=flate: Flate compression
+		strip-height=n: Strip height (default 16)
+*/
 fz_pclm_options *
 fz_parse_pclm_options(fz_context *ctx, fz_pclm_options *opts, const char *args)
 {
@@ -93,7 +102,7 @@ new_obj(fz_context *ctx, pclm_band_writer *writer)
 }
 
 static void
-pclm_write_header(fz_context *ctx, fz_band_writer *writer_, const fz_colorspace *cs)
+pclm_write_header(fz_context *ctx, fz_band_writer *writer_, fz_colorspace *cs)
 {
 	pclm_band_writer *writer = (pclm_band_writer *)writer_;
 	fz_output *out = writer->super.out;
@@ -337,17 +346,19 @@ pclm_end_page(fz_context *ctx, fz_document_writer *wri_, fz_device *dev)
 	fz_pixmap *pix = wri->pixmap;
 
 	fz_try(ctx)
+	{
 		fz_close_device(ctx, dev);
+		fz_write_header(ctx, wri->bander, pix->w, pix->h, pix->n, pix->alpha, pix->xres, pix->yres, wri->pagenum++, pix->colorspace, pix->seps);
+		fz_write_band(ctx, wri->bander, pix->stride, pix->h, pix->samples);
+	}
 	fz_always(ctx)
+	{
 		fz_drop_device(ctx, dev);
+		fz_drop_pixmap(ctx, pix);
+		wri->pixmap = NULL;
+	}
 	fz_catch(ctx)
 		fz_rethrow(ctx);
-
-	fz_write_header(ctx, wri->bander, pix->w, pix->h, pix->n, pix->alpha, pix->xres, pix->yres, wri->pagenum++, pix->colorspace, pix->seps);
-	fz_write_band(ctx, wri->bander, pix->stride, pix->h, pix->samples);
-
-	fz_drop_pixmap(ctx, pix);
-	wri->pixmap = NULL;
 }
 
 static void

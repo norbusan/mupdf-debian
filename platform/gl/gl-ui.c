@@ -173,7 +173,6 @@ void ui_draw_bevel_imp(fz_irect area, unsigned ot, unsigned it, unsigned ib, uns
 	glRectf(area.x0+1, area.y1-2, area.x1-2, area.y1-1);
 }
 
-
 void ui_draw_bevel(fz_irect area, int depressed)
 {
 	if (depressed)
@@ -371,6 +370,17 @@ static void on_warning(const char *fmt, va_list ap)
 	fprintf(stderr, "\n");
 }
 
+static void on_timer(int timer_id)
+{
+	if (reloadrequested)
+	{
+		reload();
+		ui_invalidate();
+		reloadrequested = 0;
+	}
+	glutTimerFunc(500, on_timer, 0);
+}
+
 void ui_init(int w, int h, const char *title)
 {
 	float ui_scale;
@@ -385,6 +395,7 @@ void ui_init(int w, int h, const char *title)
 	glutInitWindowSize(w, h);
 	glutCreateWindow(title);
 
+	glutTimerFunc(500, on_timer, 0);
 	glutReshapeFunc(on_reshape);
 	glutDisplayFunc(on_display);
 #if defined(FREEGLUT) && (GLUT_API_VERSION >= 6)
@@ -872,7 +883,6 @@ void ui_splitter(int *x, int min, int max, enum side side)
 		glColorHex(UI_COLOR_BEVEL_1);
 		glRectf(area.x0+3, area.y0, area.x0+4, area.y1);
 	}
-
 }
 
 void ui_scrollbar(int x0, int y0, int x1, int y1, int *value, int page_size, int max)
@@ -936,7 +946,7 @@ void ui_scrollbar(int x0, int y0, int x1, int y1, int *value, int page_size, int
 	ui_draw_ibevel_rect(fz_make_irect(x0, y0+top, x1, y0+top+thumb_h), UI_COLOR_BUTTON, 0);
 }
 
-void ui_list_begin(struct list *list, int count, int req_w, int req_h)
+void ui_tree_begin(struct list *list, int count, int req_w, int req_h, int is_tree)
 {
 	static int start_scroll_y = 0; /* we can only drag in one list at a time, so static is safe */
 
@@ -979,6 +989,7 @@ void ui_list_begin(struct list *list, int count, int req_w, int req_h)
 				&list->scroll_y, area.y1-area.y0, count * ui.lineheight);
 	}
 
+	list->is_tree = is_tree;
 	list->area = area;
 	list->item_y = area.y0 - list->scroll_y;
 
@@ -986,18 +997,34 @@ void ui_list_begin(struct list *list, int count, int req_w, int req_h)
 	glEnable(GL_SCISSOR_TEST);
 }
 
-int ui_list_item_x(struct list *list, const void *id, int indent, const char *label, int selected)
+int ui_tree_item(struct list *list, const void *id, const char *label, int selected, int depth, int is_branch, int *is_open)
 {
 	fz_irect area = { list->area.x0, list->item_y, list->area.x1, list->item_y + ui.lineheight };
+	int x_handle, x_item;
+
+	x_item = ui.lineheight / 4;
+	x_item += depth * ui.lineheight;
+	x_handle = x_item;
+	if (list->is_tree)
+		x_item += ui_measure_character(0x25BC) + ui.lineheight / 4;
 
 	/* only process visible items */
 	if (area.y1 >= list->area.y0 && area.y0 <= list->area.y1)
 	{
 		if (ui_mouse_inside(&list->area) && ui_mouse_inside(&area))
 		{
-			ui.hot = id;
+			if (list->is_tree && ui.x < area.x0 + x_item)
+			{
+				ui.hot = is_open;
+			}
+			else
+				ui.hot = id;
 			if (!ui.active && ui.down)
-				ui.active = id;
+			{
+				if (list->is_tree && ui.hot == is_open)
+					*is_open = !*is_open;
+				ui.active = ui.hot;
+			}
 		}
 
 		if (ui.active == id || selected)
@@ -1005,13 +1032,16 @@ int ui_list_item_x(struct list *list, const void *id, int indent, const char *la
 			glColorHex(UI_COLOR_TEXT_SEL_BG);
 			glRectf(area.x0, area.y0, area.x1, area.y1);
 			glColorHex(UI_COLOR_TEXT_SEL_FG);
-			ui_draw_string(area.x0 + indent, area.y0, label);
 		}
 		else
 		{
 			glColorHex(UI_COLOR_TEXT_FG);
-			ui_draw_string(area.x0 + indent, area.y0, label);
 		}
+
+		ui_draw_string(area.x0 + x_item, area.y0, label);
+		if (list->is_tree && is_branch)
+			ui_draw_string(area.x0 + x_handle, area.y0,
+				*is_open ? "\xE2\x96\xBC" : "\xE2\x96\xB6");
 	}
 
 	list->item_y += ui.lineheight;
@@ -1020,14 +1050,24 @@ int ui_list_item_x(struct list *list, const void *id, int indent, const char *la
 	return ui.active == id && !ui.down;
 }
 
+void ui_list_begin(struct list *list, int count, int req_w, int req_h)
+{
+	ui_tree_begin(list, count, req_w, req_h, 0);
+}
+
 int ui_list_item(struct list *list, const void *id, const char *label, int selected)
 {
-	return ui_list_item_x(list, id, 2, label, selected);
+	return ui_tree_item(list, id, label, selected, 0, 0, NULL);
+}
+
+void ui_tree_end(struct list *list)
+{
+	glDisable(GL_SCISSOR_TEST);
 }
 
 void ui_list_end(struct list *list)
 {
-	glDisable(GL_SCISSOR_TEST);
+	ui_tree_end(list);
 }
 
 int ui_popup(const void *id, const char *label, int is_button, int count)

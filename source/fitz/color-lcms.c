@@ -1,8 +1,8 @@
 #include "mupdf/fitz.h"
 
-#ifndef NO_ICC
-#include "lcms2art.h"
-#include "lcms2art_plugin.h"
+#if FZ_ENABLE_ICC
+#include "lcms2mt.h"
+#include "lcms2mt_plugin.h"
 #include "colorspace-imp.h"
 
 #define LCMS_BYTES_MASK 0x7
@@ -86,43 +86,6 @@ fz_lcms_description(cmsContext cmm_ctx, fz_iccprofile *profile)
 	return desc;
 }
 
-static void
-fz_lcms_premultiply_row(fz_context *ctx, int n, int c, int w, unsigned char *s)
-{
-	unsigned char a;
-	int k;
-	int n1 = n-1;
-
-	for (; w > 0; w--)
-	{
-		a = s[n1];
-		for (k = 0; k < c; k++)
-			s[k] = fz_mul255(s[k], a);
-		s += n;
-	}
-}
-
-static void
-fz_lcms_unmultiply_row(fz_context *ctx, int n, int c, int w, unsigned char *s, const unsigned char *in)
-{
-	int a, inva;
-	int k;
-	int n1 = n-1;
-
-	for (; w > 0; w--)
-	{
-		a = in[n1];
-		inva = a ? 255 * 256 / a : 0;
-		for (k = 0; k < c; k++)
-			s[k] = (in[k] * inva) >> 8;
-		for (;k < n1; k++)
-			s[k] = in[k];
-		s[n1] = a;
-		s += n;
-		in += n;
-	}
-}
-
 /* Transform pixmap */
 void
 fz_lcms_transform_pixmap(fz_cmm_instance *instance, fz_icclink *link, fz_pixmap *dst, fz_pixmap *src)
@@ -166,9 +129,9 @@ fz_lcms_transform_pixmap(fz_cmm_instance *instance, fz_icclink *link, fz_pixmap 
 		buffer = fz_malloc(ctx, ss);
 		for (; h > 0; h--)
 		{
-			fz_lcms_unmultiply_row(ctx, sn, sc, sw, buffer, inputpos);
+			fz_unmultiply_row(ctx, sn, sc, sw, buffer, inputpos);
 			cmsDoTransform(cmm_ctx, hTransform, buffer, outputpos, sw);
-			fz_lcms_premultiply_row(ctx, dn, dc, dw, outputpos);
+			fz_premultiply_row(ctx, dn, dc, dw, outputpos);
 			inputpos += ss;
 			outputpos += ds;
 		}
@@ -240,7 +203,7 @@ fz_lcms_init_link(fz_cmm_instance *instance, fz_icclink *link, const fz_iccprofi
 
 	if (prf == NULL)
 	{
-		link->cmm_handle = cmsCreateTransformTHR(cmm_ctx, src->cmm_handle, src_data_type, dst->cmm_handle, des_data_type, rend->ri, flag);
+		link->cmm_handle = cmsCreateTransform(cmm_ctx, src->cmm_handle, src_data_type, dst->cmm_handle, des_data_type, rend->ri, flag);
 		if (!link->cmm_handle)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "cmsCreateTransform failed");
 	}
@@ -251,13 +214,13 @@ fz_lcms_init_link(fz_cmm_instance *instance, fz_icclink *link, const fz_iccprofi
 		 */
 		if (src == prf)
 		{
-			link->cmm_handle = cmsCreateTransformTHR(cmm_ctx, src->cmm_handle, src_data_type, dst->cmm_handle, des_data_type, INTENT_RELATIVE_COLORIMETRIC, flag);
+			link->cmm_handle = cmsCreateTransform(cmm_ctx, src->cmm_handle, src_data_type, dst->cmm_handle, des_data_type, INTENT_RELATIVE_COLORIMETRIC, flag);
 			if (!link->cmm_handle)
 				fz_throw(ctx, FZ_ERROR_GENERIC, "cmsCreateTransform failed");
 		}
 		else if (prf == dst)
 		{
-			link->cmm_handle = cmsCreateTransformTHR(cmm_ctx, src->cmm_handle, src_data_type, prf->cmm_handle, des_data_type, rend->ri, flag);
+			link->cmm_handle = cmsCreateTransform(cmm_ctx, src->cmm_handle, src_data_type, prf->cmm_handle, des_data_type, rend->ri, flag);
 			if (!link->cmm_handle)
 				fz_throw(ctx, FZ_ERROR_GENERIC, "cmsCreateTransform failed");
 		}
@@ -277,7 +240,7 @@ fz_lcms_init_link(fz_cmm_instance *instance, fz_icclink *link, const fz_iccprofi
 				lcms_prf_cs = 0;
 			prf_num_chan = cmsChannelsOf(cmm_ctx, prf_cs);
 			prf_data_type = (COLORSPACE_SH(lcms_prf_cs) | CHANNELS_SH(prf_num_chan) | BYTES_SH(num_bytes));
-			src_to_prf_link = cmsCreateTransformTHR(cmm_ctx, src->cmm_handle, src_data_type, prf->cmm_handle, prf_data_type, rend->ri, flag);
+			src_to_prf_link = cmsCreateTransform(cmm_ctx, src->cmm_handle, src_data_type, prf->cmm_handle, prf_data_type, rend->ri, flag);
 			if (!src_to_prf_link)
 				fz_throw(ctx, FZ_ERROR_GENERIC, "cmsCreateTransform failed");
 			src_to_prf_profile = cmsTransform2DeviceLink(cmm_ctx, src_to_prf_link, 3.4, flag);
@@ -288,7 +251,7 @@ fz_lcms_init_link(fz_cmm_instance *instance, fz_icclink *link, const fz_iccprofi
 			hProfiles[0] = src_to_prf_profile;
 			hProfiles[1] = prf->cmm_handle;
 			hProfiles[2] = dst->cmm_handle;
-			link->cmm_handle = cmsCreateMultiprofileTransformTHR(cmm_ctx, hProfiles, 3, src_data_type, des_data_type, INTENT_RELATIVE_COLORIMETRIC, flag);
+			link->cmm_handle = cmsCreateMultiprofileTransform(cmm_ctx, hProfiles, 3, src_data_type, des_data_type, INTENT_RELATIVE_COLORIMETRIC, flag);
 			cmsCloseProfile(cmm_ctx, src_to_prf_profile);
 			if (!link->cmm_handle)
 				fz_throw(ctx, FZ_ERROR_GENERIC, "cmsCreateMultiprofileTransform failed");
@@ -317,7 +280,7 @@ fz_lcms_new_instance(fz_context *ctx)
 	DEBUG_LCMS_MEM(("Context Creation:: mupdf ctx = %p lcms ctx = %p \n", (void*) ctx, (void*) cmm_ctx));
 	if (cmm_ctx == NULL)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "cmsCreateContext failed");
-	cmsSetLogErrorHandlerTHR(cmm_ctx, fz_lcms_log_error);
+	cmsSetLogErrorHandler(cmm_ctx, fz_lcms_log_error);
 	return (fz_cmm_instance *)cmm_ctx;
 }
 
@@ -341,7 +304,7 @@ fz_lcms_init_profile(fz_cmm_instance *instance, fz_iccprofile *profile)
 	DEBUG_LCMS_MEM(("@@@@@@@ Create Profile Start:: mupdf ctx = %p lcms ctx = %p \n", (void*)ctx, (void*)cmm_ctx));
 
 	size = fz_buffer_storage(ctx, profile->buffer, &data);
-	profile->cmm_handle = cmsOpenProfileFromMemTHR(cmm_ctx, data, (cmsUInt32Number)size);
+	profile->cmm_handle = cmsOpenProfileFromMem(cmm_ctx, data, (cmsUInt32Number)size);
 	if (profile->cmm_handle == NULL)
 	{
 		profile->num_devcomp = 0;

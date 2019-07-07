@@ -313,6 +313,7 @@ static void retainpages(fz_context *ctx, globals *glo, int argc, char **argv)
 	pdf_drop_obj(ctx, root);
 }
 
+/* Read infile, and write selected pages to outfile with the given options. */
 void pdf_clean_file(fz_context *ctx, char *infile, char *outfile, char *password, pdf_write_options *opts, char *argv[], int argc)
 {
 	globals glo = { 0 };
@@ -338,7 +339,6 @@ void pdf_clean_file(fz_context *ctx, char *infile, char *outfile, char *password
 	}
 	fz_catch(ctx)
 	{
-		if (opts && opts->errors)
-			*opts->errors = *opts->errors+1;
+		fz_rethrow(ctx);
 	}
 }

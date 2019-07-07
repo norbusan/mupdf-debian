@@ -1,6 +1,5 @@
 #include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
-#include "pdf-imp.h"
 
 #include <assert.h>
 #include <limits.h>
@@ -339,11 +338,12 @@ static void ensure_incremental_xref(fz_context *ctx, pdf_document *doc)
 		pdf_xref *xref = &doc->xref_sections[0];
 		pdf_xref *pxref;
 		pdf_xref_entry *new_table = fz_calloc(ctx, xref->num_objects, sizeof(pdf_xref_entry));
-		pdf_xref_subsec *sub;
+		pdf_xref_subsec *sub = NULL;
 		pdf_obj *trailer = NULL;
 		int i;
 
 		fz_var(trailer);
+		fz_var(sub);
 		fz_try(ctx)
 		{
 			sub = fz_malloc_struct(ctx, pdf_xref_subsec);
@@ -354,19 +354,21 @@ static void ensure_incremental_xref(fz_context *ctx, pdf_document *doc)
 			memmove(pxref, xref, doc->num_xref_sections * sizeof(pdf_xref));
 			/* xref->num_objects is already correct */
 			xref->subsec = sub;
+			sub = NULL;
 			xref->trailer = trailer;
 			xref->pre_repair_trailer = NULL;
 			xref->unsaved_sigs = NULL;
 			xref->unsaved_sigs_end = NULL;
-			sub->next = NULL;
-			sub->len = xref->num_objects;
-			sub->start = 0;
-			sub->table = new_table;
+			xref->subsec->next = NULL;
+			xref->subsec->len = xref->num_objects;
+			xref->subsec->start = 0;
+			xref->subsec->table = new_table;
 			doc->num_xref_sections++;
 			doc->num_incremental_sections++;
 		}
 		fz_catch(ctx)
 		{
+			fz_free(ctx, sub);
 			fz_free(ctx, new_table);
 			pdf_drop_obj(ctx, trailer);
 			fz_rethrow(ctx);
@@ -510,45 +512,46 @@ void pdf_xref_ensure_incremental_object(fz_context *ctx, pdf_document *doc, int 
 
 void pdf_replace_xref(fz_context *ctx, pdf_document *doc, pdf_xref_entry *entries, int n)
 {
+	int *xref_index = NULL;
 	pdf_xref *xref = NULL;
 	pdf_xref_subsec *sub;
-	pdf_obj *trailer = pdf_keep_obj(ctx, pdf_trailer(ctx, doc));
 
+	fz_var(xref_index);
 	fz_var(xref);
+
 	fz_try(ctx)
 	{
-		fz_free(ctx, doc->xref_index);
-		doc->xref_index = NULL; /* In case the calloc fails */
-		doc->xref_index = fz_calloc(ctx, n, sizeof(int));
+		xref_index = fz_calloc(ctx, n, sizeof(int));
 		xref = fz_malloc_struct(ctx, pdf_xref);
 		sub = fz_malloc_struct(ctx, pdf_xref_subsec);
-
-		/* The new table completely replaces the previous separate sections */
-		pdf_drop_xref_sections(ctx, doc);
-
-		sub->table = entries;
-		sub->start = 0;
-		sub->len = n;
-		xref->subsec = sub;
-		xref->num_objects = n;
-		xref->trailer = trailer;
-		trailer = NULL;
-
-		doc->xref_sections = xref;
-		doc->num_xref_sections = 1;
-		doc->num_incremental_sections = 0;
-		doc->xref_base = 0;
-		doc->disallow_new_increments = 0;
-		doc->max_xref_len = n;
-
-		memset(doc->xref_index, 0, sizeof(int)*doc->max_xref_len);
 	}
 	fz_catch(ctx)
 	{
 		fz_free(ctx, xref);
-		pdf_drop_obj(ctx, trailer);
+		fz_free(ctx, xref_index);
 		fz_rethrow(ctx);
 	}
+
+	sub->table = entries;
+	sub->start = 0;
+	sub->len = n;
+
+	xref->subsec = sub;
+	xref->num_objects = n;
+	xref->trailer = pdf_keep_obj(ctx, pdf_trailer(ctx, doc));
+
+	/* The new table completely replaces the previous separate sections */
+	pdf_drop_xref_sections(ctx, doc);
+
+	doc->xref_sections = xref;
+	doc->num_xref_sections = 1;
+	doc->num_incremental_sections = 0;
+	doc->xref_base = 0;
+	doc->disallow_new_increments = 0;
+	doc->max_xref_len = n;
+
+	fz_free(ctx, doc->xref_index);
+	doc->xref_index = xref_index;
 }
 
 void pdf_forget_xref(fz_context *ctx, pdf_document *doc)
@@ -1273,61 +1276,6 @@ pdf_load_xref(fz_context *ctx, pdf_document *doc, pdf_lexbuf *buf)
 	}
 }
 
-static void
-pdf_load_linear(fz_context *ctx, pdf_document *doc)
-{
-	pdf_obj *dict = NULL;
-	pdf_obj *hint = NULL;
-	pdf_obj *o;
-	int num, gen, lin, len;
-	int64_t stmofs;
-
-	fz_var(dict);
-	fz_var(hint);
-
-	fz_try(ctx)
-	{
-		pdf_xref_entry *entry;
-
-		dict = pdf_parse_ind_obj(ctx, doc, doc->file, &doc->lexbuf.base, &num, &gen, &stmofs, NULL);
-		if (!pdf_is_dict(ctx, dict))
-			fz_throw(ctx, FZ_ERROR_GENERIC, "Failed to read linearized dictionary");
-		o = pdf_dict_get(ctx, dict, PDF_NAME(Linearized));
-		if (o == NULL)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "Failed to read linearized dictionary");
-		lin = pdf_to_int(ctx, o);
-		if (lin != 1)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "Unexpected version of Linearized tag (%d)", lin);
-		len = pdf_dict_get_int(ctx, dict, PDF_NAME(L));
-		if (len != doc->file_length)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "File has been updated since linearization");
-
-		pdf_read_xref_sections(ctx, doc, fz_tell(ctx, doc->file), &doc->lexbuf.base, 0);
-
-		doc->linear_page_count = pdf_dict_get_int(ctx, dict, PDF_NAME(N));
-		doc->linear_page_refs = fz_resize_array(ctx, doc->linear_page_refs, doc->linear_page_count, sizeof(pdf_obj *));
-		memset(doc->linear_page_refs, 0, doc->linear_page_count * sizeof(pdf_obj*));
-		doc->linear_obj = dict;
-		doc->linear_pos = fz_tell(ctx, doc->file);
-		doc->linear_page1_obj_num = pdf_dict_get_int(ctx, dict, PDF_NAME(O));
-		doc->linear_page_refs[0] = pdf_new_indirect(ctx, doc, doc->linear_page1_obj_num, 0);
-		doc->linear_page_num = 0;
-		hint = pdf_dict_get(ctx, dict, PDF_NAME(H));
-		doc->hint_object_offset = pdf_array_get_int(ctx, hint, 0);
-		doc->hint_object_length = pdf_array_get_int(ctx, hint, 1);
-
-		entry = pdf_get_populating_xref_entry(ctx, doc, 0);
-		entry->type = 'f';
-	}
-	fz_catch(ctx)
-	{
-		pdf_drop_obj(ctx, dict);
-		fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
-		/* Drop back to non linearized reading mode */
-		doc->file_reading_linearly = 0;
-	}
-}
-
 /*
  * Initialize and load xref tables.
  * If password is not null, try to decrypt.
@@ -1348,30 +1296,11 @@ pdf_init_document(fz_context *ctx, pdf_document *doc)
 	fz_try(ctx)
 	{
 		pdf_load_version(ctx, doc);
-
-		doc->file_length = fz_stream_meta(ctx, doc->file, FZ_STREAM_META_LENGTH, 0, NULL);
-		if (doc->file_length < 0)
-			doc->file_length = 0;
-
-		/* Check to see if we should work in progressive mode */
-		if (fz_stream_meta(ctx, doc->file, FZ_STREAM_META_PROGRESSIVE, 0, NULL) > 0)
-			doc->file_reading_linearly = 1;
-
-		/* Try to load the linearized file if we are in progressive
-		 * mode. */
-		if (doc->file_reading_linearly)
-			pdf_load_linear(ctx, doc);
-
-		/* If we aren't in progressive mode (or the linear load failed
-		 * and has set us back to non-progressive mode), load normally.
-		 */
-		if (!doc->file_reading_linearly)
-			pdf_load_xref(ctx, doc, &doc->lexbuf.base);
+		pdf_load_xref(ctx, doc, &doc->lexbuf.base);
 	}
 	fz_catch(ctx)
 	{
 		pdf_drop_xref_sections(ctx, doc);
-		fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
 		fz_warn(ctx, "trying to repair broken xref");
 		repaired = 1;
 	}
@@ -1383,7 +1312,8 @@ pdf_init_document(fz_context *ctx, pdf_document *doc)
 		if (repaired)
 		{
 			/* pdf_repair_xref may access xref_index, so reset it properly */
-			memset(doc->xref_index, 0, sizeof(int) * doc->max_xref_len);
+			if (doc->xref_index)
+				memset(doc->xref_index, 0, sizeof(int) * doc->max_xref_len);
 			pdf_repair_xref(ctx, doc);
 			pdf_prime_xref_index(ctx, doc);
 		}
@@ -1404,7 +1334,7 @@ pdf_init_document(fz_context *ctx, pdf_document *doc)
 			hasroot = (pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(Root)) != NULL);
 			hasinfo = (pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(Info)) != NULL);
 
-			for (i = 1; i < xref_len; i++)
+			for (i = 1; i < xref_len && !hasinfo && !hasroot; ++i)
 			{
 				pdf_xref_entry *entry = pdf_get_xref_entry(ctx, doc, i);
 				if (entry->type == 0 || entry->type == 'f')
@@ -1416,7 +1346,6 @@ pdf_init_document(fz_context *ctx, pdf_document *doc)
 				}
 				fz_catch(ctx)
 				{
-					fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
 					fz_warn(ctx, "ignoring broken object (%d 0 R)", i);
 					continue;
 				}
@@ -1428,6 +1357,7 @@ pdf_init_document(fz_context *ctx, pdf_document *doc)
 					{
 						nobj = pdf_new_indirect(ctx, doc, i, 0);
 						pdf_dict_put_drop(ctx, pdf_trailer(ctx, doc), PDF_NAME(Root), nobj);
+						hasroot = 1;
 					}
 				}
 
@@ -1437,6 +1367,7 @@ pdf_init_document(fz_context *ctx, pdf_document *doc)
 					{
 						nobj = pdf_new_indirect(ctx, doc, i, 0);
 						pdf_dict_put_drop(ctx, pdf_trailer(ctx, doc), PDF_NAME(Info), nobj);
+						hasinfo = 1;
 					}
 				}
 
@@ -1501,23 +1432,8 @@ pdf_drop_document_imp(fz_context *ctx, pdf_document *doc)
 	pdf_drop_xref_sections(ctx, doc);
 	fz_free(ctx, doc->xref_index);
 
-	pdf_drop_obj(ctx, doc->focus_obj);
 	fz_drop_stream(ctx, doc->file);
 	pdf_drop_crypt(ctx, doc->crypt);
-
-	pdf_drop_obj(ctx, doc->linear_obj);
-	if (doc->linear_page_refs)
-	{
-		for (i=0; i < doc->linear_page_count; i++)
-			pdf_drop_obj(ctx, doc->linear_page_refs[i]);
-
-		fz_free(ctx, doc->linear_page_refs);
-	}
-
-	fz_free(ctx, doc->hint_page);
-	fz_free(ctx, doc->hint_shared_ref);
-	fz_free(ctx, doc->hint_shared);
-	fz_free(ctx, doc->hint_obj_offsets);
 
 	for (i=0; i < doc->num_type3_fonts; i++)
 	{
@@ -1534,7 +1450,6 @@ pdf_drop_document_imp(fz_context *ctx, pdf_document *doc)
 	fz_free(ctx, doc->type3_fonts);
 
 	pdf_drop_ocg(ctx, doc);
-	pdf_drop_portfolio(ctx, doc);
 
 	pdf_empty_store(ctx, doc);
 
@@ -1554,6 +1469,12 @@ pdf_drop_document_imp(fz_context *ctx, pdf_document *doc)
 	fz_defer_reap_end(ctx);
 }
 
+/*
+	Closes and frees an opened PDF document.
+
+	The resource store in the context associated with pdf_document
+	is emptied.
+*/
 void
 pdf_drop_document(fz_context *ctx, pdf_document *doc)
 {
@@ -1701,238 +1622,6 @@ pdf_load_obj_stm(fz_context *ctx, pdf_document *doc, int num, pdf_lexbuf *buf, i
 	return ret_entry;
 }
 
-/*
- * object loading
- */
-static int
-pdf_obj_read(fz_context *ctx, pdf_document *doc, int64_t *offset, int *nump, pdf_obj **page)
-{
-	pdf_lexbuf *buf = &doc->lexbuf.base;
-	int num, gen, tok;
-	int64_t numofs, genofs, stmofs, tmpofs, newtmpofs;
-	int xref_len;
-	pdf_xref_entry *entry;
-
-	numofs = *offset;
-	fz_seek(ctx, doc->file, numofs, SEEK_SET);
-
-	/* We expect to read 'num' here */
-	tok = pdf_lex(ctx, doc->file, buf);
-	genofs = fz_tell(ctx, doc->file);
-	if (tok != PDF_TOK_INT)
-	{
-		/* Failed! */
-		DEBUGMESS((ctx, "skipping unexpected data (tok=%d) at %d", tok, *offset));
-		*offset = genofs;
-		return tok == PDF_TOK_EOF;
-	}
-	*nump = num = buf->i;
-
-	/* We expect to read 'gen' here */
-	tok = pdf_lex(ctx, doc->file, buf);
-	tmpofs = fz_tell(ctx, doc->file);
-	if (tok != PDF_TOK_INT)
-	{
-		/* Failed! */
-		DEBUGMESS((ctx, "skipping unexpected data after \"%d\" (tok=%d) at %d", num, tok, *offset));
-		*offset = tmpofs;
-		return tok == PDF_TOK_EOF;
-	}
-	gen = buf->i;
-
-	/* We expect to read 'obj' here */
-	do
-	{
-		tmpofs = fz_tell(ctx, doc->file);
-		tok = pdf_lex(ctx, doc->file, buf);
-		if (tok == PDF_TOK_OBJ)
-			break;
-		if (tok != PDF_TOK_INT)
-		{
-			DEBUGMESS((ctx, "skipping unexpected data (tok=%d) at %d", tok, tmpofs));
-			*offset = fz_tell(ctx, doc->file);
-			return tok == PDF_TOK_EOF;
-		}
-		DEBUGMESS((ctx, "skipping unexpected int %d at %d", num, numofs));
-		*nump = num = gen;
-		numofs = genofs;
-		gen = buf->i;
-		genofs = tmpofs;
-	}
-	while (1);
-
-	/* Now we read the actual object */
-	xref_len = pdf_xref_len(ctx, doc);
-
-	/* When we are reading a progressive file, we typically see:
-	 *    File Header
-	 *    obj m (Linearization params)
-	 *    xref #1 (refers to objects m-n)
-	 *    obj m+1
-	 *    ...
-	 *    obj n
-	 *    obj 1
-	 *    ...
-	 *    obj n-1
-	 *    xref #2
-	 *
-	 * The linearisation params are read elsewhere, hence
-	 * whenever we read an object it should just go into the
-	 * previous xref.
-	 */
-	tok = pdf_repair_obj(ctx, doc, buf, &stmofs, NULL, NULL, NULL, page, &newtmpofs, NULL);
-
-	do /* So we can break out of it */
-	{
-		if (num <= 0 || num >= xref_len)
-		{
-			fz_warn(ctx, "Not a valid object number (%d %d obj)", num, gen);
-			break;
-		}
-		if (gen != 0)
-		{
-			fz_warn(ctx, "Unexpected non zero generation number in linearized file");
-		}
-		entry = pdf_get_populating_xref_entry(ctx, doc, num);
-		if (entry->type != 0)
-		{
-			DEBUGMESS((ctx, "Duplicate object found (%d %d obj)", num, gen));
-			break;
-		}
-		if (page && *page)
-		{
-			DEBUGMESS((ctx, "Successfully read object %d @ %d - and found page %d!", num, numofs, doc->linear_page_num));
-			if (!entry->obj)
-				entry->obj = pdf_keep_obj(ctx, *page);
-
-			if (doc->linear_page_refs[doc->linear_page_num] == NULL)
-				doc->linear_page_refs[doc->linear_page_num] = pdf_new_indirect(ctx, doc, num, gen);
-		}
-		else
-		{
-			DEBUGMESS((ctx, "Successfully read object %d @ %d", num, numofs));
-		}
-		entry->type = 'n';
-		entry->gen = gen; // XXX: was 0
-		entry->num = num;
-		entry->ofs = numofs;
-		entry->stm_ofs = stmofs;
-	}
-	while (0);
-	if (page && *page)
-		doc->linear_page_num++;
-
-	if (tok == PDF_TOK_ENDOBJ)
-	{
-		*offset = fz_tell(ctx, doc->file);
-	}
-	else
-	{
-		*offset = newtmpofs;
-	}
-	return 0;
-}
-
-static void
-pdf_load_hinted_page(fz_context *ctx, pdf_document *doc, int pagenum)
-{
-	if (!doc->hints_loaded || !doc->linear_page_refs)
-		return;
-
-	if (doc->linear_page_refs[pagenum])
-		return;
-
-	fz_try(ctx)
-	{
-		int num = doc->hint_page[pagenum].number;
-		pdf_obj *page = pdf_load_object(ctx, doc, num);
-		if (pdf_name_eq(ctx, PDF_NAME(Page), pdf_dict_get(ctx, page, PDF_NAME(Type))))
-		{
-			/* We have found the page object! */
-			DEBUGMESS((ctx, "LoadHintedPage pagenum=%d num=%d", pagenum, num));
-			doc->linear_page_refs[pagenum] = pdf_new_indirect(ctx, doc, num, 0);
-		}
-		pdf_drop_obj(ctx, page);
-	}
-	fz_catch(ctx)
-	{
-		fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
-		/* Silently swallow the error and proceed as normal */
-	}
-}
-
-static int
-read_hinted_object(fz_context *ctx, pdf_document *doc, int num)
-{
-	/* Try to find the object using our hint table. Find the closest
-	 * object <= the one we want that has a hint and read forward from
-	 * there. */
-	int expected = num;
-	int curr_pos;
-	int64_t start, offset;
-
-	while (doc->hint_obj_offsets[expected] == 0 && expected > 0)
-		expected--;
-	if (expected != num)
-		DEBUGMESS((ctx, "object %d is unhinted, will search forward from %d", expected, num));
-	if (expected == 0)	/* No hints found, just bail */
-		return 0;
-
-	curr_pos = fz_tell(ctx, doc->file);
-	offset = doc->hint_obj_offsets[expected];
-
-	fz_var(expected);
-
-	fz_try(ctx)
-	{
-		int found;
-
-		/* Try to read forward from there */
-		do
-		{
-			start = offset;
-			DEBUGMESS((ctx, "Searching for object %d @ %d", expected, offset));
-			pdf_obj_read(ctx, doc, &offset, &found, 0);
-			DEBUGMESS((ctx, "Found object %d - next will be @ %d", found, offset));
-			if (found <= expected)
-			{
-				/* We found the right one (or one earlier than
-				 * we expected). Update the hints. */
-				doc->hint_obj_offsets[expected] = offset;
-				doc->hint_obj_offsets[found] = start;
-				doc->hint_obj_offsets[found+1] = offset;
-				/* Retry with the next one */
-				expected = found+1;
-			}
-			else
-			{
-				/* We found one later than we expected. */
-				doc->hint_obj_offsets[expected] = 0;
-				doc->hint_obj_offsets[found] = start;
-				doc->hint_obj_offsets[found+1] = offset;
-				while (doc->hint_obj_offsets[expected] == 0 && expected > 0)
-					expected--;
-				if (expected == 0)	/* No hints found, we give up */
-					break;
-			}
-		}
-		while (found != num);
-	}
-	fz_always(ctx)
-	{
-		fz_seek(ctx, doc->file, curr_pos, SEEK_SET);
-	}
-	fz_catch(ctx)
-	{
-		fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
-		/* FIXME: Currently we ignore the hint. Perhaps we should
-		 * drop back to non-hinted operation here. */
-		doc->hint_obj_offsets[expected] = 0;
-		fz_rethrow(ctx);
-	}
-	return expected != 0;
-}
-
 pdf_xref_entry *
 pdf_cache_object(fz_context *ctx, pdf_document *doc, int num)
 {
@@ -1968,7 +1657,7 @@ object_updated:
 		}
 		fz_catch(ctx)
 		{
-			if (!try_repair || fz_caught(ctx) == FZ_ERROR_TRYLATER)
+			if (!try_repair)
 				fz_rethrow(ctx);
 		}
 
@@ -2016,14 +1705,6 @@ object_updated:
 				fz_throw(ctx, FZ_ERROR_GENERIC, "object (%d 0 R) was not found in its object stream", num);
 		}
 	}
-	else if (doc->hint_obj_offsets && read_hinted_object(ctx, doc, num))
-	{
-		goto object_updated;
-	}
-	else if (doc->file_length && doc->linear_pos < doc->file_length)
-	{
-		fz_throw(ctx, FZ_ERROR_TRYLATER, "cannot find object in xref (%d 0 R) - not loaded yet?", num);
-	}
 	else
 	{
 		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find object in xref (%d 0 R)", num);
@@ -2061,7 +1742,6 @@ pdf_resolve_indirect(fz_context *ctx, pdf_obj *ref)
 			entry = pdf_cache_object(ctx, doc, num);
 		fz_catch(ctx)
 		{
-			fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
 			fz_warn(ctx, "cannot load object (%d 0 R) into cache", num);
 			return NULL;
 		}
@@ -2096,6 +1776,9 @@ pdf_count_objects(fz_context *ctx, pdf_document *doc)
 	return pdf_xref_len(ctx, doc);
 }
 
+/*
+	Allocate a slot in the xref table and return a fresh unused object number.
+*/
 int
 pdf_create_object(fz_context *ctx, pdf_document *doc)
 {
@@ -2117,6 +1800,9 @@ pdf_create_object(fz_context *ctx, pdf_document *doc)
 	return num;
 }
 
+/*
+	Remove object from xref table, marking the slot as free.
+*/
 void
 pdf_delete_object(fz_context *ctx, pdf_document *doc, int num)
 {
@@ -2142,6 +1828,9 @@ pdf_delete_object(fz_context *ctx, pdf_document *doc, int num)
 	x->obj = NULL;
 }
 
+/*
+	Replace object in xref table with the passed in object.
+*/
 void
 pdf_update_object(fz_context *ctx, pdf_document *doc, int num, pdf_obj *newobj)
 {
@@ -2170,6 +1859,13 @@ pdf_update_object(fz_context *ctx, pdf_document *doc, int num, pdf_obj *newobj)
 	pdf_set_obj_parent(ctx, newobj, num);
 }
 
+/*
+	Replace stream contents for object in xref table with the passed in buffer.
+
+	The buffer contents must match the /Filter setting if 'compressed' is true.
+	If 'compressed' is false, the /Filter and /DecodeParms entries are deleted.
+	The /Length entry is updated.
+*/
 void
 pdf_update_stream(fz_context *ctx, pdf_document *doc, pdf_obj *obj, fz_buffer *newbuf, int compressed)
 {
@@ -2271,6 +1967,15 @@ pdf_new_document(fz_context *ctx, fz_stream *file)
 	return doc;
 }
 
+/*
+	Opens a PDF document.
+
+	Same as pdf_open_document, but takes a stream instead of a
+	filename to locate the PDF document to open. Increments the
+	reference count of the stream. See fz_open_file,
+	fz_open_file_w or fz_open_fd for opening a stream, and
+	fz_drop_stream for closing an open stream.
+*/
 pdf_document *
 pdf_open_document_with_stream(fz_context *ctx, fz_stream *file)
 {
@@ -2287,6 +1992,23 @@ pdf_open_document_with_stream(fz_context *ctx, fz_stream *file)
 	return doc;
 }
 
+/*
+	Open a PDF document.
+
+	Open a PDF document by reading its cross reference table, so
+	MuPDF can locate PDF objects inside the file. Upon an broken
+	cross reference table or other parse errors MuPDF will restart
+	parsing the file from the beginning to try to rebuild a
+	(hopefully correct) cross reference table to allow further
+	processing of the file.
+
+	The returned pdf_document should be used when calling most
+	other PDF functions. Note that it wraps the context, so those
+	functions implicitly get access to the global state in
+	context.
+
+	filename: a path to a file as it would be given to open(2).
+*/
 pdf_document *
 pdf_open_document(fz_context *ctx, const char *filename)
 {
@@ -2314,336 +2036,10 @@ pdf_open_document(fz_context *ctx, const char *filename)
 	return doc;
 }
 
-static void
-pdf_load_hints(fz_context *ctx, pdf_document *doc, int objnum)
-{
-	fz_stream *stream = NULL;
-	pdf_obj *dict;
-
-	fz_var(stream);
-	fz_var(dict);
-
-	fz_try(ctx)
-	{
-		int i, j, least_num_page_objs, page_obj_num_bits;
-		int least_page_len, page_len_num_bits, shared_hint_offset;
-		/* int least_page_offset, page_offset_num_bits; */
-		/* int least_content_stream_len, content_stream_len_num_bits; */
-		int num_shared_obj_num_bits, shared_obj_num_bits;
-		/* int numerator_bits, denominator_bits; */
-		int shared;
-		int shared_obj_num, shared_obj_offset, shared_obj_count_page1;
-		int shared_obj_count_total;
-		int least_shared_group_len, shared_group_len_num_bits;
-		int max_object_num = pdf_xref_len(ctx, doc);
-
-		stream = pdf_open_stream_number(ctx, doc, objnum);
-		dict = pdf_get_xref_entry(ctx, doc, objnum)->obj;
-		if (dict == NULL || !pdf_is_dict(ctx, dict))
-			fz_throw(ctx, FZ_ERROR_GENERIC, "malformed hint object");
-
-		shared_hint_offset = pdf_dict_get_int(ctx, dict, PDF_NAME(S));
-
-		/* Malloc the structures (use realloc to cope with the fact we
-		 * may try this several times before enough data is loaded) */
-		doc->hint_page = fz_resize_array(ctx, doc->hint_page, doc->linear_page_count+1, sizeof(*doc->hint_page));
-		memset(doc->hint_page, 0, sizeof(*doc->hint_page) * (doc->linear_page_count+1));
-		doc->hint_obj_offsets = fz_resize_array(ctx, doc->hint_obj_offsets, max_object_num, sizeof(*doc->hint_obj_offsets));
-		memset(doc->hint_obj_offsets, 0, sizeof(*doc->hint_obj_offsets) * max_object_num);
-		doc->hint_obj_offsets_max = max_object_num;
-
-		/* Read the page object hints table: Header first */
-		least_num_page_objs = fz_read_bits(ctx, stream, 32);
-		/* The following is sometimes a lie, but we read this version,
-		 * as other table values are built from it. In
-		 * pdf_reference17.pdf, this points to 2 objects before the
-		 * first pages page object. */
-		doc->hint_page[0].offset = fz_read_bits(ctx, stream, 32);
-		if (doc->hint_page[0].offset > doc->hint_object_offset)
-			doc->hint_page[0].offset += doc->hint_object_length;
-		page_obj_num_bits = fz_read_bits(ctx, stream, 16);
-		least_page_len = fz_read_bits(ctx, stream, 32);
-		page_len_num_bits = fz_read_bits(ctx, stream, 16);
-		/* least_page_offset = */ (void) fz_read_bits(ctx, stream, 32);
-		/* page_offset_num_bits = */ (void) fz_read_bits(ctx, stream, 16);
-		/* least_content_stream_len = */ (void) fz_read_bits(ctx, stream, 32);
-		/* content_stream_len_num_bits = */ (void) fz_read_bits(ctx, stream, 16);
-		num_shared_obj_num_bits = fz_read_bits(ctx, stream, 16);
-		shared_obj_num_bits = fz_read_bits(ctx, stream, 16);
-		/* numerator_bits = */ (void) fz_read_bits(ctx, stream, 16);
-		/* denominator_bits = */ (void) fz_read_bits(ctx, stream, 16);
-
-		/* Item 1: Page object numbers */
-		doc->hint_page[0].number = doc->linear_page1_obj_num;
-		/* We don't care about the number of objects in the first page */
-		(void)fz_read_bits(ctx, stream, page_obj_num_bits);
-		j = 1;
-		for (i = 1; i < doc->linear_page_count; i++)
-		{
-			int delta_page_objs = fz_read_bits(ctx, stream, page_obj_num_bits);
-
-			doc->hint_page[i].number = j;
-			j += least_num_page_objs + delta_page_objs;
-		}
-		doc->hint_page[i].number = j; /* Not a real page object */
-		fz_sync_bits(ctx, stream);
-		/* Item 2: Page lengths */
-		j = doc->hint_page[0].offset;
-		for (i = 0; i < doc->linear_page_count; i++)
-		{
-			int delta_page_len = fz_read_bits(ctx, stream, page_len_num_bits);
-			int old = j;
-
-			doc->hint_page[i].offset = j;
-			j += least_page_len + delta_page_len;
-			if (old <= doc->hint_object_offset && j > doc->hint_object_offset)
-				j += doc->hint_object_length;
-		}
-		doc->hint_page[i].offset = j;
-		fz_sync_bits(ctx, stream);
-		/* Item 3: Shared references */
-		shared = 0;
-		for (i = 0; i < doc->linear_page_count; i++)
-		{
-			int num_shared_objs = fz_read_bits(ctx, stream, num_shared_obj_num_bits);
-			doc->hint_page[i].index = shared;
-			shared += num_shared_objs;
-		}
-		doc->hint_page[i].index = shared;
-		doc->hint_shared_ref = fz_resize_array(ctx, doc->hint_shared_ref, shared, sizeof(*doc->hint_shared_ref));
-		memset(doc->hint_shared_ref, 0, sizeof(*doc->hint_shared_ref) * shared);
-		fz_sync_bits(ctx, stream);
-		/* Item 4: Shared references */
-		for (i = 0; i < shared; i++)
-		{
-			int ref = fz_read_bits(ctx, stream, shared_obj_num_bits);
-			doc->hint_shared_ref[i] = ref;
-		}
-		/* Skip items 5,6,7 as we don't use them */
-
-		fz_seek(ctx, stream, shared_hint_offset, SEEK_SET);
-
-		/* Read the shared object hints table: Header first */
-		shared_obj_num = fz_read_bits(ctx, stream, 32);
-		shared_obj_offset = fz_read_bits(ctx, stream, 32);
-		if (shared_obj_offset > doc->hint_object_offset)
-			shared_obj_offset += doc->hint_object_length;
-		shared_obj_count_page1 = fz_read_bits(ctx, stream, 32);
-		shared_obj_count_total = fz_read_bits(ctx, stream, 32);
-		shared_obj_num_bits = fz_read_bits(ctx, stream, 16);
-		least_shared_group_len = fz_read_bits(ctx, stream, 32);
-		shared_group_len_num_bits = fz_read_bits(ctx, stream, 16);
-
-		/* Sanity check the references in Item 4 above to ensure we
-		 * don't access out of range with malicious files. */
-		for (i = 0; i < shared; i++)
-		{
-			if (doc->hint_shared_ref[i] >= shared_obj_count_total)
-			{
-				fz_throw(ctx, FZ_ERROR_GENERIC, "malformed hint stream (shared refs)");
-			}
-		}
-
-		doc->hint_shared = fz_resize_array(ctx, doc->hint_shared, shared_obj_count_total+1, sizeof(*doc->hint_shared));
-		memset(doc->hint_shared, 0, sizeof(*doc->hint_shared) * (shared_obj_count_total+1));
-
-		/* Item 1: Shared references */
-		j = doc->hint_page[0].offset;
-		for (i = 0; i < shared_obj_count_page1; i++)
-		{
-			int off = fz_read_bits(ctx, stream, shared_group_len_num_bits);
-			int old = j;
-			doc->hint_shared[i].offset = j;
-			j += off + least_shared_group_len;
-			if (old <= doc->hint_object_offset && j > doc->hint_object_offset)
-				j += doc->hint_object_length;
-		}
-		/* FIXME: We would have problems recreating the length of the
-		 * last page 1 shared reference group. But we'll never need
-		 * to, so ignore it. */
-		j = shared_obj_offset;
-		for (; i < shared_obj_count_total; i++)
-		{
-			int off = fz_read_bits(ctx, stream, shared_group_len_num_bits);
-			int old = j;
-			doc->hint_shared[i].offset = j;
-			j += off + least_shared_group_len;
-			if (old <= doc->hint_object_offset && j > doc->hint_object_offset)
-				j += doc->hint_object_length;
-		}
-		doc->hint_shared[i].offset = j;
-		fz_sync_bits(ctx, stream);
-		/* Item 2: Signature flags: read these just so we can skip */
-		for (i = 0; i < shared_obj_count_total; i++)
-		{
-			doc->hint_shared[i].number = fz_read_bits(ctx, stream, 1);
-		}
-		fz_sync_bits(ctx, stream);
-		/* Item 3: Signatures: just skip */
-		for (i = 0; i < shared_obj_count_total; i++)
-		{
-			if (doc->hint_shared[i].number)
-			{
-				(void) fz_read_bits(ctx, stream, 128);
-			}
-		}
-		fz_sync_bits(ctx, stream);
-		/* Item 4: Shared object object numbers */
-		j = doc->linear_page1_obj_num; /* FIXME: This is a lie! */
-		for (i = 0; i < shared_obj_count_page1; i++)
-		{
-			doc->hint_shared[i].number = j;
-			j += fz_read_bits(ctx, stream, shared_obj_num_bits) + 1;
-		}
-		j = shared_obj_num;
-		for (; i < shared_obj_count_total; i++)
-		{
-			doc->hint_shared[i].number = j;
-			j += fz_read_bits(ctx, stream, shared_obj_num_bits) + 1;
-		}
-		doc->hint_shared[i].number = j;
-
-		/* Now, actually use the data we have gathered. */
-		for (i = 0 /*shared_obj_count_page1*/; i < shared_obj_count_total; i++)
-		{
-			doc->hint_obj_offsets[doc->hint_shared[i].number] = doc->hint_shared[i].offset;
-		}
-		for (i = 0; i < doc->linear_page_count; i++)
-		{
-			doc->hint_obj_offsets[doc->hint_page[i].number] = doc->hint_page[i].offset;
-		}
-	}
-	fz_always(ctx)
-	{
-		fz_drop_stream(ctx, stream);
-	}
-	fz_catch(ctx)
-	{
-		fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
-		/* Don't try to load hints again */
-		doc->hints_loaded = 1;
-		/* We won't use the linearized object anymore. */
-		doc->file_reading_linearly = 0;
-		/* Any other error becomes a TRYLATER */
-		fz_throw(ctx, FZ_ERROR_TRYLATER, "malformed hints object");
-	}
-	doc->hints_loaded = 1;
-}
-
-static void
-pdf_load_hint_object(fz_context *ctx, pdf_document *doc)
-{
-	pdf_lexbuf *buf = &doc->lexbuf.base;
-	int64_t curr_pos;
-
-	curr_pos = fz_tell(ctx, doc->file);
-	fz_seek(ctx, doc->file, doc->hint_object_offset, SEEK_SET);
-	fz_try(ctx)
-	{
-		while (1)
-		{
-			pdf_obj *page = NULL;
-			int64_t tmpofs;
-			int num, tok;
-
-			tok = pdf_lex(ctx, doc->file, buf);
-			if (tok != PDF_TOK_INT)
-				break;
-			num = buf->i;
-			tok = pdf_lex(ctx, doc->file, buf);
-			if (tok != PDF_TOK_INT)
-				break;
-			/* Ignore gen = buf->i */
-			tok = pdf_lex(ctx, doc->file, buf);
-			if (tok != PDF_TOK_OBJ)
-				break;
-			(void)pdf_repair_obj(ctx, doc, buf, &tmpofs, NULL, NULL, NULL, &page, &tmpofs, NULL);
-			pdf_load_hints(ctx, doc, num);
-		}
-	}
-	fz_always(ctx)
-	{
-		fz_seek(ctx, doc->file, curr_pos, SEEK_SET);
-	}
-	fz_catch(ctx)
-	{
-		fz_rethrow(ctx);
-	}
-}
-
-pdf_obj *pdf_progressive_advance(fz_context *ctx, pdf_document *doc, int pagenum)
-{
-	pdf_lexbuf *buf = &doc->lexbuf.base;
-	int curr_pos;
-	pdf_obj *page = NULL;
-
-	pdf_load_hinted_page(ctx, doc, pagenum);
-
-	if (pagenum < 0 || pagenum >= doc->linear_page_count)
-		fz_throw(ctx, FZ_ERROR_GENERIC, "page load out of range (%d of %d)", pagenum, doc->linear_page_count);
-
-	if (doc->linear_pos == doc->file_length)
-		return doc->linear_page_refs[pagenum];
-
-	/* Only load hints once, and then only after we have got page 0 */
-	if (pagenum > 0 && !doc->hints_loaded && doc->hint_object_offset > 0 && doc->linear_pos >= doc->hint_object_offset)
-	{
-		/* Found hint object */
-		pdf_load_hint_object(ctx, doc);
-	}
-
-	DEBUGMESS((ctx, "continuing to try to advance from %d", doc->linear_pos));
-	curr_pos = fz_tell(ctx, doc->file);
-
-	fz_var(page);
-
-	fz_try(ctx)
-	{
-		int eof;
-		do
-		{
-			int num;
-			eof = pdf_obj_read(ctx, doc, &doc->linear_pos, &num, &page);
-			pdf_drop_obj(ctx, page);
-			page = NULL;
-		}
-		while (!eof);
-
-		{
-			pdf_obj *catalog;
-			pdf_obj *pages;
-			doc->linear_pos = doc->file_length;
-			pdf_load_xref(ctx, doc, buf);
-			catalog = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(Root));
-			pages = pdf_dict_get(ctx, catalog, PDF_NAME(Pages));
-
-			if (!pdf_is_dict(ctx, pages))
-				fz_throw(ctx, FZ_ERROR_GENERIC, "missing page tree");
-			break;
-		}
-	}
-	fz_always(ctx)
-	{
-		fz_seek(ctx, doc->file, curr_pos, SEEK_SET);
-	}
-	fz_catch(ctx)
-	{
-		pdf_drop_obj(ctx, page);
-		if (fz_caught(ctx) == FZ_ERROR_TRYLATER)
-		{
-			if (doc->linear_page_refs[pagenum] == NULL)
-			{
-				/* Still not got a page */
-				fz_rethrow(ctx);
-			}
-		}
-		else
-			fz_rethrow(ctx);
-	}
-
-	return doc->linear_page_refs[pagenum];
-}
-
+/*
+		Down-cast generic fitz objects into pdf specific variants.
+		Returns NULL if the objects are not from a PDF document.
+*/
 pdf_document *pdf_document_from_fz_document(fz_context *ctx, fz_document *ptr)
 {
 	return (pdf_document *)((ptr && ptr->count_pages == (fz_document_count_pages_fn*)pdf_count_pages) ? ptr : NULL);
@@ -2654,11 +2050,10 @@ pdf_page *pdf_page_from_fz_page(fz_context *ctx, fz_page *ptr)
 	return (pdf_page *)((ptr && ptr->bound_page == (fz_page_bound_page_fn*)pdf_bound_page) ? ptr : NULL);
 }
 
-pdf_annot *pdf_annot_from_fz_annot(fz_context *ctx, fz_annot *ptr)
-{
-	return (pdf_annot *)((ptr && ptr->bound_annot == (fz_annot_bound_fn*)pdf_bound_annot) ? ptr : NULL);
-}
-
+/*
+	down-cast a fz_document to a pdf_document.
+	Returns NULL if underlying document is not PDF
+*/
 pdf_document *pdf_specifics(fz_context *ctx, fz_document *doc)
 {
 	return pdf_document_from_fz_document(ctx, doc);
@@ -2805,7 +2200,7 @@ void pdf_mark_xref(fz_context *ctx, pdf_document *doc)
 				pdf_xref_entry *entry = &sub->table[e];
 				if (entry->obj)
 				{
-					entry->flags |= PDF_OBJ_FLAG_MARK;
+					entry->marked = 1;
 				}
 			}
 		}
@@ -2860,7 +2255,7 @@ void pdf_clear_xref_to_mark(fz_context *ctx, pdf_document *doc)
 				 * been updated */
 				if (entry->obj != NULL && entry->stm_buf == NULL)
 				{
-					if ((entry->flags & PDF_OBJ_FLAG_MARK) == 0 && pdf_obj_refs(ctx, entry->obj) == 1)
+					if (!entry->marked && pdf_obj_refs(ctx, entry->obj) == 1)
 					{
 						pdf_drop_obj(ctx, entry->obj);
 						entry->obj = NULL;

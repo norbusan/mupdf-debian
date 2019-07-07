@@ -25,6 +25,15 @@ void fz_var_imp(void *var)
 	/* Do nothing */
 }
 
+/*
+	Flush any repeated warnings.
+
+	Repeated warnings are buffered, counted and eventually printed
+	along with the number of repetitions. Call fz_flush_warnings
+	to force printing of the latest buffered warning and the
+	number of repetitions, for example to make sure that all
+	warnings are printed before exiting an application.
+*/
 void fz_flush_warnings(fz_context *ctx)
 {
 	if (ctx->warn->count > 1)
@@ -72,40 +81,43 @@ void fz_warn(fz_context *ctx, const char *fmt, ...)
 
 /* Error context */
 
-/* When we first setjmp, code is set to 0. Whenever we throw, we add 2 to
- * this code. Whenever we enter the always block, we add 1.
+/* When we first setjmp, state is set to 0. Whenever we throw, we add 2 to
+ * this state. Whenever we enter the always block, we add 1.
  *
- * fz_push_try sets code to 0.
+ * fz_push_try sets state to 0.
  * If (fz_throw called within fz_try)
- *     fz_throw makes code = 2.
+ *     fz_throw makes state = 2.
  *     If (no always block present)
- *         enter catch region with code = 2. OK.
+ *         enter catch region with state = 2. OK.
  *     else
- *         fz_always entered as code < 3; Makes code = 3;
+ *         fz_always entered as state < 3; Makes state = 3;
  *         if (fz_throw called within fz_always)
- *             fz_throw makes code = 5
+ *             fz_throw makes state = 5
  *             fz_always is not reentered.
- *             catch region entered with code = 5. OK.
+ *             catch region entered with state = 5. OK.
  *         else
- *             catch region entered with code = 3. OK
+ *             catch region entered with state = 3. OK
  * else
  *     if (no always block present)
- *         catch region not entered as code = 0. OK.
+ *         catch region not entered as state = 0. OK.
  *     else
- *         fz_always entered as code < 3. makes code = 1
+ *         fz_always entered as state < 3. makes state = 1
  *         if (fz_throw called within fz_always)
- *             fz_throw makes code = 3;
- *             fz_always NOT entered as code >= 3
- *             catch region entered with code = 3. OK.
+ *             fz_throw makes state = 3;
+ *             fz_always NOT entered as state >= 3
+ *             catch region entered with state = 3. OK.
  *         else
- *             catch region entered with code = 1.
+ *             catch region entered with state = 1.
  */
 
-FZ_NORETURN static void throw(fz_context *ctx)
+FZ_NORETURN static void throw(fz_context *ctx, int code)
 {
-	if (ctx->error->top >= ctx->error->stack)
+	if (ctx->error->top > ctx->error->stack)
 	{
-		ctx->error->top->code += 2;
+		ctx->error->top->state += 2;
+		if (ctx->error->top->code != FZ_ERROR_NONE)
+			fz_warn(ctx, "clobbering previous error code and message (throw in always block?)");
+		ctx->error->top->code = code;
 		fz_longjmp(ctx->error->top->buffer, 1);
 	}
 	else
@@ -123,19 +135,16 @@ FZ_NORETURN static void throw(fz_context *ctx)
 	}
 }
 
-/* Only called when we hit the bottom of the exception stack.
- * Do the same as fz_throw, but don't actually throw. */
-static int fz_fake_throw(fz_context *ctx, int code, const char *fmt, ...)
+fz_jmp_buf *fz_push_try(fz_context *ctx)
 {
-	va_list args;
-	ctx->error->errcode = code;
-	va_start(args, fmt);
-	fz_vsnprintf(ctx->error->message, sizeof ctx->error->message, fmt, args);
-	ctx->error->message[sizeof(ctx->error->message) - 1] = 0;
-	va_end(args);
-
-	if (code != FZ_ERROR_ABORT)
+	/* If we would overflow the exception stack, throw an exception instead
+	 * of entering the try block. We assume that we always have room for
+	 * 1 extra level on the stack here - i.e. we throw the error on us
+	 * starting to use the last level. */
+	if (ctx->error->top + 2 >= ctx->error->stack + nelem(ctx->error->stack))
 	{
+		fz_strlcpy(ctx->error->message, "exception stack overflow!", sizeof ctx->error->message);
+
 		fz_flush_warnings(ctx);
 		fprintf(stderr, "error: %s\n", ctx->error->message);
 #ifdef USE_OUTPUT_DEBUG_STRING
@@ -146,27 +155,48 @@ static int fz_fake_throw(fz_context *ctx, int code, const char *fmt, ...)
 #ifdef USE_ANDROID_LOG
 		__android_log_print(ANDROID_LOG_ERROR, "libmupdf", "%s", ctx->error->message);
 #endif
-	}
 
-	/* We need to arrive in the always/catch block as if throw
-	 * had taken place. */
-	ctx->error->top++;
-	ctx->error->top->code = 2;
-	return 0;
+		/* We need to arrive in the always/catch block as if throw had taken place. */
+		ctx->error->top++;
+		ctx->error->top->state = 2;
+		ctx->error->top->code = FZ_ERROR_GENERIC;
+	}
+	else
+	{
+		ctx->error->top++;
+		ctx->error->top->state = 0;
+		ctx->error->top->code = FZ_ERROR_NONE;
+	}
+	return &ctx->error->top->buffer;
 }
 
-int fz_push_try(fz_context *ctx)
+int fz_do_try(fz_context *ctx)
 {
-	/* If we would overflow the exception stack, throw an exception instead
-	 * of entering the try block. We assume that we always have room for
-	 * 1 extra level on the stack here - i.e. we throw the error on us
-	 * starting to use the last level. */
-	if (ctx->error->top + 2 >= ctx->error->stack + nelem(ctx->error->stack))
-		return fz_fake_throw(ctx, FZ_ERROR_GENERIC, "exception stack overflow!");
-
-	ctx->error->top++;
-	ctx->error->top->code = 0;
+#ifdef __COVERITY__
 	return 1;
+#else
+	return ctx->error->top->state == 0;
+#endif
+}
+
+int fz_do_always(fz_context *ctx)
+{
+#ifdef __COVERITY__
+	return 1;
+#else
+	if (ctx->error->top->state < 3)
+	{
+		ctx->error->top->state++;
+		return 1;
+	}
+	return 0;
+#endif
+}
+
+int fz_do_catch(fz_context *ctx)
+{
+	ctx->error->errcode = ctx->error->top->code;
+	return (ctx->error->top--)->state > 1;
 }
 
 int fz_caught(fz_context *ctx)
@@ -181,9 +211,9 @@ const char *fz_caught_message(fz_context *ctx)
 	return ctx->error->message;
 }
 
+/* coverity[+kill] */
 FZ_NORETURN void fz_vthrow(fz_context *ctx, int code, const char *fmt, va_list ap)
 {
-	ctx->error->errcode = code;
 	fz_vsnprintf(ctx->error->message, sizeof ctx->error->message, fmt, ap);
 	ctx->error->message[sizeof(ctx->error->message) - 1] = 0;
 
@@ -201,9 +231,10 @@ FZ_NORETURN void fz_vthrow(fz_context *ctx, int code, const char *fmt, va_list a
 #endif
 	}
 
-	throw(ctx);
+	throw(ctx, code);
 }
 
+/* coverity[+kill] */
 FZ_NORETURN void fz_throw(fz_context *ctx, int code, const char *fmt, ...)
 {
 	va_list ap;
@@ -212,10 +243,11 @@ FZ_NORETURN void fz_throw(fz_context *ctx, int code, const char *fmt, ...)
 	va_end(ap);
 }
 
+/* coverity[+kill] */
 FZ_NORETURN void fz_rethrow(fz_context *ctx)
 {
 	assert(ctx && ctx->error && ctx->error->errcode >= FZ_ERROR_NONE);
-	throw(ctx);
+	throw(ctx, ctx->error->errcode);
 }
 
 void fz_rethrow_if(fz_context *ctx, int err)

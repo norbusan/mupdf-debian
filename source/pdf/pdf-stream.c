@@ -14,7 +14,10 @@ pdf_obj_num_is_stream(fz_context *ctx, pdf_document *doc, int num)
 	if (num <= 0 || num >= pdf_xref_len(ctx, doc))
 		return 0;
 
-	entry = pdf_cache_object(ctx, doc, num);
+	fz_try(ctx)
+		entry = pdf_cache_object(ctx, doc, num);
+	fz_catch(ctx)
+		return 0;
 
 	return entry->stm_ofs != 0 || entry->stm_buf;
 }
@@ -481,9 +484,12 @@ pdf_load_raw_stream_number(fz_context *ctx, pdf_document *doc, int num)
 
 	dict = pdf_load_object(ctx, doc, num);
 
-	len = pdf_dict_get_int(ctx, dict, PDF_NAME(Length));
-
-	pdf_drop_obj(ctx, dict);
+	fz_try(ctx)
+		len = pdf_dict_get_int(ctx, dict, PDF_NAME(Length));
+	fz_always(ctx)
+		pdf_drop_obj(ctx, dict);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
 
 	stm = pdf_open_raw_stream_number(ctx, doc, num);
 
@@ -585,15 +591,23 @@ pdf_load_image_stream(fz_context *ctx, pdf_document *doc, int num, fz_compressio
 	}
 
 	dict = pdf_load_object(ctx, doc, num);
-
-	len = pdf_dict_get_int(ctx, dict, PDF_NAME(Length));
-	obj = pdf_dict_get(ctx, dict, PDF_NAME(Filter));
-	len = pdf_guess_filter_length(len, pdf_to_name(ctx, obj));
-	n = pdf_array_len(ctx, obj);
-	for (i = 0; i < n; i++)
-		len = pdf_guess_filter_length(len, pdf_to_name(ctx, pdf_array_get(ctx, obj, i)));
-
-	pdf_drop_obj(ctx, dict);
+	fz_try(ctx)
+	{
+		len = pdf_dict_get_int(ctx, dict, PDF_NAME(Length));
+		obj = pdf_dict_get(ctx, dict, PDF_NAME(Filter));
+		len = pdf_guess_filter_length(len, pdf_to_name(ctx, obj));
+		n = pdf_array_len(ctx, obj);
+		for (i = 0; i < n; i++)
+			len = pdf_guess_filter_length(len, pdf_to_name(ctx, pdf_array_get(ctx, obj, i)));
+	}
+	fz_always(ctx)
+	{
+		pdf_drop_obj(ctx, dict);
+	}
+	fz_catch(ctx)
+	{
+		fz_rethrow(ctx);
+	}
 
 	stm = pdf_open_image_stream(ctx, doc, num, params);
 
@@ -623,12 +637,6 @@ fz_buffer *
 pdf_load_stream_number(fz_context *ctx, pdf_document *doc, int num)
 {
 	return pdf_load_image_stream(ctx, doc, num, NULL, NULL);
-}
-
-fz_buffer *
-pdf_load_stream_truncated(fz_context *ctx, pdf_document *doc, int num, int *truncated)
-{
-	return pdf_load_image_stream(ctx, doc, num, NULL, truncated);
 }
 
 fz_compressed_buffer *
@@ -663,14 +671,7 @@ pdf_open_object_array(fz_context *ctx, pdf_document *doc, pdf_obj *list)
 		fz_try(ctx)
 			fz_concat_push_drop(ctx, stm, pdf_open_stream(ctx, obj));
 		fz_catch(ctx)
-		{
-			if (fz_caught(ctx) == FZ_ERROR_TRYLATER)
-			{
-				fz_drop_stream(ctx, stm);
-				fz_rethrow(ctx);
-			}
 			fz_warn(ctx, "cannot load content stream part %d/%d", i + 1, n);
-		}
 	}
 
 	return stm;
@@ -688,7 +689,8 @@ pdf_open_contents_stream(fz_context *ctx, pdf_document *doc, pdf_obj *obj)
 	if (pdf_is_stream(ctx, obj))
 		return pdf_open_image_stream(ctx, doc, num, NULL);
 
-	fz_throw(ctx, FZ_ERROR_GENERIC, "pdf object stream missing (%d 0 R)", num);
+	fz_warn(ctx, "content stream is not a stream (%d 0 R)", num);
+	return fz_open_memory(ctx, (unsigned char *)"", 0);
 }
 
 fz_buffer *pdf_load_raw_stream(fz_context *ctx, pdf_obj *ref)

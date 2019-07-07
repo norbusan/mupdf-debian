@@ -10,6 +10,8 @@
 #define PATH_MAX 2048
 #endif
 
+static int is_draw_mode = 0;
+
 static char save_filename[PATH_MAX];
 static pdf_write_options save_opts;
 
@@ -24,7 +26,6 @@ static int pdf_filter(const char *fn)
 static void init_save_pdf_options(void)
 {
 	memset(&save_opts, 0, sizeof save_opts);
-	save_opts.do_garbage = 1;
 }
 
 static void save_pdf_options(void)
@@ -39,6 +40,7 @@ static void save_pdf_options(void)
 	ui_checkbox("Compress images", &save_opts.do_compress_images);
 	ui_checkbox("Compress fonts", &save_opts.do_compress_fonts);
 	ui_checkbox("Decompress", &save_opts.do_decompress);
+	ui_checkbox("Decrypt", &save_opts.do_decrypt);
 	ui_checkbox("Garbage collect", &save_opts.do_garbage);
 	ui_checkbox("Linearize", &save_opts.do_linear);
 	ui_checkbox("Clean syntax", &save_opts.do_clean);
@@ -95,99 +97,27 @@ static const char *getuser(void)
 
 static void new_annot(int type)
 {
-	static const float black[3] = { 0, 0, 0 };
-	static const float red[3] = { 1, 0, 0 };
-	static const float green[3] = { 0, 1, 0 };
-	static const float blue[3] = { 0, 0, 1 };
-	static const float yellow[3] = { 1, 1, 0 };
-	static const float magenta[3] = { 1, 0, 1 };
-
 	selected_annot = pdf_create_annot(ctx, page, type);
 
 	pdf_set_annot_modification_date(ctx, selected_annot, time(NULL));
 	if (pdf_annot_has_author(ctx, selected_annot))
 		pdf_set_annot_author(ctx, selected_annot, getuser());
 
+	pdf_update_appearance(ctx, selected_annot);
+
 	switch (type)
 	{
-	case PDF_ANNOT_TEXT:
-	case PDF_ANNOT_FILE_ATTACHMENT:
-	case PDF_ANNOT_SOUND:
-		{
-			fz_rect icon_rect = { 12, 12, 12+20, 12+20 };
-			pdf_set_annot_flags(ctx, selected_annot,
-				PDF_ANNOT_IS_PRINT | PDF_ANNOT_IS_NO_ZOOM | PDF_ANNOT_IS_NO_ROTATE);
-			pdf_set_annot_rect(ctx, selected_annot, icon_rect);
-			pdf_set_annot_color(ctx, selected_annot, 3, yellow);
-		}
-		break;
-
-	case PDF_ANNOT_FREE_TEXT:
-		{
-			fz_rect text_rect = { 12, 12, 12+200, 12+100 };
-			pdf_set_annot_rect(ctx, selected_annot, text_rect);
-			pdf_set_annot_border(ctx, selected_annot, 0);
-			pdf_set_annot_default_appearance(ctx, selected_annot, "Helv", 12, black);
-		}
-		break;
-
-	case PDF_ANNOT_STAMP:
-		{
-			fz_rect stamp_rect = { 12, 12, 12+190, 12+50 };
-			pdf_set_annot_rect(ctx, selected_annot, stamp_rect);
-			pdf_set_annot_color(ctx, selected_annot, 3, red);
-		}
-		break;
-
-	case PDF_ANNOT_CARET:
-		{
-			fz_rect caret_rect = { 12, 12, 12+18, 12+15 };
-			pdf_set_annot_rect(ctx, selected_annot, caret_rect);
-			pdf_set_annot_color(ctx, selected_annot, 3, blue);
-		}
-		break;
-
-	case PDF_ANNOT_LINE:
-		{
-			fz_point a = { 12, 12 }, b = { 12 + 100, 12 + 50 };
-			pdf_set_annot_line(ctx, selected_annot, a, b);
-			pdf_set_annot_border(ctx, selected_annot, 1);
-			pdf_set_annot_color(ctx, selected_annot, 3, red);
-		}
-		break;
-
-	case PDF_ANNOT_SQUARE:
-	case PDF_ANNOT_CIRCLE:
-		{
-			fz_rect shape_rect = { 12, 12, 12+100, 12+50 };
-			pdf_set_annot_rect(ctx, selected_annot, shape_rect);
-			pdf_set_annot_border(ctx, selected_annot, 1);
-			pdf_set_annot_color(ctx, selected_annot, 3, red);
-		}
-		break;
-
+	case PDF_ANNOT_INK:
 	case PDF_ANNOT_POLYGON:
 	case PDF_ANNOT_POLY_LINE:
-	case PDF_ANNOT_INK:
-		pdf_set_annot_border(ctx, selected_annot, 1);
-		pdf_set_annot_color(ctx, selected_annot, 3, red);
-		break;
-
 	case PDF_ANNOT_HIGHLIGHT:
-		pdf_set_annot_color(ctx, selected_annot, 3, yellow);
-		break;
 	case PDF_ANNOT_UNDERLINE:
-		pdf_set_annot_color(ctx, selected_annot, 3, green);
-		break;
 	case PDF_ANNOT_STRIKE_OUT:
-		pdf_set_annot_color(ctx, selected_annot, 3, red);
-		break;
 	case PDF_ANNOT_SQUIGGLY:
-		pdf_set_annot_color(ctx, selected_annot, 3, magenta);
+		is_draw_mode = 1;
 		break;
 	}
 
-	pdf_update_appearance(ctx, selected_annot);
 	render_page();
 }
 
@@ -461,8 +391,7 @@ void do_annotate_panel(void)
 
 	n = 0;
 	for (annot = pdf_first_annot(ctx, page); annot; annot = pdf_next_annot(ctx, annot))
-		if (pdf_annot_type(ctx, annot) != PDF_ANNOT_WIDGET)
-			++n;
+		++n;
 
 	ui_list_begin(&annot_list, n, 0, ui.lineheight * 10 + 4);
 	for (annot = pdf_first_annot(ctx, page); annot; annot = pdf_next_annot(ctx, annot))
@@ -470,12 +399,9 @@ void do_annotate_panel(void)
 		char buf[256];
 		int num = pdf_to_num(ctx, annot->obj);
 		enum pdf_annot_type subtype = pdf_annot_type(ctx, annot);
-		if (subtype != PDF_ANNOT_WIDGET)
-		{
-			fz_snprintf(buf, sizeof buf, "%d: %s", num, pdf_string_from_annot_type(ctx, subtype));
-			if (ui_list_item(&annot_list, annot->obj, buf, selected_annot == annot))
-				selected_annot = annot;
-		}
+		fz_snprintf(buf, sizeof buf, "%d: %s", num, pdf_string_from_annot_type(ctx, subtype));
+		if (ui_list_item(&annot_list, annot->obj, buf, selected_annot == annot))
+			selected_annot = annot;
 	}
 	ui_list_end(&annot_list);
 
@@ -486,6 +412,9 @@ void do_annotate_panel(void)
 		fz_irect irect;
 		int n, choice;
 		pdf_obj *obj;
+
+		if (subtype == PDF_ANNOT_WIDGET)
+			return;
 
 		if (ui_button("Delete"))
 		{
@@ -580,6 +509,8 @@ void do_annotate_panel(void)
 			ui_label("Icon:");
 			switch (pdf_annot_type(ctx, selected_annot))
 			{
+			default:
+				break;
 			case PDF_ANNOT_TEXT:
 				choice = ui_select("Icon", name, text_icons, nelem(text_icons));
 				if (choice != -1)
@@ -639,26 +570,56 @@ void do_annotate_panel(void)
 
 		if (pdf_annot_has_quad_points(ctx, selected_annot))
 		{
-			n = pdf_annot_quad_point_count(ctx, selected_annot);
-			ui_label("QuadPoints: %d", n);
-			if (ui_button("Clear"))
-				pdf_clear_annot_quad_points(ctx, selected_annot);
+			if (is_draw_mode)
+			{
+				n = pdf_annot_quad_point_count(ctx, selected_annot);
+				ui_label("QuadPoints: %d", n);
+				if (ui_button("Clear"))
+					pdf_clear_annot_quad_points(ctx, selected_annot);
+				if (ui_button("Done"))
+					is_draw_mode = 0;
+			}
+			else
+			{
+				if (ui_button("Edit"))
+					is_draw_mode = 1;
+			}
 		}
 
 		if (pdf_annot_has_vertices(ctx, selected_annot))
 		{
-			n = pdf_annot_vertex_count(ctx, selected_annot);
-			ui_label("Vertices: %d", n);
-			if (ui_button("Clear"))
-				pdf_clear_annot_vertices(ctx, selected_annot);
+			if (is_draw_mode)
+			{
+				n = pdf_annot_vertex_count(ctx, selected_annot);
+				ui_label("Vertices: %d", n);
+				if (ui_button("Clear"))
+					pdf_clear_annot_vertices(ctx, selected_annot);
+				if (ui_button("Done"))
+					is_draw_mode = 0;
+			}
+			else
+			{
+				if (ui_button("Edit"))
+					is_draw_mode = 1;
+			}
 		}
 
 		if (pdf_annot_has_ink_list(ctx, selected_annot))
 		{
-			n = pdf_annot_ink_list_count(ctx, selected_annot);
-			ui_label("InkList: %d strokes", n);
-			if (ui_button("Clear"))
-				pdf_clear_annot_ink_list(ctx, selected_annot);
+			if (is_draw_mode)
+			{
+				n = pdf_annot_ink_list_count(ctx, selected_annot);
+				ui_label("InkList: %d strokes", n);
+				if (ui_button("Clear"))
+					pdf_clear_annot_ink_list(ctx, selected_annot);
+				if (ui_button("Done"))
+					is_draw_mode = 0;
+			}
+			else
+			{
+				if (ui_button("Edit"))
+					is_draw_mode = 1;
+			}
 		}
 
 		if (selected_annot && selected_annot->needs_new_ap)
@@ -1052,14 +1013,13 @@ void do_annotate_canvas(fz_irect canvas_area)
 	fz_rect bounds;
 	fz_irect area;
 	pdf_annot *annot;
+	const void *nothing = ui.hot;
 
 	int was_dirty = pdf->dirty;
 
 	for (annot = pdf_first_annot(ctx, page); annot; annot = pdf_next_annot(ctx, annot))
 	{
 		enum pdf_annot_type subtype = pdf_annot_type(ctx, annot);
-		if (subtype == PDF_ANNOT_WIDGET)
-			continue;
 
 		bounds = pdf_bound_annot(ctx, annot);
 		bounds = fz_transform_rect(bounds, view_page_ctm);
@@ -1068,10 +1028,15 @@ void do_annotate_canvas(fz_irect canvas_area)
 		if (ui_mouse_inside(&canvas_area) && ui_mouse_inside(&area))
 		{
 			ui.hot = annot;
-			if (!ui.active && ui.right)
+			if (!ui.active && ui.down)
 			{
-				ui.active = annot;
-				selected_annot = annot;
+				if (selected_annot != annot)
+				{
+					if (!selected_annot && !showannotate)
+						toggle_annotate();
+					ui.active = annot;
+					selected_annot = annot;
+				}
 			}
 		}
 
@@ -1112,21 +1077,25 @@ void do_annotate_canvas(fz_irect canvas_area)
 				do_edit_rect(canvas_area, area, &bounds);
 				break;
 			case PDF_ANNOT_POLYGON:
-				do_edit_polygon(canvas_area, 1);
+				if (is_draw_mode)
+					do_edit_polygon(canvas_area, 1);
 				break;
 			case PDF_ANNOT_POLY_LINE:
-				do_edit_polygon(canvas_area, 0);
+				if (is_draw_mode)
+					do_edit_polygon(canvas_area, 0);
 				break;
 
 			case PDF_ANNOT_INK:
-				do_edit_ink(canvas_area);
+				if (is_draw_mode)
+					do_edit_ink(canvas_area);
 				break;
 
 			case PDF_ANNOT_HIGHLIGHT:
 			case PDF_ANNOT_UNDERLINE:
 			case PDF_ANNOT_STRIKE_OUT:
 			case PDF_ANNOT_SQUIGGLY:
-				do_edit_quad_points();
+				if (is_draw_mode)
+					do_edit_quad_points();
 				break;
 			}
 
@@ -1153,11 +1122,14 @@ void do_annotate_canvas(fz_irect canvas_area)
 		}
 	}
 
-	if (ui_mouse_inside(&canvas_area) && ui.right)
+	if (ui_mouse_inside(&canvas_area) && ui.down)
 	{
-		if (!ui.active)
+		if (!ui.active && ui.hot == nothing)
 			selected_annot = NULL;
 	}
+
+	if (ui.right)
+		is_draw_mode = 0;
 
 	if (was_dirty != pdf->dirty)
 		update_title();

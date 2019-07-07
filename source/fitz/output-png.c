@@ -4,16 +4,6 @@
 
 #include <zlib.h>
 
-static void *zalloc_outpng(void *opaque, unsigned int items, unsigned int size)
-{
-	return fz_malloc_array_no_throw(opaque, items, size);
-}
-
-static void zfree_outpng(void *opaque, void *address)
-{
-	fz_free(opaque, address);
-}
-
 static inline void big32(unsigned char *buf, unsigned int v)
 {
 	buf[0] = (v >> 24) & 0xff;
@@ -96,7 +86,7 @@ typedef struct png_band_writer_s
 } png_band_writer;
 
 static void
-png_write_icc(fz_context *ctx, png_band_writer *writer, const fz_colorspace *cs)
+png_write_icc(fz_context *ctx, png_band_writer *writer, fz_colorspace *cs)
 {
 	fz_output *out = writer->super.out;
 	size_t size, csize;
@@ -132,7 +122,7 @@ png_write_icc(fz_context *ctx, png_band_writer *writer, const fz_colorspace *cs)
 }
 
 static void
-png_write_header(fz_context *ctx, fz_band_writer *writer_, const fz_colorspace *cs)
+png_write_header(fz_context *ctx, fz_band_writer *writer_, fz_colorspace *cs)
 {
 	png_band_writer *writer = (png_band_writer *)(void *)writer_;
 	fz_output *out = writer->super.out;
@@ -205,8 +195,8 @@ png_write_band(fz_context *ctx, fz_band_writer *writer_, int stride, int band_st
 		writer->udata = fz_malloc(ctx, writer->usize);
 		writer->cdata = fz_malloc(ctx, writer->csize);
 		writer->stream.opaque = ctx;
-		writer->stream.zalloc = zalloc_outpng;
-		writer->stream.zfree = zfree_outpng;
+		writer->stream.zalloc = fz_zlib_alloc;
+		writer->stream.zfree = fz_zlib_free;
 		err = deflateInit(&writer->stream, Z_DEFAULT_COMPRESSION);
 		if (err != Z_OK)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "compression error %d", err);

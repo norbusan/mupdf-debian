@@ -33,7 +33,6 @@ static HWND hwndframe = NULL;
 static HWND hwndview = NULL;
 static HDC hdc;
 static HBRUSH bgbrush;
-static HBRUSH shbrush;
 static BITMAPINFO *dibinf = NULL;
 static HCURSOR arrowcurs, handcurs, waitcurs, caretcurs;
 static LRESULT CALLBACK frameproc(HWND, UINT, WPARAM, LPARAM);
@@ -664,7 +663,6 @@ void winopen()
 
 	/* And a background color */
 	bgbrush = CreateSolidBrush(RGB(0x70,0x70,0x70));
-	shbrush = CreateSolidBrush(RGB(0x40,0x40,0x40));
 
 	/* Init DIB info for buffer */
 	dibinf = malloc(sizeof(BITMAPINFO) + 12);
@@ -801,6 +799,7 @@ void winblit()
 	int x1 = gapp.panx + image_w;
 	int y1 = gapp.pany + image_h;
 	RECT r;
+	HBRUSH brush;
 
 	if (gapp.image)
 	{
@@ -851,29 +850,22 @@ void winblit()
 		}
 	}
 
+	if (gapp.invert)
+		brush = (HBRUSH)GetStockObject(BLACK_BRUSH);
+	else
+		brush = bgbrush;
+
 	/* Grey background */
 	r.top = 0; r.bottom = gapp.winh;
 	r.left = 0; r.right = x0;
-	FillRect(hdc, &r, bgbrush);
+	FillRect(hdc, &r, brush);
 	r.left = x1; r.right = gapp.winw;
-	FillRect(hdc, &r, bgbrush);
+	FillRect(hdc, &r, brush);
 	r.left = 0; r.right = gapp.winw;
 	r.top = 0; r.bottom = y0;
-	FillRect(hdc, &r, bgbrush);
+	FillRect(hdc, &r, brush);
 	r.top = y1; r.bottom = gapp.winh;
-	FillRect(hdc, &r, bgbrush);
-
-	/* Drop shadow */
-	r.left = x0 + 2;
-	r.right = x1 + 2;
-	r.top = y1;
-	r.bottom = y1 + 2;
-	FillRect(hdc, &r, shbrush);
-	r.left = x1;
-	r.right = x1 + 2;
-	r.top = y0 + 2;
-	r.bottom = y1;
-	FillRect(hdc, &r, shbrush);
+	FillRect(hdc, &r, brush);
 
 	winblitsearch();
 }
@@ -1167,13 +1159,13 @@ viewproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_MOUSEWHEEL:
 		if ((signed short)HIWORD(wParam) <= 0)
 		{
-			handlemouse(oldx, oldy, 4, 1);
-			handlemouse(oldx, oldy, 4, -1);
+			handlemouse(oldx, oldy, 5, 1);
+			handlemouse(oldx, oldy, 5, -1);
 		}
 		else
 		{
-			handlemouse(oldx, oldy, 5, 1);
-			handlemouse(oldx, oldy, 5, -1);
+			handlemouse(oldx, oldy, 4, 1);
+			handlemouse(oldx, oldy, 4, -1);
 		}
 		return 0;
 
@@ -1251,9 +1243,9 @@ get_system_dpi(void)
 	return ((hdpi + vdpi) * 96 + 0.5f) / 200;
 }
 
-static void usage(void)
+static void usage(const char *argv0)
 {
-	fprintf(stderr, "usage: mupdf [options] file.pdf [page]\n");
+	fprintf(stderr, "usage: %s [options] file.pdf [page]\n", argv0);
 	fprintf(stderr, "\t-p -\tpassword\n");
 	fprintf(stderr, "\t-r -\tresolution\n");
 	fprintf(stderr, "\t-A -\tset anti-aliasing quality in bits (0=off, 8=best)\n");
@@ -1277,7 +1269,6 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShow
 	MSG msg;
 	int code;
 	fz_context *ctx;
-	int bps = 0;
 	int displayRes = get_system_dpi();
 	int c;
 
@@ -1291,16 +1282,14 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShow
 
 	argv = fz_argv_from_wargv(argc, wargv);
 
-	while ((c = fz_getopt(argc, argv, "Ip:r:A:C:W:H:S:U:Xb:")) != -1)
+	while ((c = fz_getopt(argc, argv, "Ip:r:A:C:W:H:S:U:X")) != -1)
 	{
 		switch (c)
 		{
 		case 'C':
 			c = strtol(fz_optarg, NULL, 16);
 			gapp.tint = 1;
-			gapp.tint_r = (c >> 16) & 255;
-			gapp.tint_g = (c >> 8) & 255;
-			gapp.tint_b = (c) & 255;
+			gapp.tint_white = c;
 			break;
 		case 'p': password = fz_optarg; break;
 		case 'r': displayRes = fz_atoi(fz_optarg); break;
@@ -1309,10 +1298,9 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShow
 		case 'W': gapp.layout_w = fz_atoi(fz_optarg); break;
 		case 'H': gapp.layout_h = fz_atoi(fz_optarg); break;
 		case 'S': gapp.layout_em = fz_atoi(fz_optarg); break;
-		case 'b': bps = (fz_optarg && *fz_optarg) ? fz_atoi(fz_optarg) : 4096; break;
 		case 'U': gapp.layout_css = fz_optarg; break;
 		case 'X': gapp.layout_use_doc_css = 0; break;
-		default: usage();
+		default: usage(argv[0]);
 		}
 	}
 
@@ -1339,10 +1327,7 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShow
 	if (fz_optind < argc)
 		gapp.pageno = atoi(argv[fz_optind++]);
 
-	if (bps)
-		pdfapp_open_progressive(&gapp, filename, 0, bps);
-	else
-		pdfapp_open(&gapp, filename, 0);
+	pdfapp_open(&gapp, filename, 0);
 
 	while (GetMessage(&msg, NULL, 0, 0))
 	{

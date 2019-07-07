@@ -270,6 +270,7 @@ int pdf_is_dict(fz_context *ctx, pdf_obj *obj)
 	return OBJ_IS_DICT(obj);
 }
 
+/* safe, silent failure, no error reporting on type mismatches */
 int pdf_to_bool(fz_context *ctx, pdf_obj *obj)
 {
 	RESOLVE(obj);
@@ -378,6 +379,7 @@ void pdf_set_str_len(fz_context *ctx, pdf_obj *obj, int newlen)
 		return; /* This should never happen */
 	if (newlen < 0 || (unsigned int)newlen > STRING(obj)->len)
 		return; /* This should never happen */
+	STRING(obj)->buf[newlen] = 0;
 	STRING(obj)->len = newlen;
 }
 
@@ -1574,6 +1576,7 @@ pdf_deep_copy_obj(fz_context *ctx, pdf_obj *obj)
 	}
 }
 
+/* obj marking and unmarking functions - to avoid infinite recursions. */
 int
 pdf_obj_marked(fz_context *ctx, pdf_obj *obj)
 {
@@ -1629,6 +1632,7 @@ pdf_obj_memo(fz_context *ctx, pdf_obj *obj, int bit, int *memo)
 	return 1;
 }
 
+/* obj dirty bit support. */
 int pdf_obj_is_dirty(fz_context *ctx, pdf_obj *obj)
 {
 	RESOLVE(obj);
@@ -1709,6 +1713,12 @@ pdf_drop_obj(fz_context *ctx, pdf_obj *obj)
 	}
 }
 
+/*
+	Recurse through the object structure setting the node's parent_num to num.
+	parent_num is used when a subobject is to be changed during a document edit.
+	The whole containing hierarchy is moved to the incremental xref section, so
+	to be later written out as an incremental file update.
+*/
 void
 pdf_set_obj_parent(fz_context *ctx, pdf_obj *obj, int num)
 {
@@ -1756,11 +1766,13 @@ int pdf_obj_parent_num(fz_context *ctx, pdf_obj *obj)
 
 struct fmt
 {
-	char *buf;
+	char *buf; /* original static buffer */
+	char *ptr; /* buffer we're writing to, maybe dynamically reallocated */
 	int cap;
 	int len;
 	int indent;
 	int tight;
+	int ascii;
 	int col;
 	int sep;
 	int last;
@@ -1801,8 +1813,21 @@ static inline void fmt_putc(fz_context *ctx, struct fmt *fmt, int c)
 	}
 	fmt->sep = 0;
 
-	if (fmt->buf && fmt->len < fmt->cap)
-		fmt->buf[fmt->len] = c;
+	if (fmt->len >= fmt->cap)
+	{
+		fmt->cap *= 2;
+		if (fmt->buf == fmt->ptr)
+		{
+			fmt->ptr = fz_malloc(ctx, fmt->cap);
+			memcpy(fmt->ptr, fmt->buf, fmt->len);
+		}
+		else
+		{
+			fmt->ptr = fz_resize_array(ctx, fmt->ptr, fmt->cap, 1);
+		}
+	}
+
+	fmt->ptr[fmt->len] = c;
 
 	if (c == '\n')
 		fmt->col = 0;
@@ -1832,6 +1857,39 @@ static inline void fmt_puts(fz_context *ctx, struct fmt *fmt, char *s)
 static inline void fmt_sep(fz_context *ctx, struct fmt *fmt)
 {
 	fmt->sep = 1;
+}
+
+static int is_binary_string(fz_context *ctx, pdf_obj *obj)
+{
+	unsigned char *s = (unsigned char *)pdf_to_str_buf(ctx, obj);
+	int i, n = pdf_to_str_len(ctx, obj);
+	for (i = 0; i < n; ++i)
+	{
+		if (s[i] > 126) return 1;
+		if (s[i] < 32 && (s[i] != '\t' && s[i] != '\n' && s[i] != '\r')) return 1;
+	}
+	return 0;
+}
+
+static int is_longer_than_hex(fz_context *ctx, pdf_obj *obj)
+{
+	unsigned char *s = (unsigned char *)pdf_to_str_buf(ctx, obj);
+	int i, n = pdf_to_str_len(ctx, obj);
+	int m = 0;
+	for (i = 0; i < n; ++i)
+	{
+		if (s[i] > 126)
+			m += 4;
+		else if (s[i] == 0)
+			m += 4;
+		else if (strchr("\n\r\t\b\f()\\", s[i]))
+			m += 2;
+		else if (s[i] < 32)
+			m += 4;
+		else
+			m += 1;
+	}
+	return m > (n * 2);
 }
 
 static void fmt_str_out(fz_context *ctx, void *fmt_, const unsigned char *s, int n)
@@ -1998,23 +2056,6 @@ static void fmt_dict(fz_context *ctx, struct fmt *fmt, pdf_obj *obj)
 	}
 }
 
-static void count_encrypted_data(fz_context *ctx, void *arg, const unsigned char *str, int len)
-{
-	int *encrypted_len = (int *)arg;
-	int added = 0;
-	int i;
-	unsigned char c;
-
-	for (i = 0; i < len; i++) {
-		c = (unsigned char)str[i];
-		if (c != 0 && strchr("()\\\n\r\t\b\f", c))
-			added ++;
-		else if (c < 32 || c >= 127)
-			added += 3;
-	}
-	*encrypted_len += added;
-}
-
 static void fmt_obj(fz_context *ctx, struct fmt *fmt, pdf_obj *obj)
 {
 	char buf[256];
@@ -2043,14 +2084,15 @@ static void fmt_obj(fz_context *ctx, struct fmt *fmt, pdf_obj *obj)
 	else if (pdf_is_string(ctx, obj))
 	{
 		unsigned char *str = (unsigned char *)pdf_to_str_buf(ctx, obj);
-		int len = pdf_to_str_len(ctx, obj);
-		int encoded_len = 0;
-
-		pdf_encrypt_data(ctx, fmt->crypt, fmt->num, fmt->gen, count_encrypted_data, &encoded_len, str, len);
-		if (encoded_len < 2*len)
-			fmt_str(ctx, fmt, obj);
-		else
+		if (fmt->crypt
+			|| (fmt->ascii && is_binary_string(ctx, obj))
+			|| (str[0]==0xff && str[1]==0xfe)
+			|| (str[0]==0xfe && str[1] == 0xff)
+			|| is_longer_than_hex(ctx, obj)
+			)
 			fmt_hex(ctx, fmt, obj);
+		else
+			fmt_str(ctx, fmt, obj);
 	}
 	else if (pdf_is_name(ctx, obj))
 		fmt_name(ctx, fmt, obj);
@@ -2062,8 +2104,8 @@ static void fmt_obj(fz_context *ctx, struct fmt *fmt, pdf_obj *obj)
 		fmt_puts(ctx, fmt, "<unknown object>");
 }
 
-int
-pdf_sprint_encrypted_obj(fz_context *ctx, char *s, int n, pdf_obj *obj, int tight, pdf_crypt *crypt, int num, int gen)
+static char *
+pdf_sprint_encrypted_obj(fz_context *ctx, char *buf, int cap, int *len, pdf_obj *obj, int tight, int ascii, pdf_crypt *crypt, int num, int gen)
 {
 	struct fmt fmt;
 
@@ -2072,76 +2114,79 @@ pdf_sprint_encrypted_obj(fz_context *ctx, char *s, int n, pdf_obj *obj, int tigh
 	fmt.sep = 0;
 	fmt.last = 0;
 
+	if (!buf || cap == 0)
+	{
+		fmt.cap = 1024;
+		fmt.buf = NULL;
+		fmt.ptr = fz_malloc(ctx, fmt.cap);
+	}
+	else
+	{
+		fmt.cap = cap;
+		fmt.buf = buf;
+		fmt.ptr = buf;
+	}
+
 	fmt.tight = tight;
-	fmt.buf = s;
-	fmt.cap = n;
+	fmt.ascii = ascii;
 	fmt.len = 0;
 	fmt.crypt = crypt;
 	fmt.num = num;
 	fmt.gen = gen;
 	fmt_obj(ctx, &fmt, obj);
 
-	if (fmt.buf && fmt.len < fmt.cap)
-		fmt.buf[fmt.len] = '\0';
+	fmt_putc(ctx, &fmt, 0);
 
-	return fmt.len;
+	return *len = fmt.len-1, fmt.ptr;
 }
 
-int
-pdf_sprint_obj(fz_context *ctx, char *s, int n, pdf_obj *obj, int tight)
+char *
+pdf_sprint_obj(fz_context *ctx, char *buf, int cap, int *len, pdf_obj *obj, int tight, int ascii)
 {
-	return pdf_sprint_encrypted_obj(ctx, s, n, obj, tight, NULL, 0, 0);
+	return pdf_sprint_encrypted_obj(ctx, buf, cap, len, obj, tight, ascii, NULL, 0, 0);
 }
 
-int pdf_print_encrypted_obj(fz_context *ctx, fz_output *out, pdf_obj *obj, int tight, pdf_crypt *crypt, int num, int gen)
+void pdf_print_encrypted_obj(fz_context *ctx, fz_output *out, pdf_obj *obj, int tight, int ascii, pdf_crypt *crypt, int num, int gen)
 {
 	char buf[1024];
 	char *ptr;
 	int n;
 
-	n = pdf_sprint_encrypted_obj(ctx, buf, sizeof buf, obj, tight, crypt, num, gen);
-	if (n <= sizeof buf)
-	{
-		fz_write_data(ctx, out, buf, n);
-	}
-	else
-	{
-		ptr = fz_malloc(ctx, n + 1);
-		pdf_sprint_encrypted_obj(ctx, ptr, n + 1, obj, tight, crypt, num, gen);
+	ptr = pdf_sprint_encrypted_obj(ctx, buf, sizeof buf, &n, obj, tight, ascii,crypt, num, gen);
+	fz_try(ctx)
 		fz_write_data(ctx, out, ptr, n);
-		fz_free(ctx, ptr);
-	}
-	return n;
+	fz_always(ctx)
+		if (ptr != buf)
+			fz_free(ctx, ptr);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
 }
 
-int pdf_print_obj(fz_context *ctx, fz_output *out, pdf_obj *obj, int tight)
+void pdf_print_obj(fz_context *ctx, fz_output *out, pdf_obj *obj, int tight, int ascii)
 {
-	return pdf_print_encrypted_obj(ctx, out, obj, tight, NULL, 0, 0);
+	pdf_print_encrypted_obj(ctx, out, obj, tight, ascii, NULL, 0, 0);
 }
 
-static int pdf_debug_encrypted_obj(fz_context *ctx, pdf_obj *obj, int tight, pdf_crypt *crypt, int num, int gen)
+static void pdf_debug_encrypted_obj(fz_context *ctx, pdf_obj *obj, int tight, pdf_crypt *crypt, int num, int gen)
 {
 	char buf[1024];
 	char *ptr;
 	int n;
+	int ascii = 1;
 
-	n = pdf_sprint_obj(ctx, NULL, 0, obj, tight);
-	if ((n + 1) < sizeof buf)
-	{
-		pdf_sprint_encrypted_obj(ctx, buf, sizeof buf, obj, tight, crypt, num, gen);
-		fwrite(buf, 1, n, stdout);
-	}
-	else
-	{
-		ptr = fz_malloc(ctx, n + 1);
-		pdf_sprint_encrypted_obj(ctx, ptr, n + 1, obj, tight, crypt, num, gen);
-		fwrite(ptr, 1, n, stdout);
+	ptr = pdf_sprint_encrypted_obj(ctx, buf, sizeof buf, &n, obj, tight, ascii, crypt, num, gen);
+	fwrite(ptr, 1, n, stdout);
+	if (ptr != buf)
 		fz_free(ctx, ptr);
-	}
-	return n;
 }
 
 void pdf_debug_obj(fz_context *ctx, pdf_obj *obj)
+{
+	pdf_debug_encrypted_obj(ctx, pdf_resolve_indirect(ctx, obj), 0, NULL, 0, 0);
+	putchar('\n');
+}
+
+void pdf_debug_ref(fz_context *ctx, pdf_obj *obj)
 {
 	pdf_debug_encrypted_obj(ctx, obj, 0, NULL, 0, 0);
 	putchar('\n');
@@ -2246,6 +2291,13 @@ pdf_obj *pdf_dict_put_dict(fz_context *ctx, pdf_obj *dict, pdf_obj *key, int ini
 {
 	pdf_obj *obj = pdf_new_dict(ctx, pdf_get_bound_document(ctx, dict), initial);
 	pdf_dict_put_drop(ctx, dict, key, obj);
+	return obj;
+}
+
+pdf_obj *pdf_dict_puts_dict(fz_context *ctx, pdf_obj *dict, const char *key, int initial)
+{
+	pdf_obj *obj = pdf_new_dict(ctx, pdf_get_bound_document(ctx, dict), initial);
+	pdf_dict_puts_drop(ctx, dict, key, obj);
 	return obj;
 }
 
