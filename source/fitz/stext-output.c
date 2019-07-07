@@ -80,7 +80,7 @@ fz_print_stext_image_as_html(fz_context *ctx, fz_output *out, fz_stext_block *bl
 	int w = block->bbox.x1 - block->bbox.x0;
 	int h = block->bbox.y1 - block->bbox.y0;
 
-	fz_write_printf(ctx, out, "<img style=\"top:%dpt;left:%dpt;width:%dpt;height:%dpt\" src=\"data:", y, x, w, h);
+	fz_write_printf(ctx, out, "<img style=\"position:absolute;top:%dpt;left:%dpt;width:%dpt;height:%dpt\" src=\"", y, x, w, h);
 	fz_write_image_as_data_uri(ctx, out, block->u.i.image);
 	fz_write_string(ctx, out, "\">\n");
 }
@@ -101,7 +101,7 @@ fz_print_stext_block_as_html(fz_context *ctx, fz_output *out, fz_stext_block *bl
 		x = line->bbox.x0;
 		y = line->bbox.y0;
 
-		fz_write_printf(ctx, out, "<p style=\"top:%dpt;left:%dpt;\">", y, x);
+		fz_write_printf(ctx, out, "<p style=\"position:absolute;margin:0;padding:0;top:%dpt;left:%dpt\">", y, x);
 		font = NULL;
 
 		for (ch = line->first_char; ch; ch = ch->next)
@@ -140,6 +140,9 @@ fz_print_stext_block_as_html(fz_context *ctx, fz_output *out, fz_stext_block *bl
 	}
 }
 
+/*
+	Output a page to a file in HTML (visual) format.
+*/
 void
 fz_print_stext_page_as_html(fz_context *ctx, fz_output *out, fz_stext_page *page)
 {
@@ -148,7 +151,7 @@ fz_print_stext_page_as_html(fz_context *ctx, fz_output *out, fz_stext_page *page
 	int w = page->mediabox.x1 - page->mediabox.x0;
 	int h = page->mediabox.y1 - page->mediabox.y0;
 
-	fz_write_printf(ctx, out, "<div style=\"width:%dpt;height:%dpt\">\n", w, h);
+	fz_write_printf(ctx, out, "<div style=\"position:relative;width:%dpt;height:%dpt;background-color:white\">\n", w, h);
 
 	for (block = page->first_block; block; block = block->next)
 	{
@@ -169,9 +172,7 @@ fz_print_stext_header_as_html(fz_context *ctx, fz_output *out)
 	fz_write_string(ctx, out, "<head>\n");
 	fz_write_string(ctx, out, "<style>\n");
 	fz_write_string(ctx, out, "body{background-color:gray}\n");
-	fz_write_string(ctx, out, "div{position:relative;background-color:white;margin:1em auto}\n");
-	fz_write_string(ctx, out, "p{position:absolute;margin:0}\n");
-	fz_write_string(ctx, out, "img{position:absolute}\n");
+	fz_write_string(ctx, out, "div{margin:1em auto}\n");
 	fz_write_string(ctx, out, "</style>\n");
 	fz_write_string(ctx, out, "</head>\n");
 	fz_write_string(ctx, out, "<body>\n");
@@ -192,7 +193,7 @@ fz_print_stext_image_as_xhtml(fz_context *ctx, fz_output *out, fz_stext_block *b
 	int w = block->bbox.x1 - block->bbox.x0;
 	int h = block->bbox.y1 - block->bbox.y0;
 
-	fz_write_printf(ctx, out, "<p><img width=\"%d\" height=\"%d\" src=\"data:", w, h);
+	fz_write_printf(ctx, out, "<p><img width=\"%d\" height=\"%d\" src=\"", w, h);
 	fz_write_image_as_data_uri(ctx, out, block->u.i.image);
 	fz_write_string(ctx, out, "\"/></p>\n");
 }
@@ -279,6 +280,9 @@ static void fz_print_stext_block_as_xhtml(fz_context *ctx, fz_output *out, fz_st
 	fz_write_string(ctx, out, "</p>\n");
 }
 
+/*
+	Output a page to a file in XHTML (semantic) format.
+*/
 void
 fz_print_stext_page_as_xhtml(fz_context *ctx, fz_output *out, fz_stext_page *page)
 {
@@ -324,6 +328,9 @@ fz_print_stext_trailer_as_xhtml(fz_context *ctx, fz_output *out)
 
 /* Detailed XML dump of the entire structured text data */
 
+/*
+	Output a page to a file in XML format.
+*/
 void
 fz_print_stext_page_as_xml(fz_context *ctx, fz_output *out, fz_stext_page *page)
 {
@@ -406,6 +413,9 @@ fz_print_stext_page_as_xml(fz_context *ctx, fz_output *out, fz_stext_page *page)
 
 /* Plain text */
 
+/*
+	Output a page to a file in UTF-8 format.
+*/
 void
 fz_print_stext_page_as_text(fz_context *ctx, fz_output *out, fz_stext_page *page)
 {
@@ -475,31 +485,33 @@ text_end_page(fz_context *ctx, fz_document_writer *wri_, fz_device *dev)
 	fz_text_writer *wri = (fz_text_writer*)wri_;
 
 	fz_try(ctx)
+	{
 		fz_close_device(ctx, dev);
+		switch (wri->format)
+		{
+		default:
+		case FZ_FORMAT_TEXT:
+			fz_print_stext_page_as_text(ctx, wri->out, wri->page);
+			break;
+		case FZ_FORMAT_HTML:
+			fz_print_stext_page_as_html(ctx, wri->out, wri->page);
+			break;
+		case FZ_FORMAT_XHTML:
+			fz_print_stext_page_as_xhtml(ctx, wri->out, wri->page);
+			break;
+		case FZ_FORMAT_STEXT:
+			fz_print_stext_page_as_xml(ctx, wri->out, wri->page);
+			break;
+		}
+	}
 	fz_always(ctx)
+	{
 		fz_drop_device(ctx, dev);
+		fz_drop_stext_page(ctx, wri->page);
+		wri->page = NULL;
+	}
 	fz_catch(ctx)
 		fz_rethrow(ctx);
-
-	switch (wri->format)
-	{
-	default:
-	case FZ_FORMAT_TEXT:
-		fz_print_stext_page_as_text(ctx, wri->out, wri->page);
-		break;
-	case FZ_FORMAT_HTML:
-		fz_print_stext_page_as_html(ctx, wri->out, wri->page);
-		break;
-	case FZ_FORMAT_XHTML:
-		fz_print_stext_page_as_xhtml(ctx, wri->out, wri->page);
-		break;
-	case FZ_FORMAT_STEXT:
-		fz_print_stext_page_as_xml(ctx, wri->out, wri->page);
-		break;
-	}
-
-	fz_drop_stext_page(ctx, wri->page);
-	wri->page = NULL;
 }
 
 static void

@@ -21,6 +21,7 @@ static const char *cbz_ext_list[] = {
 	".pam",
 	".pbm",
 	".pgm",
+	".pkm",
 	".png",
 	".pnm",
 	".ppm",
@@ -181,7 +182,7 @@ cbz_load_page(fz_context *ctx, fz_document *doc_, int number)
 	fz_buffer *buf = NULL;
 
 	if (number < 0 || number >= doc->page_count)
-		return NULL;
+		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot load page %d", number);
 
 	fz_var(page);
 

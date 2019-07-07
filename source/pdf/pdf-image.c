@@ -299,7 +299,7 @@ pdf_load_image(fz_context *ctx, pdf_document *doc, pdf_obj *dict)
 }
 
 pdf_obj *
-pdf_add_image(fz_context *ctx, pdf_document *doc, fz_image *image, int mask)
+pdf_add_image(fz_context *ctx, pdf_document *doc, fz_image *image)
 {
 	fz_pixmap *pixmap = NULL;
 	pdf_obj *imobj = NULL;
@@ -308,7 +308,7 @@ pdf_add_image(fz_context *ctx, pdf_document *doc, fz_image *image, int mask)
 	pdf_obj *imref = NULL;
 	fz_compressed_buffer *cbuffer;
 	unsigned char digest[16];
-	int n;
+	int i, n;
 
 	/* If we can maintain compression, do so */
 	cbuffer = fz_compressed_image_buffer(ctx, image);
@@ -400,6 +400,13 @@ pdf_add_image(fz_context *ctx, pdf_document *doc, fz_image *image, int mask)
 				pdf_dict_del(ctx, imobj, PDF_NAME(DecodeParms));
 
 			buffer = fz_keep_buffer(ctx, cbuffer->buffer);
+
+			if (image->use_decode)
+			{
+				pdf_obj *ary = pdf_dict_put_array(ctx, imobj, PDF_NAME(Decode), image->n * 2);
+				for (i = 0; i < image->n * 2; ++i)
+					pdf_array_push_real(ctx, ary, image->decode[i]);
+			}
 		}
 		else
 		{
@@ -457,7 +464,7 @@ raw_or_unknown_compression:
 		pdf_dict_put_int(ctx, imobj, PDF_NAME(Width), pixmap ? pixmap->w : image->w);
 		pdf_dict_put_int(ctx, imobj, PDF_NAME(Height), pixmap ? pixmap->h : image->h);
 
-		if (mask)
+		if (image->imagemask)
 		{
 			pdf_dict_put_bool(ctx, imobj, PDF_NAME(ImageMask), 1);
 		}
@@ -506,6 +513,7 @@ raw_or_unknown_compression:
 					pdf_array_push_string(ctx, arr, (char *) lookup, basen * (high + 1));
 				}
 				break;
+			case FZ_COLORSPACE_NONE:
 			case FZ_COLORSPACE_GRAY:
 				pdf_dict_put(ctx, imobj, PDF_NAME(ColorSpace), PDF_NAME(DeviceGray));
 				break;
@@ -524,7 +532,7 @@ raw_or_unknown_compression:
 
 		if (image->mask)
 		{
-			pdf_dict_put_drop(ctx, imobj, PDF_NAME(SMask), pdf_add_image(ctx, doc, image->mask, 0));
+			pdf_dict_put_drop(ctx, imobj, PDF_NAME(SMask), pdf_add_image(ctx, doc, image->mask));
 		}
 
 		pdf_update_stream(ctx, doc, imobj, buffer, 1);

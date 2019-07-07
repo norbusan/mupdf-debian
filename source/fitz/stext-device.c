@@ -24,15 +24,25 @@ struct fz_stext_device_s
 	int curdir;
 	int lastchar;
 	int flags;
+	const fz_text *lasttext;
 };
 
 const char *fz_stext_options_usage =
 	"Text output options:\n"
+	"\tinhibit-spaces: don't add spaces between gaps in the text\n"
+	"\tpreserve-images: keep images in output\n"
 	"\tpreserve-ligatures: do not expand ligatures into constituent characters\n"
 	"\tpreserve-whitespace: do not convert all whitespace into space characters\n"
-	"\tpreserve-images: keep images in output\n"
 	"\n";
 
+/*
+	Create an empty text page.
+
+	The text page is filled out by the text device to contain the blocks
+	and lines of text on the page.
+
+	mediabox: optional mediabox information.
+*/
 fz_stext_page *
 fz_new_stext_page(fz_context *ctx, fz_rect mediabox)
 {
@@ -317,20 +327,25 @@ fz_add_stext_char_imp(fz_context *ctx, fz_stext_device *dev, fz_font *font, int 
 			{
 				if (fabsf(spacing) < size * SPACE_DIST)
 				{
-					/* Motion is in line, and small. */
+					/* Motion is in line and small enough to ignore. */
 					new_line = 0;
 				}
-				else if (spacing >= size * SPACE_DIST && spacing < size * SPACE_MAX_DIST)
+				else if (fabsf(spacing) > size * SPACE_MAX_DIST)
 				{
-					/* Motion is in line, but large enough to warrant us adding a space. */
-					if (dev->lastchar != ' ' && wmode == 0)
-						add_space = 1;
+					/* Motion is in line and large enough to warrant splitting to a new line */
+					new_line = 1;
+				}
+				else if (spacing < 0)
+				{
+					/* Motion is backward in line! Ignore this odd spacing. */
 					new_line = 0;
 				}
 				else
 				{
-					/* Motion is in line, but large enough to warrant splitting to a new line */
-					new_line = 1;
+					/* Motion is forward in line and large enough to warrant us adding a space. */
+					if (dev->lastchar != ' ' && wmode == 0)
+						add_space = 1;
+					new_line = 0;
 				}
 			}
 
@@ -378,7 +393,7 @@ fz_add_stext_char_imp(fz_context *ctx, fz_stext_device *dev, fz_font *font, int 
 	}
 
 	/* Add synthetic space */
-	if (add_space)
+	if (add_space && !(dev->flags & FZ_STEXT_INHIBIT_SPACES))
 		add_char_to_line(ctx, page, cur_line, trm, font, size, ' ', &dev->pen, &p);
 
 	add_char_to_line(ctx, page, cur_line, trm, font, size, c, &p, &q);
@@ -499,9 +514,13 @@ fz_stext_fill_text(fz_context *ctx, fz_device *dev, const fz_text *text, fz_matr
 {
 	fz_stext_device *tdev = (fz_stext_device*)dev;
 	fz_text_span *span;
+	if (text == tdev->lasttext)
+		return;
 	tdev->new_obj = 1;
 	for (span = text->head; span; span = span->next)
 		fz_stext_extract(ctx, tdev, span, ctm);
+	fz_drop_text(ctx, tdev->lasttext);
+	tdev->lasttext = fz_keep_text(ctx, text);
 }
 
 static void
@@ -510,9 +529,13 @@ fz_stext_stroke_text(fz_context *ctx, fz_device *dev, const fz_text *text, const
 {
 	fz_stext_device *tdev = (fz_stext_device*)dev;
 	fz_text_span *span;
+	if (text == tdev->lasttext)
+		return;
 	tdev->new_obj = 1;
 	for (span = text->head; span; span = span->next)
 		fz_stext_extract(ctx, tdev, span, ctm);
+	fz_drop_text(ctx, tdev->lasttext);
+	tdev->lasttext = fz_keep_text(ctx, text);
 }
 
 static void
@@ -520,9 +543,13 @@ fz_stext_clip_text(fz_context *ctx, fz_device *dev, const fz_text *text, fz_matr
 {
 	fz_stext_device *tdev = (fz_stext_device*)dev;
 	fz_text_span *span;
+	if (text == tdev->lasttext)
+		return;
 	tdev->new_obj = 1;
 	for (span = text->head; span; span = span->next)
 		fz_stext_extract(ctx, tdev, span, ctm);
+	fz_drop_text(ctx, tdev->lasttext);
+	tdev->lasttext = fz_keep_text(ctx, text);
 }
 
 static void
@@ -530,9 +557,13 @@ fz_stext_clip_stroke_text(fz_context *ctx, fz_device *dev, const fz_text *text, 
 {
 	fz_stext_device *tdev = (fz_stext_device*)dev;
 	fz_text_span *span;
+	if (text == tdev->lasttext)
+		return;
 	tdev->new_obj = 1;
 	for (span = text->head; span; span = span->next)
 		fz_stext_extract(ctx, tdev, span, ctm);
+	fz_drop_text(ctx, tdev->lasttext);
+	tdev->lasttext = fz_keep_text(ctx, text);
 }
 
 static void
@@ -540,9 +571,13 @@ fz_stext_ignore_text(fz_context *ctx, fz_device *dev, const fz_text *text, fz_ma
 {
 	fz_stext_device *tdev = (fz_stext_device*)dev;
 	fz_text_span *span;
+	if (text == tdev->lasttext)
+		return;
 	tdev->new_obj = 1;
 	for (span = text->head; span; span = span->next)
 		fz_stext_extract(ctx, tdev, span, ctm);
+	fz_drop_text(ctx, tdev->lasttext);
+	tdev->lasttext = fz_keep_text(ctx, text);
 }
 
 /* Images and shadings */
@@ -633,7 +668,13 @@ fz_stext_close_device(fz_context *ctx, fz_device *dev)
 		for (line = block->u.t.first_line; line; line = line->next)
 		{
 			for (ch = line->first_char; ch; ch = ch->next)
-				line->bbox = fz_union_rect(line->bbox, fz_rect_from_quad(ch->quad));
+			{
+				fz_rect ch_box = fz_rect_from_quad(ch->quad);
+				if (ch == line->first_char)
+					line->bbox = ch_box;
+				else
+					line->bbox = fz_union_rect(line->bbox, ch_box);
+			}
 			block->bbox = fz_union_rect(block->bbox, line->bbox);
 		}
 	}
@@ -645,8 +686,13 @@ fz_stext_close_device(fz_context *ctx, fz_device *dev)
 static void
 fz_stext_drop_device(fz_context *ctx, fz_device *dev)
 {
+	fz_stext_device *tdev = (fz_stext_device*)dev;
+	fz_drop_text(ctx, tdev->lasttext);
 }
 
+/*
+	Parse stext device options from a comma separated key-value string.
+*/
 fz_stext_options *
 fz_parse_stext_options(fz_context *ctx, fz_stext_options *opts, const char *string)
 {
@@ -660,10 +706,27 @@ fz_parse_stext_options(fz_context *ctx, fz_stext_options *opts, const char *stri
 		opts->flags |= FZ_STEXT_PRESERVE_WHITESPACE;
 	if (fz_has_option(ctx, string, "preserve-images", &val) && fz_option_eq(val, "yes"))
 		opts->flags |= FZ_STEXT_PRESERVE_IMAGES;
+	if (fz_has_option(ctx, string, "inhibit-spaces", &val) && fz_option_eq(val, "yes"))
+		opts->flags |= FZ_STEXT_INHIBIT_SPACES;
 
 	return opts;
 }
 
+/*
+	Create a device to extract the text on a page.
+
+	Gather the text on a page into blocks and lines.
+
+	The reading order is taken from the order the text is drawn in the
+	source file, so may not be accurate.
+
+	page: The text page to which content should be added. This will
+	usually be a newly created (empty) text page, but it can be one
+	containing data already (for example when merging multiple pages,
+	or watermarking).
+
+	options: Options to configure the stext device.
+*/
 fz_device *
 fz_new_stext_device(fz_context *ctx, fz_stext_page *page, const fz_stext_options *opts)
 {
@@ -680,18 +743,20 @@ fz_new_stext_device(fz_context *ctx, fz_stext_page *page, const fz_stext_options
 
 	if (opts && (opts->flags & FZ_STEXT_PRESERVE_IMAGES))
 	{
-		dev->super.hints |= FZ_MAINTAIN_CONTAINER_STACK;
 		dev->super.fill_shade = fz_stext_fill_shade;
 		dev->super.fill_image = fz_stext_fill_image;
 		dev->super.fill_image_mask = fz_stext_fill_image_mask;
 	}
 
+	if (opts)
+		dev->flags = opts->flags;
 	dev->page = page;
 	dev->pen.x = 0;
 	dev->pen.y = 0;
 	dev->trm = fz_identity;
 	dev->lastchar = ' ';
 	dev->curdir = 1;
+	dev->lasttext = NULL;
 
 	return (fz_device*)dev;
 }

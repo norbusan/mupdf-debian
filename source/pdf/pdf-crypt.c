@@ -737,7 +737,7 @@ static void pdf_docenc_from_utf8(char *password, const char *utf8, int n)
 		utf8 += fz_chartorune(&c, utf8);
 		for (k = 0; k < 256; k++)
 		{
-			if (c == pdf_doc_encoding[k])
+			if (c == fz_unicode_from_pdf_doc_encoding[k])
 			{
 				password[i++] = k;
 				break;
@@ -754,6 +754,17 @@ static void pdf_saslprep_from_utf8(char *password, const char *utf8, int n)
 	fz_strlcpy(password, utf8, n);
 }
 
+/*
+	Attempt to authenticate a
+	password.
+
+	Returns 0 for failure, non-zero for success.
+
+	In the non-zero case:
+		bit 0 set => no password required
+		bit 1 set => user password authenticated
+		bit 2 set => owner password authenticated
+*/
 int
 pdf_authenticate_password(fz_context *ctx, pdf_document *doc, const char *pwd_utf8)
 {

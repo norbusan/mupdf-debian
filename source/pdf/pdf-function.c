@@ -141,37 +141,6 @@ struct ps_stack_s
 	int sp;
 };
 
-void
-pdf_print_ps_stack(fz_context *ctx, fz_output *out, ps_stack *st)
-{
-	int i;
-
-	fz_write_printf(ctx, out, "stack:");
-
-	for (i = 0; i < st->sp; i++)
-	{
-		switch (st->stack[i].type)
-		{
-		case PS_BOOL:
-			if (st->stack[i].u.b)
-				fz_write_printf(ctx, out, " true");
-			else
-				fz_write_printf(ctx, out, " false");
-			break;
-
-		case PS_INT:
-			fz_write_printf(ctx, out, " %d", st->stack[i].u.i);
-			break;
-
-		case PS_REAL:
-			fz_write_printf(ctx, out, " %g", st->stack[i].u.f);
-			break;
-		}
-	}
-
-	fz_write_printf(ctx, out, "\n");
-}
-
 static void
 ps_init_stack(ps_stack *st)
 {
@@ -870,12 +839,10 @@ load_postscript_func(fz_context *ctx, pdf_function *func, pdf_obj *dict)
 	int codeptr;
 	pdf_lexbuf buf;
 	pdf_token tok;
-	int locked = 0;
 
 	pdf_lexbuf_init(ctx, &buf, PDF_LEXBUF_SMALL);
 
 	fz_var(stream);
-	fz_var(locked);
 
 	fz_try(ctx)
 	{
@@ -944,8 +911,6 @@ load_sample_func(fz_context *ctx, pdf_function *func, pdf_obj *dict)
 	int samplecount;
 	int bps;
 	int i;
-
-	fz_var(stream);
 
 	func->u.sa.samples = NULL;
 
@@ -1093,7 +1058,7 @@ eval_sample_func(fz_context *ctx, pdf_function *func, const float *in, float *ou
 		x = fz_clamp(x, 0, func->u.sa.size[i] - 1);
 		e0[i] = floorf(x);
 		e1[i] = ceilf(x);
-		efrac[i] = x - floorf(x);
+		efrac[i] = x - e0[i];
 	}
 
 	scale[0] = func->n;
@@ -1365,7 +1330,7 @@ eval_stitching_func(fz_context *ctx, pdf_function *func, float in, float *out)
 
 	in = lerp(in, low, high, func->u.st.encode[i * 2 + 0], func->u.st.encode[i * 2 + 1]);
 
-	pdf_eval_function(ctx, func->u.st.funcs[i], &in, 1, out, func->u.st.funcs[i]->n);
+	pdf_eval_function(ctx, func->u.st.funcs[i], &in, 1, out, func->n);
 }
 
 /*
@@ -1420,9 +1385,9 @@ pdf_eval_function(fz_context *ctx, pdf_function *func, const float *in, int inle
 
 	if (inlen < func->m)
 	{
-		for (i = 0; i < func->m; ++i)
+		for (i = 0; i < inlen; ++i)
 			fakein[i] = in[i];
-		for (; i < inlen; ++i)
+		for (; i < func->m; ++i)
 			fakein[i] = 0;
 		in = fakein;
 	}

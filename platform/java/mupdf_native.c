@@ -54,7 +54,6 @@ static JavaVM *jvm = NULL;
 
 /* All the cached classes/mids/fids we need. */
 
-static jclass cls_Annotation;
 static jclass cls_Buffer;
 static jclass cls_ColorSpace;
 static jclass cls_Cookie;
@@ -78,6 +77,7 @@ static jclass cls_OutOfMemoryError;
 static jclass cls_Outline;
 static jclass cls_PDFAnnotation;
 static jclass cls_PDFDocument;
+static jclass cls_PDFDocument_JsEventListener;
 static jclass cls_PDFGraftMap;
 static jclass cls_PDFObject;
 static jclass cls_PDFPage;
@@ -93,6 +93,7 @@ static jclass cls_SeekableInputStream;
 static jclass cls_SeekableOutputStream;
 static jclass cls_SeekableStream;
 static jclass cls_Shade;
+static jclass cls_String;
 static jclass cls_StrokeState;
 static jclass cls_StructuredText;
 static jclass cls_StructuredTextWalker;
@@ -102,8 +103,8 @@ static jclass cls_TextChar;
 static jclass cls_TextLine;
 static jclass cls_TextWalker;
 static jclass cls_TryLaterException;
+static jclass cls_PDFWidget;
 
-static jfieldID fid_Annotation_pointer;
 static jfieldID fid_Buffer_pointer;
 static jfieldID fid_ColorSpace_pointer;
 static jfieldID fid_Cookie_pointer;
@@ -157,8 +158,13 @@ static jfieldID fid_TextChar_c;
 static jfieldID fid_TextLine_bbox;
 static jfieldID fid_TextLine_chars;
 static jfieldID fid_Text_pointer;
+static jfieldID fid_PDFWidget_fieldFlags;
+static jfieldID fid_PDFWidget_fieldType;
+static jfieldID fid_PDFWidget_maxLen;
+static jfieldID fid_PDFWidget_options;
+static jfieldID fid_PDFWidget_pointer;
+static jfieldID fid_PDFWidget_textFormat;
 
-static jmethodID mid_Annotation_init;
 static jmethodID mid_ColorSpace_fromPointer;
 static jmethodID mid_ColorSpace_init;
 static jmethodID mid_Device_beginGroup;
@@ -194,6 +200,7 @@ static jmethodID mid_Object_toString;
 static jmethodID mid_Outline_init;
 static jmethodID mid_PDFAnnotation_init;
 static jmethodID mid_PDFDocument_init;
+static jmethodID mid_PDFDocument_JsEventListener_onAlert;
 static jmethodID mid_PDFGraftMap_init;
 static jmethodID mid_PDFObject_init;
 static jmethodID mid_PDFPage_init;
@@ -225,6 +232,7 @@ static jmethodID mid_TextChar_init;
 static jmethodID mid_TextLine_init;
 static jmethodID mid_TextWalker_showGlyph;
 static jmethodID mid_Text_init;
+static jmethodID mid_PDFWidget_init;
 
 #ifdef _WIN32
 static DWORD context_key;
@@ -301,6 +309,17 @@ static int check_enums()
 	valid &= com_artifex_mupdf_fitz_PDFAnnotation_TYPE_3D == PDF_ANNOT_3D;
 	valid &= com_artifex_mupdf_fitz_PDFAnnotation_TYPE_UNKNOWN == PDF_ANNOT_UNKNOWN;
 
+	valid &= com_artifex_mupdf_fitz_PDFAnnotation_IS_INVISIBLE == PDF_ANNOT_IS_INVISIBLE;
+	valid &= com_artifex_mupdf_fitz_PDFAnnotation_IS_HIDDEN == PDF_ANNOT_IS_HIDDEN;
+	valid &= com_artifex_mupdf_fitz_PDFAnnotation_IS_PRINT == PDF_ANNOT_IS_PRINT;
+	valid &= com_artifex_mupdf_fitz_PDFAnnotation_IS_NO_ZOOM == PDF_ANNOT_IS_NO_ZOOM;
+	valid &= com_artifex_mupdf_fitz_PDFAnnotation_IS_NO_ROTATE == PDF_ANNOT_IS_NO_ROTATE;
+	valid &= com_artifex_mupdf_fitz_PDFAnnotation_IS_NO_VIEW == PDF_ANNOT_IS_NO_VIEW;
+	valid &= com_artifex_mupdf_fitz_PDFAnnotation_IS_READ_ONLY == PDF_ANNOT_IS_READ_ONLY;
+	valid &= com_artifex_mupdf_fitz_PDFAnnotation_IS_LOCKED == PDF_ANNOT_IS_LOCKED;
+	valid &= com_artifex_mupdf_fitz_PDFAnnotation_IS_TOGGLE_NO_VIEW == PDF_ANNOT_IS_TOGGLE_NO_VIEW;
+	valid &= com_artifex_mupdf_fitz_PDFAnnotation_IS_LOCKED_CONTENTS == PDF_ANNOT_IS_LOCKED_CONTENTS;
+
 	valid &= com_artifex_mupdf_fitz_StrokeState_LINE_CAP_BUTT == FZ_LINECAP_BUTT;
 	valid &= com_artifex_mupdf_fitz_StrokeState_LINE_CAP_ROUND == FZ_LINECAP_ROUND;
 	valid &= com_artifex_mupdf_fitz_StrokeState_LINE_CAP_SQUARE == FZ_LINECAP_SQUARE;
@@ -315,6 +334,21 @@ static int check_enums()
 	valid &= com_artifex_mupdf_fitz_StructuredText_SELECT_WORDS == FZ_SELECT_WORDS;
 	valid &= com_artifex_mupdf_fitz_StructuredText_SELECT_LINES == FZ_SELECT_LINES;
 
+	valid &= com_artifex_mupdf_fitz_PDFWidget_TYPE_UNKNOWN == PDF_WIDGET_TYPE_UNKNOWN;
+	valid &= com_artifex_mupdf_fitz_PDFWidget_TYPE_BUTTON == PDF_WIDGET_TYPE_BUTTON;
+	valid &= com_artifex_mupdf_fitz_PDFWidget_TYPE_CHECKBOX == PDF_WIDGET_TYPE_CHECKBOX;
+	valid &= com_artifex_mupdf_fitz_PDFWidget_TYPE_COMBOBOX == PDF_WIDGET_TYPE_COMBOBOX;
+	valid &= com_artifex_mupdf_fitz_PDFWidget_TYPE_LISTBOX == PDF_WIDGET_TYPE_LISTBOX;
+	valid &= com_artifex_mupdf_fitz_PDFWidget_TYPE_RADIOBUTTON == PDF_WIDGET_TYPE_RADIOBUTTON;
+	valid &= com_artifex_mupdf_fitz_PDFWidget_TYPE_SIGNATURE == PDF_WIDGET_TYPE_SIGNATURE;
+	valid &= com_artifex_mupdf_fitz_PDFWidget_TYPE_TEXT == PDF_WIDGET_TYPE_TEXT;
+
+	valid &= com_artifex_mupdf_fitz_PDFWidget_TX_FORMAT_NONE == PDF_WIDGET_TX_FORMAT_NONE;
+	valid &= com_artifex_mupdf_fitz_PDFWidget_TX_FORMAT_NUMBER == PDF_WIDGET_TX_FORMAT_NUMBER;
+	valid &= com_artifex_mupdf_fitz_PDFWidget_TX_FORMAT_SPECIAL == PDF_WIDGET_TX_FORMAT_SPECIAL;
+	valid &= com_artifex_mupdf_fitz_PDFWidget_TX_FORMAT_DATE == PDF_WIDGET_TX_FORMAT_DATE;
+	valid &= com_artifex_mupdf_fitz_PDFWidget_TX_FORMAT_TIME == PDF_WIDGET_TX_FORMAT_TIME;
+
 	return valid ? 1 : 0;
 }
 
@@ -322,10 +356,7 @@ static int check_enums()
 
 static void jni_throw(JNIEnv *env, int type, const char *mess)
 {
-	if (type == FZ_ERROR_TRYLATER)
-		(*env)->ThrowNew(env, cls_TryLaterException, mess);
-	else
-		(*env)->ThrowNew(env, cls_RuntimeException, mess);
+	(*env)->ThrowNew(env, cls_RuntimeException, mess);
 }
 
 static void jni_rethrow(JNIEnv *env, fz_context *ctx)
@@ -487,10 +518,6 @@ static int find_fids(JNIEnv *env)
 	int err = 0;
 	int getvmErr;
 
-	cls_Annotation = get_class(&err, env, PKG"Annotation");
-	fid_Annotation_pointer = get_field(&err, env, "pointer", "J");
-	mid_Annotation_init = get_method(&err, env, "<init>", "(J)V");
-
 	cls_Buffer = get_class(&err, env, PKG"Buffer");
 	fid_Buffer_pointer = get_field(&err, env, "pointer", "J");
 
@@ -591,6 +618,9 @@ static int find_fids(JNIEnv *env)
 	fid_PDFDocument_pointer = get_field(&err, env, "pointer", "J");
 	mid_PDFDocument_init = get_method(&err, env, "<init>", "(J)V");
 
+	cls_PDFDocument_JsEventListener = get_class(&err, env, PKG"PDFDocument$JsEventListener");
+	mid_PDFDocument_JsEventListener_onAlert = get_method(&err, env, "onAlert", "(Ljava/lang/String;)V");
+
 	cls_PDFGraftMap = get_class(&err, env, PKG"PDFGraftMap");
 	fid_PDFGraftMap_pointer = get_field(&err, env, "pointer", "J");
 	mid_PDFGraftMap_init = get_method(&err, env, "<init>", "(J)V");
@@ -645,6 +675,8 @@ static int find_fids(JNIEnv *env)
 	fid_Shade_pointer = get_field(&err, env, "pointer", "J");
 	mid_Shade_init = get_method(&err, env, "<init>", "(J)V");
 
+	cls_String = get_class(&err, env,  "java/lang/String");
+
 	cls_StrokeState = get_class(&err, env, PKG"StrokeState");
 	fid_StrokeState_pointer = get_field(&err, env, "pointer", "J");
 	mid_StrokeState_init = get_method(&err, env, "<init>", "(J)V");
@@ -682,6 +714,15 @@ static int find_fids(JNIEnv *env)
 
 	cls_TextWalker = get_class(&err, env, PKG"TextWalker");
 	mid_TextWalker_showGlyph = get_method(&err, env, "showGlyph", "(L"PKG"Font;L"PKG"Matrix;IIZ)V");
+
+	cls_PDFWidget = get_class(&err, env, PKG"PDFWidget");
+	fid_PDFWidget_pointer = get_field(&err, env, "pointer", "J");
+	fid_PDFWidget_fieldType = get_field(&err, env, "fieldType", "I");
+	fid_PDFWidget_textFormat = get_field(&err, env, "textFormat", "I");
+	fid_PDFWidget_maxLen = get_field(&err, env, "maxLen", "I");
+	fid_PDFWidget_fieldFlags = get_field(&err, env, "fieldFlags", "I");
+	fid_PDFWidget_options = get_field(&err, env, "options", "[Ljava/lang/String;");
+	mid_PDFWidget_init = get_method(&err, env, "<init>", "(J)V");
 
 	cls_TryLaterException = get_class(&err, env, PKG"TryLaterException");
 
@@ -746,7 +787,6 @@ static void jni_detach_thread(int detach)
 
 static void lose_fids(JNIEnv *env)
 {
-	(*env)->DeleteGlobalRef(env, cls_Annotation);
 	(*env)->DeleteGlobalRef(env, cls_Buffer);
 	(*env)->DeleteGlobalRef(env, cls_ColorSpace);
 	(*env)->DeleteGlobalRef(env, cls_Cookie);
@@ -773,6 +813,7 @@ static void lose_fids(JNIEnv *env)
 	(*env)->DeleteGlobalRef(env, cls_PathWalker);
 	(*env)->DeleteGlobalRef(env, cls_PDFAnnotation);
 	(*env)->DeleteGlobalRef(env, cls_PDFDocument);
+	(*env)->DeleteGlobalRef(env, cls_PDFDocument_JsEventListener);
 	(*env)->DeleteGlobalRef(env, cls_PDFPage);
 	(*env)->DeleteGlobalRef(env, cls_PDFGraftMap);
 	(*env)->DeleteGlobalRef(env, cls_PDFObject);
@@ -785,6 +826,7 @@ static void lose_fids(JNIEnv *env)
 	(*env)->DeleteGlobalRef(env, cls_SeekableInputStream);
 	(*env)->DeleteGlobalRef(env, cls_SeekableOutputStream);
 	(*env)->DeleteGlobalRef(env, cls_Shade);
+	(*env)->DeleteGlobalRef(env, cls_String);
 	(*env)->DeleteGlobalRef(env, cls_StrokeState);
 	(*env)->DeleteGlobalRef(env, cls_StructuredText);
 	(*env)->DeleteGlobalRef(env, cls_StructuredTextWalker);
@@ -794,6 +836,7 @@ static void lose_fids(JNIEnv *env)
 	(*env)->DeleteGlobalRef(env, cls_TextLine);
 	(*env)->DeleteGlobalRef(env, cls_TextWalker);
 	(*env)->DeleteGlobalRef(env, cls_TryLaterException);
+	(*env)->DeleteGlobalRef(env, cls_PDFWidget);
 }
 
 #ifdef HAVE_ANDROID
@@ -845,10 +888,6 @@ static fz_font *load_noto_try(fz_context *ctx, const char *stem)
 }
 
 enum { JP, KR, SC, TC };
-
-#define NOTO3(NAME1, NAME2, NAME3) load_noto3(ctx, NAME1 "-Regular", NAME2 "-Regular", NAME3 "-Regular")
-#define NOTO2(NAME1, NAME2) load_noto3(ctx, NAME1 "-Regular", NAME2 "-Regular", NULL)
-#define NOTO(NAME) load_noto_try(ctx, NAME)
 
 fz_font *load_droid_fallback_font(fz_context *ctx, int script, int language, int serif, int bold, int italic)
 {
@@ -1012,7 +1051,6 @@ fz_font *load_droid_fallback_font(fz_context *ctx, int script, int language, int
 	case UCDN_SCRIPT_NUSHU: return load_noto_try(ctx, "Nushu");
 	case UCDN_SCRIPT_SOYOMBO: return load_noto_try(ctx, "Soyombo");
 	case UCDN_SCRIPT_ZANABAZAR_SQUARE: return load_noto_try(ctx, "ZanabazarSquare");
-
 	}
 	return NULL;
 }
@@ -1353,26 +1391,6 @@ static inline jfloatArray to_jfloatArray(fz_context *ctx, JNIEnv *env, const flo
 
 /* Conversion functions: C to Java. None of these throw fitz exceptions. */
 
-static inline jobject to_Annotation_safe(fz_context *ctx, JNIEnv *env, fz_annot *annot)
-{
-	jobject jannot;
-	pdf_annot *pannot;
-
-	if (!ctx || !annot) return NULL;
-
-	fz_keep_annot(ctx, annot);
-
-	pannot = pdf_annot_from_fz_annot(ctx, annot);
-	if (pannot)
-		jannot = (*env)->NewObject(env, cls_PDFAnnotation, mid_PDFAnnotation_init, jlong_cast(annot));
-	else
-		jannot = (*env)->NewObject(env, cls_Annotation, mid_Annotation_init, jlong_cast(annot));
-	if (!jannot)
-		fz_drop_annot(ctx, annot);
-
-	return jannot;
-}
-
 static inline jint to_ColorParams_safe(fz_context *ctx, JNIEnv *env, const fz_color_params *cp)
 {
 	if (!ctx || !cp)
@@ -1501,6 +1519,20 @@ static inline jobject to_Outline_safe(fz_context *ctx, JNIEnv *env, fz_document 
 	return jarr;
 }
 
+static inline jobject to_PDFAnnotation_safe(fz_context *ctx, JNIEnv *env, pdf_annot *annot)
+{
+	jobject jannot;
+
+	if (!ctx || !annot) return NULL;
+
+	pdf_keep_annot(ctx, annot);
+	jannot = (*env)->NewObject(env, cls_PDFAnnotation, mid_PDFAnnotation_init, jlong_cast(annot));
+	if (!jannot)
+		pdf_drop_annot(ctx, annot);
+
+	return jannot;
+}
+
 static inline jobject to_PDFObject_safe(fz_context *ctx, JNIEnv *env, jobject pdf, pdf_obj *obj)
 {
 	jobject jobj;
@@ -1523,13 +1555,6 @@ static inline jobject to_Point_safe(fz_context *ctx, JNIEnv *env, fz_point point
 	if (!ctx) return NULL;
 
 	return (*env)->NewObject(env, cls_Point, mid_Point_init, point.x, point.y);
-}
-
-static inline jobject to_Rect_safe(fz_context *ctx, JNIEnv *env, fz_rect rect)
-{
-	if (!ctx) return NULL;
-
-	return (*env)->NewObject(env, cls_Rect, mid_Rect_init, rect.x0, rect.y0, rect.x1, rect.y1);
 }
 
 static inline jobject to_Quad_safe(fz_context *ctx, JNIEnv *env, fz_quad quad)
@@ -1562,6 +1587,39 @@ static inline jobjectArray to_jQuadArray_safe(fz_context *ctx, JNIEnv *env, cons
 		if ((*env)->ExceptionCheck(env)) return NULL;
 
 		(*env)->DeleteLocalRef(env, jquad);
+	}
+
+	return arr;
+}
+
+static inline jobject to_Rect_safe(fz_context *ctx, JNIEnv *env, fz_rect rect)
+{
+	if (!ctx) return NULL;
+
+	return (*env)->NewObject(env, cls_Rect, mid_Rect_init, rect.x0, rect.y0, rect.x1, rect.y1);
+}
+
+static inline jobjectArray to_StringArray_safe(fz_context *ctx, JNIEnv *env, const char **strings, int n)
+{
+	jobjectArray arr;
+	int i;
+
+	if (!ctx || !strings) return NULL;
+
+	arr = (*env)->NewObjectArray(env, n, cls_String, NULL);
+	if (!arr) return NULL;
+
+	for (i = 0; i < n; i++)
+	{
+		jobject jstring;
+
+		jstring = (*env)->NewStringUTF(env, strings[i]);
+		if (!jstring) return NULL;
+
+		(*env)->SetObjectArrayElement(env, arr, i, jstring);
+		if ((*env)->ExceptionCheck(env)) return NULL;
+
+		(*env)->DeleteLocalRef(env, jstring);
 	}
 
 	return arr;
@@ -1631,6 +1689,19 @@ static inline jobject to_Page_safe_own(fz_context *ctx, JNIEnv *env, fz_page *pa
 	return jobj;
 }
 
+static inline jobject to_PDFAnnotation_safe_own(fz_context *ctx, JNIEnv *env, pdf_annot *annot)
+{
+	jobject jannot;
+
+	if (!ctx || !annot) return NULL;
+
+	jannot = (*env)->NewObject(env, cls_PDFAnnotation, mid_PDFAnnotation_init, jlong_cast(annot));
+	if (!jannot)
+		pdf_drop_annot(ctx, annot);
+
+	return jannot;
+}
+
 static inline jobject to_PDFGraftMap_safe_own(fz_context *ctx, JNIEnv *env, jobject pdf, pdf_graft_map *map)
 {
 	jobject jmap;
@@ -1655,6 +1726,60 @@ static inline jobject to_PDFObject_safe_own(fz_context *ctx, JNIEnv *env, jobjec
 		pdf_drop_obj(ctx, obj);
 
 	return jobj;
+}
+
+static inline jobject to_PDFWidget(fz_context *ctx, JNIEnv *env, pdf_widget *widget)
+{
+	jobject jwidget;
+	int nopts;
+	const char **opts = NULL;
+	jobjectArray jopts = NULL;
+
+	fz_var(opts);
+
+	pdf_keep_annot(ctx, widget);
+	jwidget = (*env)->NewObject(env, cls_PDFWidget, mid_PDFWidget_init, jlong_cast(widget));
+	if (!jwidget)
+	{
+		pdf_drop_annot(ctx, widget);
+		return NULL;
+	}
+
+	fz_try(ctx)
+	{
+		int fieldType = pdf_widget_type(ctx, widget);
+		int fieldFlags = pdf_field_flags(ctx, widget->obj);
+		(*env)->SetIntField(env, jwidget, fid_PDFWidget_fieldType, fieldType);
+		(*env)->SetIntField(env, jwidget, fid_PDFWidget_fieldFlags, fieldFlags);
+		if (fieldType == PDF_WIDGET_TYPE_TEXT)
+		{
+			(*env)->SetIntField(env, jwidget, fid_PDFWidget_maxLen, pdf_text_widget_max_len(ctx, widget->page->doc, widget));
+			(*env)->SetIntField(env, jwidget, fid_PDFWidget_textFormat, pdf_text_widget_format(ctx, widget->page->doc, widget));
+		}
+		if (fieldType == PDF_WIDGET_TYPE_COMBOBOX || fieldType == PDF_WIDGET_TYPE_LISTBOX)
+		{
+			nopts = pdf_choice_widget_options(ctx, widget->page->doc, widget, 0, NULL);
+			if (nopts > 0)
+			{
+				opts = fz_malloc(ctx, nopts * sizeof(*opts));
+				pdf_choice_widget_options(ctx, widget->page->doc, widget, 0, opts);
+				jopts = to_StringArray_safe(ctx, env, opts, nopts);
+				if (jopts)
+					(*env)->SetObjectField(env, jwidget, fid_PDFWidget_options, jopts);
+			}
+		}
+	}
+	fz_always(ctx)
+	{
+		fz_free(ctx, opts);
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+		return NULL;
+	}
+
+	return jwidget;
 }
 
 static inline jobject to_Pixmap_safe_own(fz_context *ctx, JNIEnv *env, fz_pixmap *pixmap)
@@ -1684,15 +1809,6 @@ static inline jobject to_StructuredText_safe_own(fz_context *ctx, JNIEnv *env, f
 }
 
 /* Conversion functions: Java to C. These all throw java exceptions. */
-
-static inline fz_annot *from_Annotation(JNIEnv *env, jobject jobj)
-{
-	fz_annot *annot;
-	if (!jobj) return NULL;
-	annot = CAST(fz_annot *, (*env)->GetLongField(env, jobj, fid_Annotation_pointer));
-	if (!annot) jni_throw_null(env, "cannot use already destroyed Annotation");
-	return annot;
-}
 
 static inline fz_buffer *from_Buffer(JNIEnv *env, jobject jobj)
 {
@@ -1825,7 +1941,6 @@ static inline pdf_obj *from_PDFObject(JNIEnv *env, jobject jobj)
 	pdf_obj *obj;
 	if (!jobj) return NULL;
 	obj = CAST(pdf_obj *, (*env)->GetLongField(env, jobj, fid_PDFObject_pointer));
-	if (!obj) jni_throw_null(env, "cannot use already destroyed PDFObject");
 	return obj;
 }
 
@@ -1954,12 +2069,6 @@ static inline fz_rect from_Rect(JNIEnv *env, jobject jrect)
 
 /* Conversion functions: Java to C. None of these throw java exceptions. */
 
-static inline fz_annot *from_Annotation_safe(JNIEnv *env, jobject jobj)
-{
-	if (!jobj) return NULL;
-	return CAST(fz_annot *, (*env)->GetLongField(env, jobj, fid_Annotation_pointer));
-}
-
 static inline fz_buffer *from_Buffer_safe(JNIEnv *env, jobject jobj)
 {
 	if (!jobj) return NULL;
@@ -2038,6 +2147,12 @@ static inline fz_path *from_Path_safe(JNIEnv *env, jobject jobj)
 	return CAST(fz_path *, (*env)->GetLongField(env, jobj, fid_Path_pointer));
 }
 
+static inline pdf_annot *from_PDFAnnotation_safe(JNIEnv *env, jobject jobj)
+{
+	if (!jobj) return NULL;
+	return CAST(pdf_annot *, (*env)->GetLongField(env, jobj, fid_PDFAnnotation_pointer));
+}
+
 static inline pdf_document *from_PDFDocument_safe(JNIEnv *env, jobject jobj)
 {
 	if (!jobj) return NULL;
@@ -2054,6 +2169,12 @@ static inline pdf_obj *from_PDFObject_safe(JNIEnv *env, jobject jobj)
 {
 	if (!jobj) return NULL;
 	return CAST(pdf_obj *, (*env)->GetLongField(env, jobj, fid_PDFObject_pointer));
+}
+
+static inline pdf_widget *from_PDFWidget_safe(JNIEnv *env, jobject jobj)
+{
+	if (!jobj) return NULL;
+	return CAST(pdf_widget *, (*env)->GetLongField(env, jobj, fid_PDFWidget_pointer));
 }
 
 static inline fz_pixmap *from_Pixmap_safe(JNIEnv *env, jobject jobj)
@@ -3210,7 +3331,6 @@ FUN(NativeDevice_endLayer)(JNIEnv *env, jobject self)
 	fz_catch(ctx)
 		jni_rethrow(env, ctx);
 }
-
 
 JNIEXPORT void JNICALL
 FUN(NativeDevice_beginMask)(JNIEnv *env, jobject self, jobject jrect, jboolean luminosity, jobject jcs, jfloatArray jcolor, jint jcp)
@@ -4751,21 +4871,21 @@ FUN(Image_toPixmap)(JNIEnv *env, jobject self)
 /* Annotation Interface */
 
 JNIEXPORT void JNICALL
-FUN(Annotation_finalize)(JNIEnv *env, jobject self)
+FUN(PDFAnnotation_finalize)(JNIEnv *env, jobject self)
 {
 	fz_context *ctx = get_context(env);
-	fz_annot *annot = from_Annotation_safe(env, self);
+	pdf_annot *annot = from_PDFAnnotation_safe(env, self);
 
 	if (!ctx || !annot) return;
 
-	fz_drop_annot(ctx, annot);
+	pdf_drop_annot(ctx, annot);
 }
 
 JNIEXPORT void JNICALL
-FUN(Annotation_run)(JNIEnv *env, jobject self, jobject jdev, jobject jctm, jobject jcookie)
+FUN(PDFAnnotation_run)(JNIEnv *env, jobject self, jobject jdev, jobject jctm, jobject jcookie)
 {
 	fz_context *ctx = get_context(env);
-	fz_annot *annot = from_Annotation(env, self);
+	pdf_annot *annot = from_PDFAnnotation(env, self);
 	fz_device *dev = from_Device(env, jdev);
 	fz_matrix ctm = from_Matrix(env, jctm);
 	fz_cookie *cookie= from_Cookie(env, jcookie);
@@ -4779,37 +4899,18 @@ FUN(Annotation_run)(JNIEnv *env, jobject self, jobject jdev, jobject jctm, jobje
 	if (err)
 		return;
 	fz_try(ctx)
-		fz_run_annot(ctx, annot, dev, ctm, cookie);
+		pdf_run_annot(ctx, annot, dev, ctm, cookie);
 	fz_always(ctx)
 		unlockNativeDevice(env, info);
 	fz_catch(ctx)
 		jni_rethrow(env, ctx);
 }
 
-JNIEXPORT jlong JNICALL
-FUN(Annotation_advance)(JNIEnv *env, jobject self)
-{
-	fz_context *ctx = get_context(env);
-	fz_annot *annot = from_Annotation(env, self);
-
-	if (!ctx || !annot) return 0;
-
-	fz_try(ctx)
-		annot = fz_next_annot(ctx, annot);
-	fz_catch(ctx)
-	{
-		jni_rethrow(env, ctx);
-		return 0;
-	}
-
-	return jlong_cast(annot);
-}
-
 JNIEXPORT jobject JNICALL
-FUN(Annotation_toPixmap)(JNIEnv *env, jobject self, jobject jctm, jobject jcs, jboolean alpha)
+FUN(PDFAnnotation_toPixmap)(JNIEnv *env, jobject self, jobject jctm, jobject jcs, jboolean alpha)
 {
 	fz_context *ctx = get_context(env);
-	fz_annot *annot = from_Annotation(env, self);
+	pdf_annot *annot = from_PDFAnnotation(env, self);
 	fz_matrix ctm = from_Matrix(env, jctm);
 	fz_colorspace *cs = from_ColorSpace(env, jcs);
 	fz_pixmap *pixmap = NULL;
@@ -4817,7 +4918,7 @@ FUN(Annotation_toPixmap)(JNIEnv *env, jobject self, jobject jctm, jobject jcs, j
 	if (!ctx || !annot) return NULL;
 
 	fz_try(ctx)
-		pixmap = fz_new_pixmap_from_annot(ctx, annot, ctm, cs, alpha);
+		pixmap = pdf_new_pixmap_from_annot(ctx, annot, ctm, cs, NULL, alpha);
 	fz_catch(ctx)
 	{
 		jni_rethrow(env, ctx);
@@ -4828,16 +4929,16 @@ FUN(Annotation_toPixmap)(JNIEnv *env, jobject self, jobject jctm, jobject jcs, j
 }
 
 JNIEXPORT jobject JNICALL
-FUN(Annotation_getBounds)(JNIEnv *env, jobject self)
+FUN(PDFAnnotation_getBounds)(JNIEnv *env, jobject self)
 {
 	fz_context *ctx = get_context(env);
-	fz_annot *annot = from_Annotation(env, self);
+	pdf_annot *annot = from_PDFAnnotation(env, self);
 	fz_rect rect;
 
 	if (!ctx || !annot) return NULL;
 
 	fz_try(ctx)
-		rect = fz_bound_annot(ctx, annot);
+		rect = pdf_bound_annot(ctx, annot);
 	fz_catch(ctx)
 	{
 		jni_rethrow(env, ctx);
@@ -4848,16 +4949,16 @@ FUN(Annotation_getBounds)(JNIEnv *env, jobject self)
 }
 
 JNIEXPORT jobject JNICALL
-FUN(Annotation_toDisplayList)(JNIEnv *env, jobject self)
+FUN(PDFAnnotation_toDisplayList)(JNIEnv *env, jobject self)
 {
 	fz_context *ctx = get_context(env);
-	fz_annot *annot = from_Annotation(env, self);
+	pdf_annot *annot = from_PDFAnnotation(env, self);
 	fz_display_list *list = NULL;
 
 	if (!ctx || !annot) return NULL;
 
 	fz_try(ctx)
-		list = fz_new_display_list_from_annot(ctx, annot);
+		list = pdf_new_display_list_from_annot(ctx, annot);
 	fz_catch(ctx)
 	{
 		jni_rethrow(env, ctx);
@@ -4869,6 +4970,7 @@ FUN(Annotation_toDisplayList)(JNIEnv *env, jobject self)
 
 /* Document interface */
 
+#if FZ_ENABLE_GPRF
 static char *make_tmp_gproof_path(const char *path)
 {
 	FILE *f;
@@ -4906,6 +5008,7 @@ static char *make_tmp_gproof_path(const char *path)
 	LOGE("Rewritten to %s\n", buf);
 	return buf;
 }
+#endif
 
 JNIEXPORT jstring JNICALL
 FUN(Document_proofNative)(JNIEnv *env, jobject self, jstring jCurrentPath, jstring jPrintProfile, jstring jDisplayProfile, jint inResolution)
@@ -5003,6 +5106,8 @@ FUN(Document_openNativeWithStream)(JNIEnv *env, jclass cls, jobject jstream, jst
 
 	fz_var(state);
 	fz_var(stm);
+	fz_var(stream);
+	fz_var(array);
 
 	if (jmimetype)
 	{
@@ -5419,7 +5524,7 @@ FUN(Page_finalize)(JNIEnv *env, jobject self)
 }
 
 JNIEXPORT jobject JNICALL
-FUN(Page_toPixmap)(JNIEnv *env, jobject self, jobject jctm, jobject jcs, jboolean alpha)
+FUN(Page_toPixmap)(JNIEnv *env, jobject self, jobject jctm, jobject jcs, jboolean alpha, jboolean showExtra)
 {
 	fz_context *ctx = get_context(env);
 	fz_page *page = from_Page(env, self);
@@ -5430,7 +5535,12 @@ FUN(Page_toPixmap)(JNIEnv *env, jobject self, jobject jctm, jobject jcs, jboolea
 	if (!ctx || !page) return NULL;
 
 	fz_try(ctx)
-		pixmap = fz_new_pixmap_from_page(ctx, page, ctm, cs, alpha);
+	{
+		if (showExtra)
+			pixmap = fz_new_pixmap_from_page(ctx, page, ctm, cs, alpha);
+		else
+			pixmap = fz_new_pixmap_from_page_contents(ctx, page, ctm, cs, alpha);
+	}
 	fz_catch(ctx)
 	{
 		jni_rethrow(env, ctx);
@@ -5510,13 +5620,63 @@ FUN(Page_runPageContents)(JNIEnv *env, jobject self, jobject jdev, jobject jctm,
 		jni_rethrow(env, ctx);
 }
 
-JNIEXPORT jobject JNICALL
-FUN(Page_getAnnotations)(JNIEnv *env, jobject self)
+JNIEXPORT void JNICALL
+FUN(Page_runPageAnnots)(JNIEnv *env, jobject self, jobject jdev, jobject jctm, jobject jcookie)
 {
 	fz_context *ctx = get_context(env);
 	fz_page *page = from_Page(env, self);
-	fz_annot *annot = NULL;
-	fz_annot *annots = NULL;
+	fz_device *dev = from_Device(env, jdev);
+	fz_matrix ctm = from_Matrix(env, jctm);
+	fz_cookie *cookie = from_Cookie(env, jcookie);
+	NativeDeviceInfo *info;
+	int err;
+
+	if (!ctx || !page) return;
+	if (!dev) { jni_throw_arg(env, "device must not be null"); return; }
+
+	info = lockNativeDevice(env, jdev, &err);
+	if (err)
+		return;
+	fz_try(ctx)
+		fz_run_page_annots(ctx, page, dev, ctm, cookie);
+	fz_always(ctx)
+		unlockNativeDevice(env, info);
+	fz_catch(ctx)
+		jni_rethrow(env, ctx);
+}
+
+JNIEXPORT void JNICALL
+FUN(Page_runPageWidgets)(JNIEnv *env, jobject self, jobject jdev, jobject jctm, jobject jcookie)
+{
+	fz_context *ctx = get_context(env);
+	fz_page *page = from_Page(env, self);
+	fz_device *dev = from_Device(env, jdev);
+	fz_matrix ctm = from_Matrix(env, jctm);
+	fz_cookie *cookie = from_Cookie(env, jcookie);
+	NativeDeviceInfo *info;
+	int err;
+
+	if (!ctx || !page) return;
+	if (!dev) { jni_throw_arg(env, "device must not be null"); return; }
+
+	info = lockNativeDevice(env, jdev, &err);
+	if (err)
+		return;
+	fz_try(ctx)
+		fz_run_page_widgets(ctx, page, dev, ctm, cookie);
+	fz_always(ctx)
+		unlockNativeDevice(env, info);
+	fz_catch(ctx)
+		jni_rethrow(env, ctx);
+}
+
+JNIEXPORT jobject JNICALL
+FUN(PDFPage_getAnnotations)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_page *page = from_PDFPage(env, self);
+	pdf_annot *annot = NULL;
+	pdf_annot *annots = NULL;
 	jobject jannots = NULL;
 	int annot_count;
 	int i;
@@ -5526,11 +5686,11 @@ FUN(Page_getAnnotations)(JNIEnv *env, jobject self)
 	/* count the annotations */
 	fz_try(ctx)
 	{
-		annots = fz_first_annot(ctx, page);
+		annots = pdf_first_annot(ctx, page);
 
 		annot = annots;
 		for (annot_count = 0; annot; annot_count++)
-			annot = fz_next_annot(ctx, annot);
+			annot = pdf_next_annot(ctx, annot);
 	}
 	fz_catch(ctx)
 	{
@@ -5543,13 +5703,13 @@ FUN(Page_getAnnotations)(JNIEnv *env, jobject self)
 		return NULL;
 
 	/* now run through actually creating the annotation objects */
-	jannots = (*env)->NewObjectArray(env, annot_count, cls_Annotation, NULL);
+	jannots = (*env)->NewObjectArray(env, annot_count, cls_PDFAnnotation, NULL);
 	if (!jannots) return NULL;
 
 	annot = annots;
 	for (i = 0; annot && i < annot_count; i++)
 	{
-		jobject jannot = to_Annotation_safe(ctx, env, annot);
+		jobject jannot = to_PDFAnnotation_safe(ctx, env, annot);
 		if (!jannot) return NULL;
 
 		(*env)->SetObjectArrayElement(env, jannots, i, jannot);
@@ -5558,7 +5718,7 @@ FUN(Page_getAnnotations)(JNIEnv *env, jobject self)
 		(*env)->DeleteLocalRef(env, jannot);
 
 		fz_try(ctx)
-			annot = fz_next_annot(ctx, annot);
+			annot = pdf_next_annot(ctx, annot);
 		fz_catch(ctx)
 		{
 			jni_rethrow(env, ctx);
@@ -5567,6 +5727,63 @@ FUN(Page_getAnnotations)(JNIEnv *env, jobject self)
 	}
 
 	return jannots;
+}
+
+JNIEXPORT jobjectArray JNICALL
+FUN(PDFPage_getWidgetsNative)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_page *page = from_PDFPage(env, self);
+	pdf_widget *widget;
+	jobjectArray jwidgets = NULL;
+	int count = 0;
+
+	if (!ctx || !page)
+		return NULL;
+
+	fz_try(ctx)
+	{
+		for (widget = pdf_first_widget(ctx, page); widget; widget = pdf_next_widget(ctx, widget))
+			count++;
+	}
+	fz_catch(ctx)
+	{
+		count = 0;
+	}
+
+	if (count == 0)
+		return NULL;
+
+	jwidgets = (*env)->NewObjectArray(env, count, cls_PDFWidget, NULL);
+	if (!jwidgets)
+		return NULL;
+
+	fz_try(ctx)
+	{
+		int i = 0;
+
+		for (widget = pdf_first_widget(ctx, page); widget; widget = pdf_next_widget(ctx, widget))
+		{
+			jobject jwidget;
+
+			jwidget = to_PDFWidget(ctx, env, widget);
+			if (!jwidget)
+				fz_throw_java(ctx, env);
+
+			(*env)->SetObjectArrayElement(env, jwidgets, i, jwidget);
+			if ((*env)->ExceptionCheck(env))
+				fz_throw_java(ctx, env);
+
+			(*env)->DeleteLocalRef(env, jwidget);
+			i++;
+		}
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+	}
+
+	return jwidgets;
 }
 
 JNIEXPORT jobject JNICALL
@@ -5675,7 +5892,7 @@ FUN(Page_search)(JNIEnv *env, jobject self, jstring jneedle)
 }
 
 JNIEXPORT jobject JNICALL
-FUN(Page_toDisplayList)(JNIEnv *env, jobject self, jboolean no_annotations)
+FUN(Page_toDisplayList)(JNIEnv *env, jobject self, jboolean showExtra)
 {
 	fz_context *ctx = get_context(env);
 	fz_page *page = from_Page(env, self);
@@ -5684,10 +5901,10 @@ FUN(Page_toDisplayList)(JNIEnv *env, jobject self, jboolean no_annotations)
 	if (!ctx || !page) return NULL;
 
 	fz_try(ctx)
-		if (no_annotations)
-			list = fz_new_display_list_from_page_contents(ctx, page);
-		else
+		if (showExtra)
 			list = fz_new_display_list_from_page(ctx, page);
+		else
+			list = fz_new_display_list_from_page_contents(ctx, page);
 	fz_catch(ctx)
 	{
 		jni_rethrow(env, ctx);
@@ -6668,8 +6885,13 @@ FUN(PDFDocument_finalize)(JNIEnv *env, jobject self)
 {
 	fz_context *ctx = get_context(env);
 	pdf_document *pdf = from_PDFDocument_safe(env, self);
+	void *data = NULL;
 
 	if (!ctx || !pdf) return;
+
+	data = pdf_get_doc_event_callback_data(ctx, pdf);
+	if (data)
+		(*env)->DeleteGlobalRef(env, data);
 
 	fz_drop_document(ctx, &pdf->super);
 }
@@ -7125,7 +7347,6 @@ FUN(PDFDocument_addStreamString)(JNIEnv *env, jobject self, jstring jbuf, jobjec
 	pdf_obj *obj = from_PDFObject(env, jobj);
 	fz_buffer *buf = NULL;
 	const char *sbuf = NULL;
-	unsigned char *data = NULL;
 	pdf_obj *ind = NULL;
 
 	if (!ctx || !pdf) return NULL;
@@ -7138,10 +7359,7 @@ FUN(PDFDocument_addStreamString)(JNIEnv *env, jobject self, jstring jbuf, jobjec
 
 	fz_try(ctx)
 	{
-		size_t len = strlen(sbuf);
-		data = fz_malloc(ctx, len);
-		memcpy(data, sbuf, len);
-		buf = fz_new_buffer_from_data(ctx, data, len);
+		buf = fz_new_buffer_from_copied_data(ctx, (const unsigned char *)sbuf, strlen(sbuf));
 		ind = pdf_add_stream(ctx, pdf, buf, obj, compressed);
 	}
 	fz_always(ctx)
@@ -7192,7 +7410,6 @@ FUN(PDFDocument_addPageString)(JNIEnv *env, jobject self, jobject jmediabox, jin
 	pdf_obj *resources = from_PDFObject(env, jresources);
 	const char *scontents = NULL;
 	fz_buffer *contents = NULL;
-	unsigned char *data = NULL;
 	pdf_obj *ind = NULL;
 
 	if (!ctx || !pdf) return NULL;
@@ -7206,9 +7423,7 @@ FUN(PDFDocument_addPageString)(JNIEnv *env, jobject self, jobject jmediabox, jin
 
 	fz_try(ctx)
 	{
-		size_t len = strlen(scontents);
-		data = fz_malloc(ctx, len);
-		contents = fz_new_buffer_from_data(ctx, data, len);
+		contents = fz_new_buffer_from_copied_data(ctx, (const unsigned char *)scontents, strlen(scontents));
 		ind = pdf_add_page(ctx, pdf, mediabox, rotate, resources, contents);
 	}
 	fz_always(ctx)
@@ -7271,7 +7486,7 @@ FUN(PDFDocument_addImage)(JNIEnv *env, jobject self, jobject jimage)
 	if (!image) { jni_throw_arg(env, "image must not be null"); return NULL; }
 
 	fz_try(ctx)
-		ind = pdf_add_image(ctx, pdf, image, 0);
+		ind = pdf_add_image(ctx, pdf, image);
 	fz_catch(ctx)
 	{
 		jni_rethrow(env, ctx);
@@ -7365,7 +7580,7 @@ FUN(PDFDocument_canBeSavedIncrementally)(JNIEnv *env, jobject self)
 	return pdf_can_be_saved_incrementally(ctx, pdf) ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT jint JNICALL
+JNIEXPORT void JNICALL
 FUN(PDFDocument_nativeSaveWithStream)(JNIEnv *env, jobject self, jobject jstream, jstring joptions)
 {
 	fz_context *ctx = get_context(env);
@@ -7375,17 +7590,18 @@ FUN(PDFDocument_nativeSaveWithStream)(JNIEnv *env, jobject self, jobject jstream
 	jbyteArray array = NULL;
 	fz_output *out;
 	const char *options = NULL;
-	int errors = 0;
 	pdf_write_options pwo;
 
 	fz_var(state);
 	fz_var(out);
+	fz_var(stream);
+	fz_var(array);
 
 	if (joptions)
 	{
 		options = (*env)->GetStringUTFChars(env, joptions, NULL);
 		if (!options)
-			return 0;
+			return;
 	}
 
 	stream = (*env)->NewGlobalRef(env, jstream);
@@ -7393,7 +7609,7 @@ FUN(PDFDocument_nativeSaveWithStream)(JNIEnv *env, jobject self, jobject jstream
 	{
 		if (options)
 			(*env)->ReleaseStringUTFChars(env, joptions, options);
-		return 0;
+		return;
 	}
 
 	array = (*env)->NewByteArray(env, sizeof state->buffer);
@@ -7404,7 +7620,7 @@ FUN(PDFDocument_nativeSaveWithStream)(JNIEnv *env, jobject self, jobject jstream
 		if (options)
 			(*env)->ReleaseStringUTFChars(env, joptions, options);
 		(*env)->DeleteGlobalRef(env, stream);
-		return 0;
+		return;
 	}
 
 	fz_try(ctx)
@@ -7423,7 +7639,6 @@ FUN(PDFDocument_nativeSaveWithStream)(JNIEnv *env, jobject self, jobject jstream
 		array = NULL;
 
 		pdf_parse_write_options(ctx, &pwo, options);
-		pwo.errors = &errors;
 		pdf_write_document(ctx, pdf, out, &pwo);
 		fz_close_output(ctx, out);
 	}
@@ -7439,13 +7654,10 @@ FUN(PDFDocument_nativeSaveWithStream)(JNIEnv *env, jobject self, jobject jstream
 		if (array) (*env)->DeleteGlobalRef(env, array);
 		fz_free(ctx, state);
 		jni_rethrow(env, ctx);
-		return 0;
 	}
-
-	return errors;
 }
 
-JNIEXPORT jint JNICALL
+JNIEXPORT void JNICALL
 FUN(PDFDocument_save)(JNIEnv *env, jobject self, jstring jfilename, jstring joptions)
 {
 	fz_context *ctx = get_context(env);
@@ -7453,13 +7665,12 @@ FUN(PDFDocument_save)(JNIEnv *env, jobject self, jstring jfilename, jstring jopt
 	const char *filename = NULL;
 	const char *options = NULL;
 	pdf_write_options pwo;
-	int errors = 0;
 
-	if (!ctx || !pdf) return 0;
-	if (!jfilename) { jni_throw_arg(env, "filename must not be null"); return 0; }
+	if (!ctx || !pdf) return;
+	if (!jfilename) { jni_throw_arg(env, "filename must not be null"); return; }
 
 	filename = (*env)->GetStringUTFChars(env, jfilename, NULL);
-	if (!filename) return 0;
+	if (!filename) return;
 
 	if (joptions)
 	{
@@ -7467,14 +7678,13 @@ FUN(PDFDocument_save)(JNIEnv *env, jobject self, jstring jfilename, jstring jopt
 		if (!options)
 		{
 			(*env)->ReleaseStringUTFChars(env, jfilename, filename);
-			return 0;
+			return;
 		}
 	}
 
 	fz_try(ctx)
 	{
 		pdf_parse_write_options(ctx, &pwo, options);
-		pwo.errors = &errors;
 		pdf_save_document(ctx, pdf, filename, &pwo);
 	}
 	fz_always(ctx)
@@ -7485,8 +7695,6 @@ FUN(PDFDocument_save)(JNIEnv *env, jobject self, jstring jfilename, jstring jopt
 	}
 	fz_catch(ctx)
 		jni_rethrow(env, ctx);
-
-	return errors;
 }
 
 /* PDFObject interface */
@@ -7500,16 +7708,6 @@ FUN(PDFObject_finalize)(JNIEnv *env, jobject self)
 	if (!ctx || !obj) return;
 
 	pdf_drop_obj(ctx, obj);
-}
-
-JNIEXPORT jlong JNICALL
-FUN(PDFObject_newNull)(JNIEnv *env, jclass cls)
-{
-	fz_context *ctx = get_context(env);
-
-	if (!ctx) return 0;
-
-	return jlong_cast(PDF_NULL);
 }
 
 JNIEXPORT jint JNICALL
@@ -7871,7 +8069,6 @@ FUN(PDFObject_writeStreamString)(JNIEnv *env, jobject self, jstring jstr)
 	pdf_obj *obj = from_PDFObject(env, self);
 	pdf_document *pdf = pdf_get_bound_document(ctx, obj);
 	const char *str = NULL;
-	unsigned char *data = NULL;
 	fz_buffer *buf = NULL;
 
 	if (!ctx || !obj) return;
@@ -7885,10 +8082,7 @@ FUN(PDFObject_writeStreamString)(JNIEnv *env, jobject self, jstring jstr)
 
 	fz_try(ctx)
 	{
-		size_t len = strlen(str);
-		data = fz_malloc(ctx, len);
-		memcpy(data, str, len);
-		buf = fz_new_buffer_from_data(ctx, data, len);
+		buf = fz_new_buffer_from_copied_data(ctx, (const unsigned char *)str, strlen(str));
 		pdf_update_stream(ctx, pdf, obj, buf, 0);
 	}
 	fz_always(ctx)
@@ -7925,7 +8119,6 @@ FUN(PDFObject_writeRawStreamString)(JNIEnv *env, jobject self, jstring jstr)
 	pdf_obj *obj = from_PDFObject(env, self);
 	pdf_document *pdf = pdf_get_bound_document(ctx, obj);
 	const char *str = NULL;
-	unsigned char *data = NULL;
 	fz_buffer *buf = NULL;
 
 	if (!ctx || !obj) return;
@@ -7939,10 +8132,7 @@ FUN(PDFObject_writeRawStreamString)(JNIEnv *env, jobject self, jstring jstr)
 
 	fz_try(ctx)
 	{
-		size_t len = strlen(str);
-		data = fz_malloc(ctx, len);
-		memcpy(data, str, len);
-		buf = fz_new_buffer_from_data(ctx, data, len);
+		buf = fz_new_buffer_from_copied_data(ctx, (const unsigned char *)str, strlen(str));
 		pdf_update_stream(ctx, pdf, obj, buf, 1);
 	}
 	fz_always(ctx)
@@ -8130,6 +8320,8 @@ FUN(PDFObject_putDictionaryStringBoolean)(JNIEnv *env, jobject self, jstring jna
 		if (!name) return;
 	}
 
+	fz_var(key);
+
 	fz_try(ctx)
 	{
 		key = name ? pdf_new_name(ctx, name) : NULL;
@@ -8160,6 +8352,8 @@ FUN(PDFObject_putDictionaryStringInteger)(JNIEnv *env, jobject self, jstring jna
 		if (!name) return;
 	}
 
+	fz_var(key);
+
 	fz_try(ctx)
 	{
 		key = name ? pdf_new_name(ctx, name) : NULL;
@@ -8189,6 +8383,8 @@ FUN(PDFObject_putDictionaryStringFloat)(JNIEnv *env, jobject self, jstring jname
 		name = (*env)->GetStringUTFChars(env, jname, NULL);
 		if (!name) return;
 	}
+
+	fz_var(key);
 
 	fz_try(ctx)
 	{
@@ -8230,6 +8426,8 @@ FUN(PDFObject_putDictionaryStringString)(JNIEnv *env, jobject self, jstring jnam
 		}
 	}
 
+	fz_var(key);
+
 	fz_try(ctx)
 	{
 		key = name ? pdf_new_name(ctx, name) : NULL;
@@ -8265,6 +8463,8 @@ FUN(PDFObject_putDictionaryStringPDFObject)(JNIEnv *env, jobject self, jstring j
 		name = (*env)->GetStringUTFChars(env, jname, NULL);
 		if (!name) return;
 	}
+
+	fz_var(key);
 
 	fz_try(ctx)
 	{
@@ -8694,7 +8894,7 @@ FUN(PDFObject_pushPDFObject)(JNIEnv *env, jobject self, jobject jitem)
 }
 
 JNIEXPORT jstring JNICALL
-FUN(PDFObject_toString)(JNIEnv *env, jobject self, jboolean tight)
+FUN(PDFObject_toString)(JNIEnv *env, jobject self, jboolean tight, jboolean ascii)
 {
 	fz_context *ctx = get_context(env);
 	pdf_obj *obj = from_PDFObject_safe(env, self);
@@ -8708,9 +8908,7 @@ FUN(PDFObject_toString)(JNIEnv *env, jobject self, jboolean tight)
 
 	fz_try(ctx)
 	{
-		n = pdf_sprint_obj(ctx, NULL, 0, obj, tight);
-		s = fz_malloc(ctx, n + 1);
-		pdf_sprint_obj(ctx, s, n + 1, obj, tight);
+		s = pdf_sprint_obj(ctx, NULL, 0, &n, obj, tight, ascii);
 		string = (*env)->NewStringUTF(env, s);
 	}
 	fz_always(ctx)
@@ -8790,7 +8988,7 @@ FUN(PDFPage_createAnnotation)(JNIEnv *env, jobject self, jint subtype)
 		return NULL;
 	}
 
-	return to_Annotation_safe(ctx, env, (fz_annot*)annot);
+	return to_PDFAnnotation_safe_own(ctx, env, annot);
 }
 
 JNIEXPORT void JNICALL
@@ -9267,7 +9465,7 @@ FUN(PDFAnnotation_setQuadPoints)(JNIEnv *env, jobject self, jobject jqps)
 }
 
 JNIEXPORT void JNICALL
-FUN(PDFAnnotation_updateAppearance)(JNIEnv *env, jobject self)
+FUN(PDFAnnotation_eventEnter)(JNIEnv *env, jobject self)
 {
 	fz_context *ctx = get_context(env);
 	pdf_annot *annot = from_PDFAnnotation(env, self);
@@ -9275,7 +9473,90 @@ FUN(PDFAnnotation_updateAppearance)(JNIEnv *env, jobject self)
 	if (!ctx || !annot) return;
 
 	fz_try(ctx)
-		pdf_update_appearance(ctx, annot);
+	{
+		pdf_annot_event_enter(ctx, annot);
+		annot->is_hot = 1;
+	}
+	fz_catch(ctx)
+		jni_rethrow(env, ctx);
+}
+
+JNIEXPORT void JNICALL
+FUN(PDFAnnotation_eventExit)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_annot *annot = from_PDFAnnotation(env, self);
+
+	if (!ctx || !annot) return;
+
+	fz_try(ctx)
+	{
+		pdf_annot_event_exit(ctx, annot);
+		annot->is_hot = 0;
+	}
+	fz_catch(ctx)
+		jni_rethrow(env, ctx);
+}
+
+JNIEXPORT void JNICALL
+FUN(PDFAnnotation_eventDown)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_annot *annot = from_PDFAnnotation(env, self);
+
+	if (!ctx || !annot) return;
+
+	fz_try(ctx)
+	{
+		pdf_annot_event_down(ctx, annot);
+		annot->is_active = 1;
+	}
+	fz_catch(ctx)
+		jni_rethrow(env, ctx);
+}
+
+JNIEXPORT void JNICALL
+FUN(PDFAnnotation_eventUp)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_annot *annot = from_PDFAnnotation(env, self);
+
+	if (!ctx || !annot) return;
+
+	fz_try(ctx)
+	{
+		if (annot->is_hot && annot->is_active)
+			pdf_annot_event_up(ctx, annot);
+		annot->is_active = 0;
+	}
+	fz_catch(ctx)
+		jni_rethrow(env, ctx);
+}
+
+JNIEXPORT void JNICALL
+FUN(PDFAnnotation_eventFocus)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_annot *annot = from_PDFAnnotation(env, self);
+
+	if (!ctx || !annot) return;
+
+	fz_try(ctx)
+		pdf_annot_event_focus(ctx, annot);
+	fz_catch(ctx)
+		jni_rethrow(env, ctx);
+}
+
+JNIEXPORT void JNICALL
+FUN(PDFAnnotation_eventBlur)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_annot *annot = from_PDFAnnotation(env, self);
+
+	if (!ctx || !annot) return;
+
+	fz_try(ctx)
+		pdf_annot_event_blur(ctx, annot);
 	fz_catch(ctx)
 		jni_rethrow(env, ctx);
 }
@@ -9437,9 +9718,9 @@ FUN(PDFAnnotation_isOpen)(JNIEnv *env, jobject self)
 {
 	fz_context *ctx = get_context(env);
 	pdf_annot *annot = from_PDFAnnotation(env, self);
-	int open = 0;
+	jboolean open = JNI_FALSE;
 
-	if (!ctx || !annot) return 0;
+	if (!ctx || !annot) return JNI_FALSE;
 
 	fz_try(ctx)
 		open = pdf_annot_is_open(ctx, annot);
@@ -9610,4 +9891,421 @@ FUN(PDFAnnotation_setLineEndingStyles)(JNIEnv *env, jobject self, jint start_sty
 		pdf_set_annot_line_ending_styles(ctx, annot, start_style, end_style);
 	fz_catch(ctx)
 		jni_rethrow(env, ctx);
+}
+
+static void event_cb(fz_context *ctx, pdf_document *doc, pdf_doc_event *event, void *data)
+{
+	JNIEnv *env;
+	int detach;
+	jobject jlistener = (jobject)data;
+
+	env = jni_attach_thread(ctx, &detach);
+	if (env == NULL)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot attach to JVM in event_cb");
+
+	switch (event->type)
+	{
+	case PDF_DOCUMENT_EVENT_ALERT:
+		{
+			pdf_alert_event *alert;
+			jstring jstring;
+
+			alert = pdf_access_alert_event(ctx, event);
+
+			jstring = (*env)->NewStringUTF(env, alert->message);
+			if (!jstring)
+			{
+				jni_detach_thread(detach);
+				fz_throw_java(ctx, env);
+				return;
+			}
+
+			(*env)->CallVoidMethod(env, jlistener, mid_PDFDocument_JsEventListener_onAlert, jstring);
+			if ((*env)->ExceptionCheck(env))
+			{
+				jni_detach_thread(detach);
+				fz_throw_java(ctx, env);
+			}
+		}
+		break;
+
+	default:
+		jni_detach_thread(detach);
+		fz_throw(ctx, FZ_ERROR_GENERIC, "event not yet implemented");
+		break;
+	}
+
+	jni_detach_thread(detach);
+}
+
+JNIEXPORT void JNICALL
+FUN(PDFDocument_enableJs)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_document *pdf = from_PDFDocument_safe(env, self);
+
+	if (!ctx || !pdf)
+		return;
+
+	fz_try(ctx)
+	{
+		pdf_enable_js(ctx, pdf);
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+	}
+}
+
+JNIEXPORT void JNICALL
+FUN(PDFDocument_disableJs)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_document *pdf = from_PDFDocument_safe(env, self);
+
+	if (!ctx || !pdf)
+		return;
+
+	fz_try(ctx)
+	{
+		pdf_disable_js(ctx, pdf);
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+	}
+}
+
+JNIEXPORT jboolean JNICALL
+FUN(PDFDocument_isJsSupported)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_document *pdf = from_PDFDocument_safe(env, self);
+	jboolean supported = JNI_FALSE;
+
+	if (!ctx || !pdf)
+		return JNI_FALSE;
+
+	fz_try(ctx)
+	{
+		supported = pdf_js_supported(ctx, pdf);
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+	}
+
+	return supported;
+}
+
+JNIEXPORT void JNICALL
+FUN(PDFDocument_setJsEventListener)(JNIEnv *env, jobject self, jobject listener)
+{
+	fz_context *ctx = get_context(env);
+	pdf_document *pdf = from_PDFDocument_safe(env, self);
+	void *data = NULL;
+
+	if (!ctx || !pdf)
+		return;
+
+	fz_try(ctx)
+	{
+		data = pdf_get_doc_event_callback_data(ctx, pdf);
+		if (data)
+			(*env)->DeleteGlobalRef(env, data);
+		pdf_set_doc_event_callback(ctx, pdf, event_cb, (*env)->NewGlobalRef(env, listener));
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+	}
+}
+
+JNIEXPORT void JNICALL
+FUN(PDFDocument_calculate)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_document *pdf = from_PDFDocument_safe(env, self);
+
+	if (!ctx || !pdf)
+		return;
+
+	fz_try(ctx)
+	{
+		if (pdf->recalculate)
+			pdf_calculate_form(ctx, pdf);
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+	}
+}
+
+JNIEXPORT void JNICALL
+FUN(PDFWidget_finalize)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_widget *widget = from_PDFWidget_safe(env, self);
+
+	if (!ctx || !widget)
+		return;
+
+	pdf_drop_annot(ctx, widget);
+}
+
+JNIEXPORT jstring JNICALL
+FUN(PDFWidget_getValue)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_widget *widget = from_PDFWidget_safe(env, self);
+	const char *text = NULL;
+	jstring jval;
+
+	if (!ctx || !widget)
+		return NULL;
+
+	fz_try(ctx)
+	{
+		text = pdf_field_value(ctx, widget->obj);
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+	}
+
+	jval = (*env)->NewStringUTF(env, text);
+	return jval;
+}
+
+JNIEXPORT jboolean JNICALL
+FUN(PDFWidget_setTextValue)(JNIEnv *env, jobject self, jstring jval)
+{
+	fz_context *ctx = get_context(env);
+	pdf_widget *widget = from_PDFWidget_safe(env, self);
+	const char *val;
+	jboolean accepted = JNI_FALSE;
+
+	if (!ctx || !widget)
+		return JNI_FALSE;
+
+	val = (*env)->GetStringUTFChars(env, jval, NULL);
+
+	fz_var(accepted);
+	fz_try(ctx)
+	{
+		accepted = pdf_set_text_field_value(ctx, widget, val);
+	}
+	fz_always(ctx)
+	{
+		(*env)->ReleaseStringUTFChars(env, jval, val);
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+	}
+
+	return accepted;
+}
+
+JNIEXPORT jboolean JNICALL
+FUN(PDFWidget_setChoiceValue)(JNIEnv *env, jobject self, jstring jval)
+{
+	fz_context *ctx = get_context(env);
+	pdf_widget *widget = from_PDFWidget_safe(env, self);
+	const char *val;
+	jboolean accepted = JNI_FALSE;
+
+	if (!ctx || !widget)
+		return JNI_FALSE;
+
+	val = (*env)->GetStringUTFChars(env, jval, NULL);
+
+	fz_var(accepted);
+	fz_try(ctx)
+	{
+		accepted = pdf_set_choice_field_value(ctx, widget, val);
+	}
+	fz_always(ctx)
+	{
+		(*env)->ReleaseStringUTFChars(env, jval, val);
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+	}
+
+	return accepted;
+}
+
+JNIEXPORT jboolean JNICALL
+FUN(PDFWidget_setValue)(JNIEnv *env, jobject self, jstring jval)
+{
+	fz_context *ctx = get_context(env);
+	pdf_widget *widget = from_PDFWidget_safe(env, self);
+	const char *val;
+	jboolean accepted = JNI_FALSE;
+
+	if (!ctx || !widget)
+		return JNI_FALSE;
+
+	val = (*env)->GetStringUTFChars(env, jval, NULL);
+
+	fz_var(accepted);
+	fz_try(ctx)
+	{
+		accepted = pdf_set_field_value(ctx, widget->page->doc, widget->obj, (char *)val, widget->ignore_trigger_events);
+	}
+	fz_always(ctx)
+	{
+		(*env)->ReleaseStringUTFChars(env, jval, val);
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+	}
+
+	return accepted;
+}
+
+JNIEXPORT jboolean JNICALL
+FUN(PDFWidget_toggle)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_widget *widget = from_PDFWidget_safe(env, self);
+	jboolean accepted = JNI_FALSE;
+
+	if (!ctx || !widget)
+		return JNI_FALSE;
+
+	fz_var(accepted);
+	fz_try(ctx)
+	{
+		accepted = pdf_toggle_widget(ctx, widget);
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+	}
+
+	return accepted;
+}
+
+JNIEXPORT void JNICALL
+FUN(PDFWidget_setEditing)(JNIEnv *env, jobject self, jboolean val)
+{
+	fz_context *ctx = get_context(env);
+	pdf_widget *widget = from_PDFWidget_safe(env, self);
+
+	if (!ctx || !widget)
+		return;
+
+	fz_try(ctx)
+	{
+		pdf_set_widget_editing_state(ctx, widget, val);
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+	}
+}
+
+JNIEXPORT jboolean JNICALL
+FUN(PDFWidget_isEditing)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_widget *widget = from_PDFWidget_safe(env, self);
+	jboolean state = JNI_FALSE;
+
+	if (!ctx || !widget)
+		return JNI_FALSE;
+
+	fz_var(state);
+	fz_try(ctx)
+	{
+		state = pdf_get_widget_editing_state(ctx, widget);
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+	}
+
+	return state;
+}
+
+JNIEXPORT jobject JNICALL
+FUN(PDFWidget_textQuads)(JNIEnv *env, jobject self)
+{
+	fz_context *ctx = get_context(env);
+	pdf_widget *widget = from_PDFWidget_safe(env, self);
+	jobject jquad;
+	jobjectArray array;
+	int i, nchars;
+	fz_stext_page *stext = NULL;
+
+	if (!ctx || !widget)
+		return NULL;
+
+	fz_try(ctx)
+	{
+		fz_stext_options opts = {0};
+		opts.flags = FZ_STEXT_INHIBIT_SPACES;
+		stext = pdf_new_stext_page_from_annot(ctx, widget, &opts);
+	}
+	fz_catch(ctx)
+	{
+		jni_rethrow(env, ctx);
+		return NULL;
+	}
+
+	nchars = 0;
+	for (fz_stext_block *block = stext->first_block; block; block = block->next)
+	{
+		if (block->type == FZ_STEXT_BLOCK_TEXT)
+		{
+			for (fz_stext_line *line = block->u.t.first_line; line; line = line->next)
+			{
+				for (fz_stext_char *ch = line->first_char; ch; ch = ch->next)
+				{
+					nchars++;
+				}
+			}
+		}
+	}
+
+	array = (*env)->NewObjectArray(env, nchars, cls_Quad, NULL);
+	if (!array) {
+		fz_drop_stext_page(ctx, stext);
+		return NULL;
+	}
+
+	i = 0;
+	for (fz_stext_block *block = stext->first_block; block; block = block->next)
+	{
+		if (block->type == FZ_STEXT_BLOCK_TEXT)
+		{
+			for (fz_stext_line *line = block->u.t.first_line; line; line = line->next)
+			{
+				for (fz_stext_char *ch = line->first_char; ch; ch = ch->next)
+				{
+					jquad = to_Quad_safe(ctx, env, ch->quad);
+					if (!jquad) {
+						fz_drop_stext_page(ctx, stext);
+						return NULL;
+					}
+
+					(*env)->SetObjectArrayElement(env, array, i, jquad);
+					if ((*env)->ExceptionCheck(env)) {
+						fz_drop_stext_page(ctx, stext);
+						return NULL;
+					}
+
+					(*env)->DeleteLocalRef(env, jquad);
+					i++;
+				}
+			}
+		}
+	}
+
+	fz_drop_stext_page(ctx, stext);
+	return array;
 }

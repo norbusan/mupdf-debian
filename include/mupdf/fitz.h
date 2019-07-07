@@ -54,22 +54,14 @@ extern "C" {
 #include "mupdf/fitz/link.h"
 #include "mupdf/fitz/outline.h"
 #include "mupdf/fitz/document.h"
-#include "mupdf/fitz/annotation.h"
 
 #include "mupdf/fitz/util.h"
 
 /* Output formats */
 #include "mupdf/fitz/writer.h"
 #include "mupdf/fitz/band-writer.h"
-#include "mupdf/fitz/output-pnm.h"
-#include "mupdf/fitz/output-png.h"
-#include "mupdf/fitz/output-pwg.h"
-#include "mupdf/fitz/output-pcl.h"
-#include "mupdf/fitz/output-pclm.h"
-#include "mupdf/fitz/output-ps.h"
-#include "mupdf/fitz/output-psd.h"
+#include "mupdf/fitz/write-pixmap.h"
 #include "mupdf/fitz/output-svg.h"
-#include "mupdf/fitz/output-tga.h"
 
 #ifdef __cplusplus
 }

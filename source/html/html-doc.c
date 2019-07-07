@@ -15,6 +15,7 @@ struct html_document_s
 	fz_archive *zip;
 	fz_html_font_set *set;
 	fz_html *html;
+	fz_outline *outline;
 };
 
 struct html_page_s
@@ -31,6 +32,7 @@ htdoc_drop_document(fz_context *ctx, fz_document *doc_)
 	fz_drop_archive(ctx, doc->zip);
 	fz_drop_html(ctx, doc->html);
 	fz_drop_html_font_set(ctx, doc->set);
+	fz_drop_outline(ctx, doc->outline);
 }
 
 static int
@@ -62,11 +64,24 @@ htdoc_count_pages(fz_context *ctx, fz_document *doc_)
 }
 
 static void
+htdoc_update_outline(fz_context *ctx, fz_document *doc, fz_outline *node)
+{
+	while (node)
+	{
+		node->page = htdoc_resolve_link(ctx, doc, node->uri, &node->x, &node->y);
+		htdoc_update_outline(ctx, doc, node->down);
+		node = node->next;
+	}
+}
+
+static void
 htdoc_layout(fz_context *ctx, fz_document *doc_, float w, float h, float em)
 {
 	html_document *doc = (html_document*)doc_;
 
 	fz_layout_html(ctx, doc->html, w, h, em);
+
+	htdoc_update_outline(ctx, doc_, doc->outline);
 }
 
 static void
@@ -131,56 +146,31 @@ htdoc_load_page(fz_context *ctx, fz_document *doc_, int number)
 	return (fz_page*)page;
 }
 
+static fz_outline *
+htdoc_load_outline(fz_context *ctx, fz_document *doc_)
+{
+	html_document *doc = (html_document*)doc_;
+	return fz_keep_outline(ctx, doc->outline);
+}
+
 static int
 htdoc_lookup_metadata(fz_context *ctx, fz_document *doc_, const char *key, char *buf, int size)
 {
-	if (!strcmp(key, "format"))
+	html_document *doc = (html_document*)doc_;
+	if (!strcmp(key, FZ_META_FORMAT))
 		return (int)fz_strlcpy(buf, "XHTML", size);
+	if (!strcmp(key, FZ_META_INFO_TITLE) && doc->html->title)
+		return (int)fz_strlcpy(buf, doc->html->title, size);
 	return -1;
 }
 
 static fz_document *
-htdoc_open_document_with_stream(fz_context *ctx, fz_stream *file)
+htdoc_open_document_with_buffer(fz_context *ctx, const char *dirname, fz_buffer *buf)
 {
-	html_document *doc;
-	fz_buffer *buf;
-
-	doc = fz_new_derived_document(ctx, html_document);
-
+	html_document *doc = fz_new_derived_document(ctx, html_document);
 	doc->super.drop_document = htdoc_drop_document;
 	doc->super.layout = htdoc_layout;
-	doc->super.resolve_link = htdoc_resolve_link;
-	doc->super.count_pages = htdoc_count_pages;
-	doc->super.load_page = htdoc_load_page;
-	doc->super.lookup_metadata = htdoc_lookup_metadata;
-	doc->super.is_reflowable = 1;
-
-	doc->zip = fz_open_directory(ctx, ".");
-	doc->set = fz_new_html_font_set(ctx);
-
-	buf = fz_read_all(ctx, file, 0);
-	fz_try(ctx)
-		doc->html = fz_parse_html(ctx, doc->set, doc->zip, ".", buf, fz_user_css(ctx));
-	fz_always(ctx)
-		fz_drop_buffer(ctx, buf);
-	fz_catch(ctx)
-		fz_rethrow(ctx);
-
-	return &doc->super;
-}
-
-static fz_document *
-htdoc_open_document(fz_context *ctx, const char *filename)
-{
-	char dirname[2048];
-	fz_buffer *buf = NULL;
-	html_document *doc;
-
-	fz_dirname(dirname, filename, sizeof dirname);
-
-	doc = fz_new_derived_document(ctx, html_document);
-	doc->super.drop_document = htdoc_drop_document;
-	doc->super.layout = htdoc_layout;
+	doc->super.load_outline = htdoc_load_outline;
 	doc->super.resolve_link = htdoc_resolve_link;
 	doc->super.make_bookmark = htdoc_make_bookmark;
 	doc->super.lookup_bookmark = htdoc_lookup_bookmark;
@@ -193,9 +183,8 @@ htdoc_open_document(fz_context *ctx, const char *filename)
 	{
 		doc->zip = fz_open_directory(ctx, dirname);
 		doc->set = fz_new_html_font_set(ctx);
-
-		buf = fz_read_file(ctx, filename);
 		doc->html = fz_parse_html(ctx, doc->set, doc->zip, ".", buf, fz_user_css(ctx));
+		doc->outline = fz_load_html_outline(ctx, doc->html);
 	}
 	fz_always(ctx)
 		fz_drop_buffer(ctx, buf);
@@ -206,6 +195,20 @@ htdoc_open_document(fz_context *ctx, const char *filename)
 	}
 
 	return (fz_document*)doc;
+}
+
+static fz_document *
+htdoc_open_document_with_stream(fz_context *ctx, fz_stream *file)
+{
+	return htdoc_open_document_with_buffer(ctx, ".", fz_read_all(ctx, file, 0));
+}
+
+static fz_document *
+htdoc_open_document(fz_context *ctx, const char *filename)
+{
+	char dirname[2048];
+	fz_dirname(dirname, filename, sizeof dirname);
+	return htdoc_open_document_with_buffer(ctx, dirname, fz_read_file(ctx, filename));
 }
 
 static const char *htdoc_extensions[] =

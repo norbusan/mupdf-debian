@@ -210,6 +210,25 @@ do_paint_tri(fz_context *ctx, void *arg, fz_vertex *av, fz_vertex *bv, fz_vertex
 	fz_paint_triangle(dest, vertices, 2 + dest->n - dest->alpha, ptd->bbox);
 }
 
+/*
+	Render a shade to a given pixmap.
+
+	shade: The shade to paint.
+
+	override_cs: NULL, or colorspace to override the shades
+	inbuilt colorspace.
+
+	ctm: The transform to apply.
+
+	dest: The pixmap to render into.
+
+	color_params: The color rendering settings
+
+	bbox: Pointer to a bounding box to limit the rendering
+	of the shade.
+
+	op: NULL, or pointer to overprint bitmap.
+*/
 void
 fz_paint_shade(fz_context *ctx, fz_shade *shade, fz_colorspace *colorspace, fz_matrix ctm, fz_pixmap *dest, const fz_color_params *color_params, fz_irect bbox, const fz_overprint *eop)
 {
@@ -248,7 +267,7 @@ fz_paint_shade(fz_context *ctx, fz_shade *shade, fz_colorspace *colorspace, fz_m
 		ptd.bbox = bbox;
 
 		fz_init_cached_color_converter(ctx, &ptd.cc, NULL, temp->colorspace, colorspace, color_params);
-		fz_process_shade(ctx, shade, local_ctm, prepare_mesh_vertex, &do_paint_tri, &ptd);
+		fz_process_shade(ctx, shade, local_ctm, fz_rect_from_irect(bbox), prepare_mesh_vertex, &do_paint_tri, &ptd);
 
 		if (shade->use_function)
 		{

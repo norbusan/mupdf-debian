@@ -379,8 +379,9 @@ done_SC:
 		}
 		if (gstate->pending.text.scale != gstate->sent.text.scale)
 		{
+			/* The value of scale in the gstate is divided by 100 from what is written in the file */
 			if (p->chain->op_Tz)
-				p->chain->op_Tz(ctx, p->chain, gstate->pending.text.scale);
+				p->chain->op_Tz(ctx, p->chain, gstate->pending.text.scale*100);
 		}
 		if (gstate->pending.text.leading != gstate->sent.text.leading)
 		{
@@ -436,7 +437,28 @@ filter_show_char(fz_context *ctx, pdf_filter_processor *p, int cid)
 	}
 
 	if (p->text_filter)
-		remove = p->text_filter(ctx, p->opaque, ucsbuf, ucslen, trm, p->tos.char_bbox);
+	{
+		fz_matrix ctm = fz_concat(gstate->sent.ctm, gstate->pending.ctm);
+		fz_rect bbox;
+
+		if (fontdesc->wmode == 0)
+		{
+			bbox.x0 = 0;
+			bbox.y0 = fz_font_descender(ctx, fontdesc->font);
+			bbox.x1 = fz_advance_glyph(ctx, fontdesc->font, p->tos.gid, 0);
+			bbox.y1 = fz_font_ascender(ctx, fontdesc->font);
+		}
+		else
+		{
+			fz_rect font_bbox = fz_font_bbox(ctx, fontdesc->font);
+			bbox.x0 = font_bbox.x0;
+			bbox.x1 = font_bbox.x1;
+			bbox.y0 = 0;
+			bbox.y1 = fz_advance_glyph(ctx, fontdesc->font, p->tos.gid, 1);
+		}
+
+		remove = p->text_filter(ctx, p->opaque, ucsbuf, ucslen, trm, ctm, bbox);
+	}
 
 	pdf_tos_move_after_char(ctx, &p->tos);
 
@@ -567,7 +589,6 @@ adjustment(fz_context *ctx, pdf_filter_processor *p, fz_point skip)
 	return skip_dist * 1000;
 }
 
-
 static void
 filter_show_text(fz_context *ctx, pdf_filter_processor *p, pdf_obj *text)
 {
@@ -640,7 +661,6 @@ filter_show_text(fz_context *ctx, pdf_filter_processor *p, pdf_obj *text)
 					skip.y += tadj;
 					p->tos.tm = fz_pre_translate(p->tos.tm, 0, tadj);
 				}
-
 			}
 		}
 		if (skip.x != 0 || skip.y != 0)
@@ -1067,6 +1087,8 @@ pdf_filter_Tw(fz_context *ctx, pdf_processor *proc, float wordspace)
 static void
 pdf_filter_Tz(fz_context *ctx, pdf_processor *proc, float scale)
 {
+	/* scale is as written in the file. It is 100 times smaller
+	 * in the gstate. */
 	pdf_filter_processor *p = (pdf_filter_processor*)proc;
 	filter_flush(ctx, p, 0);
 	p->gstate->pending.text.scale = scale / 100;
@@ -1301,7 +1323,7 @@ pdf_filter_SC_color(fz_context *ctx, pdf_processor *proc, int n, float *color)
 	gstate->pending.SC.shd = NULL;
 	gstate->pending.SC.n = n;
 	for (i = 0; i < n; ++i)
-		gstate->pending.SC.c[i] = fz_clamp(color[i], 0, 1);
+		gstate->pending.SC.c[i] = color[i];
 }
 
 static void
@@ -1315,7 +1337,7 @@ pdf_filter_sc_color(fz_context *ctx, pdf_processor *proc, int n, float *color)
 	gstate->pending.sc.shd = NULL;
 	gstate->pending.sc.n = n;
 	for (i = 0; i < n; ++i)
-		gstate->pending.sc.c[i] = fz_clamp(color[i], 0, 1);
+		gstate->pending.sc.c[i] = color[i];
 }
 
 static void
@@ -1369,12 +1391,12 @@ pdf_filter_k(fz_context *ctx, pdf_processor *proc, float c, float m, float y, fl
 /* shadings, images, xobjects */
 
 static void
-pdf_filter_BI(fz_context *ctx, pdf_processor *proc, fz_image *img)
+pdf_filter_BI(fz_context *ctx, pdf_processor *proc, fz_image *img, const char *colorspace)
 {
 	pdf_filter_processor *p = (pdf_filter_processor*)proc;
 	filter_flush(ctx, p, FLUSH_ALL);
 	if (p->chain->op_BI)
-		p->chain->op_BI(ctx, p->chain, img);
+		p->chain->op_BI(ctx, p->chain, img, colorspace);
 }
 
 static void
@@ -1501,12 +1523,65 @@ pdf_drop_filter_processor(fz_context *ctx, pdf_processor *proc)
 	fz_free(ctx, p->font_name);
 }
 
+/*
+	Create a filter processor. This
+	filters the PDF operators it is fed, and passes them down
+	(with some changes) to the child filter.
+
+	The changes made by the filter are:
+
+	* No operations are allowed to change the top level gstate.
+	Additional q/Q operators are inserted to prevent this.
+
+	* Repeated/unnecessary colour operators are removed (so,
+	for example, "0 0 0 rg 0 1 rg 0.5 g" would be sanitised to
+	"0.5 g")
+
+	The intention of these changes is to provide a simpler,
+	but equivalent stream, repairing problems with mismatched
+	operators, maintaining structure (such as BMC, EMC calls)
+	and leaving the graphics state in an known (default) state
+	so that subsequent operations (such as synthesising new
+	operators to be appended to the stream) are easier.
+
+	The net graphical effect of the filtered operator stream
+	should be identical to the incoming operator stream.
+
+	chain: The child processor to which the filtered operators
+	will be fed.
+
+	old_res: The incoming resource dictionary.
+
+	new_res: An (initially empty) resource dictionary that will
+	be populated by copying entries from the old dictionary to
+	the new one as they are used. At the end therefore, this
+	contains exactly those resource objects actually required.
+
+*/
 pdf_processor *
 pdf_new_filter_processor(fz_context *ctx, pdf_document *doc, pdf_processor *chain, pdf_obj *old_rdb, pdf_obj *new_rdb)
 {
 	return pdf_new_filter_processor_with_text_filter(ctx, doc, chain, old_rdb, new_rdb, NULL, NULL, NULL);
 }
 
+/*
+	Create a filter
+	processor with a filter function for text. This filters the
+	PDF operators it is fed, and passes them down (with some
+	changes) to the child filter.
+
+	See pdf_new_filter_processor for documentation.
+
+	text_filter: A function called to assess whether a given
+	character should be removed or not.
+
+	after_text_object: A function to be called after each text object.
+	This allows the caller to insert some extra content if
+	required.
+
+	text_filter_opaque: Opaque value to be passed to the
+	text_filter function.
+*/
 pdf_processor *
 pdf_new_filter_processor_with_text_filter(fz_context *ctx, pdf_document *doc, pdf_processor *chain, pdf_obj *old_rdb, pdf_obj *new_rdb, pdf_text_filter_fn *text_filter, pdf_after_text_object_fn *after, void *text_filter_opaque)
 {

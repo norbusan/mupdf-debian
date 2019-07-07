@@ -82,7 +82,7 @@ img_load_page(fz_context *ctx, fz_document *doc_, int number)
 	img_page *page = NULL;
 
 	if (number < 0 || number >= doc->page_count)
-		return NULL;
+		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot load page %d", number);
 
 	fz_var(pixmap);
 	fz_var(image);
@@ -150,7 +150,7 @@ img_open_document_with_stream(fz_context *ctx, fz_stream *file)
 		size_t len;
 		unsigned char *data;
 
-		doc->buffer = fz_read_all(ctx, file, 1024);
+		doc->buffer = fz_read_all(ctx, file, 0);
 		len = fz_buffer_storage(ctx, doc->buffer, &data);
 
 		fmt = FZ_IMAGE_UNKNOWN;
@@ -167,6 +167,12 @@ img_open_document_with_stream(fz_context *ctx, fz_stream *file)
 			doc->page_count = fz_load_pnm_subimage_count(ctx, data, len);
 			doc->load_subimage = fz_load_pnm_subimage;
 			doc->format = "PNM";
+		}
+		else if (fmt == FZ_IMAGE_JBIG2)
+		{
+			doc->page_count = fz_load_jbig2_subimage_count(ctx, data, len);
+			doc->load_subimage = fz_load_jbig2_subimage;
+			doc->format = "JBIG2";
 		}
 		else
 		{
@@ -189,6 +195,8 @@ static const char *img_extensions[] =
 	"gif",
 	"hdp",
 	"j2k",
+	"jb2",
+	"jbig2",
 	"jfif",
 	"jfif-tbnl",
 	"jp2",
@@ -200,6 +208,7 @@ static const char *img_extensions[] =
 	"pam",
 	"pbm",
 	"pgm",
+	"pkm",
 	"png",
 	"pnm",
 	"ppm",
@@ -221,6 +230,8 @@ static const char *img_mimetypes[] =
 	"image/png",
 	"image/tiff",
 	"image/vnd.ms-photo",
+	"image/x-jb2",
+	"image/x-jbig2",
 	"image/x-portable-anymap",
 	"image/x-portable-arbitrarymap",
 	"image/x-portable-bitmap",

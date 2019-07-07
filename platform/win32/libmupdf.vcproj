@@ -1900,6 +1900,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\source\fitz\encodings.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\fitz\error.c"
 				>
 			</File>
@@ -2016,6 +2020,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\source\fitz\load-jbig2.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\fitz\load-jpeg.c"
 				>
 			</File>
@@ -2092,10 +2100,6 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\source\fitz\output-tga.c"
-				>
-			</File>
-			<File
 				RelativePath="..\..\source\fitz\output.c"
 				>
 			</File>
@@ -2149,10 +2153,6 @@
 			</File>
 			<File
 				RelativePath="..\..\source\fitz\stream-open.c"
-				>
-			</File>
-			<File
-				RelativePath="..\..\source\fitz\stream-prog.c"
 				>
 			</File>
 			<File
@@ -2280,19 +2280,11 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\source\pdf\pdf-encoding.c"
-				>
-			</File>
-			<File
-				RelativePath="..\..\source\pdf\pdf-encodings.h"
-				>
-			</File>
-			<File
 				RelativePath="..\..\source\pdf\pdf-event.c"
 				>
 			</File>
 			<File
-				RelativePath="..\..\source\pdf\pdf-field.c"
+				RelativePath="..\..\source\pdf\pdf-font-add.c"
 				>
 			</File>
 			<File
@@ -2317,10 +2309,6 @@
 			</File>
 			<File
 				RelativePath="..\..\source\pdf\pdf-image.c"
-				>
-			</File>
-			<File
-				RelativePath="..\..\source\pdf\pdf-imp.h"
 				>
 			</File>
 			<File
@@ -2388,10 +2376,6 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\source\pdf\pdf-portfolio.c"
-				>
-			</File>
-			<File
 				RelativePath="..\..\source\pdf\pdf-repair.c"
 				>
 			</File>
@@ -2428,6 +2412,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\source\pdf\pdf-util.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\source\pdf\pdf-write.c"
 				>
 			</File>
@@ -2448,19 +2436,15 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\include\mupdf\html.h"
-				>
-			</File>
-			<File
 				RelativePath="..\..\include\mupdf\memento.h"
 				>
 			</File>
 			<File
-				RelativePath="..\..\include\mupdf\pdf-tools.h"
+				RelativePath="..\..\include\mupdf\pdf.h"
 				>
 			</File>
 			<File
-				RelativePath="..\..\include\mupdf\pdf.h"
+				RelativePath="..\..\include\mupdf\ucdn.h"
 				>
 			</File>
 			<File
@@ -2499,11 +2483,11 @@
 					>
 				</File>
 				<File
-					RelativePath="..\..\include\mupdf\pdf\field.h"
+					RelativePath="..\..\include\mupdf\pdf\font.h"
 					>
 				</File>
 				<File
-					RelativePath="..\..\include\mupdf\pdf\font.h"
+					RelativePath="..\..\include\mupdf\pdf\form.h"
 					>
 				</File>
 				<File
@@ -2512,6 +2496,10 @@
 				</File>
 				<File
 					RelativePath="..\..\include\mupdf\pdf\javascript.h"
+					>
+				</File>
+				<File
+					RelativePath="..\..\include\mupdf\pdf\layer.h"
 					>
 				</File>
 				<File
@@ -2539,10 +2527,6 @@
 					>
 				</File>
 				<File
-					RelativePath="..\..\include\mupdf\pdf\widget.h"
-					>
-				</File>
-				<File
 					RelativePath="..\..\include\mupdf\pdf\xref.h"
 					>
 				</File>
@@ -2552,6 +2536,14 @@
 				>
 				<File
 					RelativePath="..\..\include\mupdf\fitz\annotation.h"
+					>
+				</File>
+				<File
+					RelativePath="..\..\include\mupdf\fitz\archive.h"
+					>
+				</File>
+				<File
+					RelativePath="..\..\include\mupdf\fitz\band-writer.h"
 					>
 				</File>
 				<File
@@ -2639,6 +2631,10 @@
 					>
 				</File>
 				<File
+					RelativePath="..\..\include\mupdf\fitz\image-list.h"
+					>
+				</File>
+				<File
 					RelativePath="..\..\include\mupdf\fitz\image.h"
 					>
 				</File>
@@ -2680,10 +2676,6 @@
 				</File>
 				<File
 					RelativePath="..\..\include\mupdf\fitz\output-svg.h"
-					>
-				</File>
-				<File
-					RelativePath="..\..\include\mupdf\fitz\output-tga.h"
 					>
 				</File>
 				<File
@@ -2763,6 +2755,10 @@
 					>
 				</File>
 				<File
+					RelativePath="..\..\include\mupdf\fitz\write-pixmap.h"
+					>
+				</File>
+				<File
 					RelativePath="..\..\include\mupdf\fitz\writer.h"
 					>
 				</File>
@@ -2797,6 +2793,14 @@
 			</File>
 			<File
 				RelativePath="..\..\source\html\html-layout.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\html\html-outline.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\html\html-parse.c"
 				>
 			</File>
 		</Filter>

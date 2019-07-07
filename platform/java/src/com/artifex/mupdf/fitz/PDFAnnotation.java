@@ -2,13 +2,37 @@ package com.artifex.mupdf.fitz;
 
 import java.util.Date;
 
-public class PDFAnnotation extends Annotation
+public class PDFAnnotation
 {
 	static {
 		Context.init();
 	}
 
-	private PDFAnnotation(long p) { super(p); }
+	private long pointer;
+
+	protected native void finalize();
+
+	public void destroy() {
+		finalize();
+		pointer = 0;
+	}
+
+	protected PDFAnnotation(long p) {
+		pointer = p;
+	}
+
+	public boolean equals(PDFAnnotation other) {
+		return (this.pointer == other.pointer);
+	}
+
+	public boolean equals(long other) {
+		return (this.pointer == other);
+	}
+
+	public native void run(Device dev, Matrix ctm, Cookie cookie);
+	public native Pixmap toPixmap(Matrix ctm, ColorSpace colorspace, boolean alpha);
+	public native Rect getBounds();
+	public native DisplayList toDisplayList();
 
 	/* IMPORTANT: Keep in sync with mupdf/pdf/annot.h */
 	public static final int TYPE_TEXT = 0;
@@ -48,6 +72,17 @@ public class PDFAnnotation extends Annotation
 	public static final int LINE_ENDING_R_OPEN_ARROW = 7;
 	public static final int LINE_ENDING_R_CLOSED_ARROW = 8;
 	public static final int LINE_ENDING_SLASH = 9;
+
+	public static final int IS_INVISIBLE = 1 << (1-1);
+	public static final int IS_HIDDEN = 1 << (2-1);
+	public static final int IS_PRINT = 1 << (3-1);
+	public static final int IS_NO_ZOOM = 1 << (4-1);
+	public static final int IS_NO_ROTATE = 1 << (5-1);
+	public static final int IS_NO_VIEW = 1 << (6-1);
+	public static final int IS_READ_ONLY = 1 << (7-1);
+	public static final int IS_LOCKED = 1 << (8-1);
+	public static final int IS_TOGGLE_NO_VIEW = 1 << (9-1);
+	public static final int IS_LOCKED_CONTENTS = 1 << (10-1);
 
 	public native int getType();
 	public native int getFlags();
@@ -91,7 +126,12 @@ public class PDFAnnotation extends Annotation
 	public native boolean isOpen();
 	public native void setIsOpen(boolean open);
 
-	public native void updateAppearance();
+	public native void eventEnter();
+	public native void eventExit();
+	public native void eventDown();
+	public native void eventUp();
+	public native void eventFocus();
+	public native void eventBlur();
 
 	public native boolean update();
 }

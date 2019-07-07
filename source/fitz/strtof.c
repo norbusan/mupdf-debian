@@ -18,7 +18,7 @@
    The implementation uses a self-made floating point type, 'strtof_fp_t', with
    a 32-bit significand. The steps of the algorithm are
 
-   INPUT: Up to 9 decimal digits d1 , ... d9 and an exponent dexp.
+   INPUT: Up to 9 decimal digits d1, ... d9 and an exponent dexp.
    OUTPUT: A float corresponding to the number d1 ... d9 * 10^dexp.
 
    1) Convert the integer d1 ... d9 to an strtof_fp_t x.
@@ -332,6 +332,12 @@ starts_with(const char **s, const char *string)
 			*tailptr = (char *) s;	\
 	while (0)
 
+/*
+	Locale-independent decimal to binary
+	conversion. On overflow return (-)INFINITY and set errno to ERANGE. On
+	underflow return 0 and set errno to ERANGE. Special inputs (case
+	insensitive): "NAN", "INF" or "INFINITY".
+*/
 float
 fz_strtof(const char *string, char **tailptr)
 {

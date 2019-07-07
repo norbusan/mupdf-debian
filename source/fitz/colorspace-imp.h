@@ -26,7 +26,7 @@ struct fz_colorspace_s
 {
 	fz_key_storable key_storable;
 	size_t size;
-	char name[24];
+	char *name;
 	enum fz_colorspace_type type;
 	int flags;
 	int n;
@@ -47,6 +47,7 @@ struct fz_iccprofile_s
 	fz_buffer *buffer;
 	unsigned char md5[16];
 	void *cmm_handle;
+	fz_colorspace *alternate;
 };
 
 struct fz_icclink_s

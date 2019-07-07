@@ -117,7 +117,6 @@ fz_process_shade_type1(fz_context *ctx, fz_shade *shade, fz_matrix ctm, fz_mesh_
 	}
 }
 
-/* FIXME: Nasty */
 #define HUGENUM 32000 /* how far to extend linear/radial shadings */
 
 static fz_point
@@ -129,7 +128,7 @@ fz_point_on_circle(fz_point p, float r, float theta)
 }
 
 static void
-fz_process_shade_type2(fz_context *ctx, fz_shade *shade, fz_matrix ctm, fz_mesh_processor *painter)
+fz_process_shade_type2(fz_context *ctx, fz_shade *shade, fz_matrix ctm, fz_mesh_processor *painter, fz_rect scissor)
 {
 	fz_point p0, p1, dir;
 	fz_vertex v0, v1, v2, v3;
@@ -137,6 +136,7 @@ fz_process_shade_type2(fz_context *ctx, fz_shade *shade, fz_matrix ctm, fz_mesh_
 	float theta;
 	float zero = 0;
 	float one = 1;
+	float r;
 
 	p0.x = shade->u.l_or_r.coords[0][0];
 	p0.y = shade->u.l_or_r.coords[0][1];
@@ -149,10 +149,31 @@ fz_process_shade_type2(fz_context *ctx, fz_shade *shade, fz_matrix ctm, fz_mesh_
 	dir = fz_transform_vector(dir, ctm);
 	theta = atan2f(dir.y, dir.x);
 
-	v0.p = fz_point_on_circle(p0, HUGENUM, theta);
-	v1.p = fz_point_on_circle(p1, HUGENUM, theta);
-	v2.p = fz_point_on_circle(p0, -HUGENUM, theta);
-	v3.p = fz_point_on_circle(p1, -HUGENUM, theta);
+	if (fz_is_infinite_rect(scissor)) {
+		r = HUGENUM; /* Not ideal, but it'll do for now */
+	} else {
+		float x = p0.x - scissor.x0;
+		float y = p0.y - scissor.y0;
+		if (x < scissor.x1 - p0.x)
+			x = scissor.x1 - p0.x;
+		if (x < p0.x - scissor.x1)
+			x = p0.x - scissor.x1;
+		if (x < scissor.x1 - p1.x)
+			x = scissor.x1 - p1.x;
+		if (y < scissor.y1 - p0.y)
+			y = scissor.y1 - p0.y;
+		if (y < p0.y - scissor.y1)
+			y = p0.y - scissor.y1;
+		if (y < scissor.y1 - p1.y)
+			y = scissor.y1 - p1.y;
+		r = x+y;
+	}
+	v0.p = fz_point_on_circle(p0, r, theta);
+	v1.p = fz_point_on_circle(p1, r, theta);
+	v2.p.x = 2*p0.x - v0.p.x;
+	v2.p.y = 2*p0.y - v0.p.y;
+	v3.p.x = 2*p1.x - v1.p.x;
+	v3.p.y = 2*p1.y - v1.p.y;
 
 	fz_prepare_color(ctx, painter, &v0, &zero);
 	fz_prepare_color(ctx, painter, &v1, &one);
@@ -161,14 +182,22 @@ fz_process_shade_type2(fz_context *ctx, fz_shade *shade, fz_matrix ctm, fz_mesh_
 
 	paint_quad(ctx, painter, &v0, &v2, &v3, &v1);
 
+	if (shade->u.l_or_r.extend[0] || shade->u.l_or_r.extend[1]) {
+		float d = fabsf(p1.x - p0.x);
+		float e = fabsf(p1.y - p0.y);
+		if (d < e)
+			d = e;
+		if (d != 0)
+			r /= d;
+	}
 	if (shade->u.l_or_r.extend[0])
 	{
-		e0.p.x = v0.p.x - (p1.x - p0.x) * HUGENUM;
-		e0.p.y = v0.p.y - (p1.y - p0.y) * HUGENUM;
+		e0.p.x = v0.p.x - (p1.x - p0.x) * r;
+		e0.p.y = v0.p.y - (p1.y - p0.y) * r;
 		fz_prepare_color(ctx, painter, &e0, &zero);
 
-		e1.p.x = v2.p.x - (p1.x - p0.x) * HUGENUM;
-		e1.p.y = v2.p.y - (p1.y - p0.y) * HUGENUM;
+		e1.p.x = v2.p.x - (p1.x - p0.x) * r;
+		e1.p.y = v2.p.y - (p1.y - p0.y) * r;
 		fz_prepare_color(ctx, painter, &e1, &zero);
 
 		paint_quad(ctx, painter, &e0, &v0, &v2, &e1);
@@ -176,12 +205,12 @@ fz_process_shade_type2(fz_context *ctx, fz_shade *shade, fz_matrix ctm, fz_mesh_
 
 	if (shade->u.l_or_r.extend[1])
 	{
-		e0.p.x = v1.p.x + (p1.x - p0.x) * HUGENUM;
-		e0.p.y = v1.p.y + (p1.y - p0.y) * HUGENUM;
+		e0.p.x = v1.p.x + (p1.x - p0.x) * r;
+		e0.p.y = v1.p.y + (p1.y - p0.y) * r;
 		fz_prepare_color(ctx, painter, &e0, &one);
 
-		e1.p.x = v3.p.x + (p1.x - p0.x) * HUGENUM;
-		e1.p.y = v3.p.y + (p1.y - p0.y) * HUGENUM;
+		e1.p.x = v3.p.x + (p1.x - p0.x) * r;
+		e1.p.y = v3.p.y + (p1.y - p0.y) * r;
 		fz_prepare_color(ctx, painter, &e1, &one);
 
 		paint_quad(ctx, painter, &e0, &v1, &v3, &e1);
@@ -929,8 +958,29 @@ fz_process_shade_type7(fz_context *ctx, fz_shade *shade, fz_matrix ctm, fz_mesh_
 	}
 }
 
+/*
+	Process a shade, using supplied callback
+	functions. This decomposes the shading to a mesh (even ones
+	that are not natively meshes, such as linear or radial
+	shadings), and processes triangles from those meshes.
+
+	shade: The shade to process.
+
+	ctm: The transform to use
+
+	prepare: Callback function to 'prepare' each vertex.
+	This function is passed an array of floats, and populates
+	a fz_vertex structure.
+
+	process: This function is passed 3 pointers to vertex
+	structures, and actually performs the processing (typically
+	filling the area between the vertexes).
+
+	process_arg: An opaque argument passed through from caller
+	to callback functions.
+*/
 void
-fz_process_shade(fz_context *ctx, fz_shade *shade, fz_matrix ctm,
+fz_process_shade(fz_context *ctx, fz_shade *shade, fz_matrix ctm, fz_rect scissor,
 		fz_shade_prepare_fn *prepare, fz_shade_process_fn *process, void *process_arg)
 {
 	fz_mesh_processor painter;
@@ -944,7 +994,7 @@ fz_process_shade(fz_context *ctx, fz_shade *shade, fz_matrix ctm,
 	if (shade->type == FZ_FUNCTION_BASED)
 		fz_process_shade_type1(ctx, shade, ctm, &painter);
 	else if (shade->type == FZ_LINEAR)
-		fz_process_shade_type2(ctx, shade, ctm, &painter);
+		fz_process_shade_type2(ctx, shade, ctm, &painter, scissor);
 	else if (shade->type == FZ_RADIAL)
 		fz_process_shade_type3(ctx, shade, ctm, &painter);
 	else if (shade->type == FZ_MESH_TYPE4)
@@ -1053,6 +1103,12 @@ fz_keep_shade(fz_context *ctx, fz_shade *shade)
 	return fz_keep_storable(ctx, &shade->storable);
 }
 
+/*
+	Internal function to destroy a
+	shade. Only exposed for use with the fz_store.
+
+	shade: The reference to destroy.
+*/
 void
 fz_drop_shade_imp(fz_context *ctx, fz_storable *shade_)
 {
@@ -1071,6 +1127,17 @@ fz_drop_shade(fz_context *ctx, fz_shade *shade)
 	fz_drop_storable(ctx, &shade->storable);
 }
 
+/*
+	Bound a given shading.
+
+	shade: The shade to bound.
+
+	ctm: The transform to apply to the shade before bounding.
+
+	r: Pointer to storage to put the bounds in.
+
+	Returns r, updated to contain the bounds for the shading.
+*/
 fz_rect
 fz_bound_shade(fz_context *ctx, fz_shade *shade, fz_matrix ctm)
 {

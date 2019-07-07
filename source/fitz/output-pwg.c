@@ -8,6 +8,9 @@ typedef struct {
 	fz_pwg_options pwg;
 } pwg_band_writer;
 
+/*
+	Output the file header to a pwg stream, ready for pages to follow it.
+*/
 void
 fz_write_pwg_file_header(fz_context *ctx, fz_output *out)
 {
@@ -95,6 +98,9 @@ pwg_page_header(fz_context *ctx, fz_output *out, const fz_pwg_options *pwg,
 	fz_write_data(ctx, out, pwg ? pwg->page_size_name : zero, 64);
 }
 
+/*
+	Output a page to a pwg stream to follow a header, or other pages.
+*/
 void
 fz_write_pixmap_as_pwg_page(fz_context *ctx, fz_output *out, const fz_pixmap *pixmap, const fz_pwg_options *pwg)
 {
@@ -111,6 +117,9 @@ fz_write_pixmap_as_pwg_page(fz_context *ctx, fz_output *out, const fz_pixmap *pi
 		fz_rethrow(ctx);
 }
 
+/*
+	Output a bitmap page to a pwg stream to follow a header, or other pages.
+*/
 void
 fz_write_bitmap_as_pwg_page(fz_context *ctx, fz_output *out, const fz_bitmap *bitmap, const fz_pwg_options *pwg)
 {
@@ -141,6 +150,16 @@ fz_write_bitmap_as_pwg(fz_context *ctx, fz_output *out, const fz_bitmap *bitmap,
 	fz_write_bitmap_as_pwg_page(ctx, out, bitmap, pwg);
 }
 
+/*
+	Save a pixmap as a pwg
+
+	filename: The filename to save as (including extension).
+
+	append: If non-zero, then append a new page to existing file.
+
+	pwg: NULL, or a pointer to an options structure (initialised to zero
+	before being filled in, for future expansion).
+*/
 void
 fz_save_pixmap_as_pwg(fz_context *ctx, fz_pixmap *pixmap, char *filename, int append, const fz_pwg_options *pwg)
 {
@@ -158,6 +177,16 @@ fz_save_pixmap_as_pwg(fz_context *ctx, fz_pixmap *pixmap, char *filename, int ap
 		fz_rethrow(ctx);
 }
 
+/*
+	Save a bitmap as a pwg
+
+	filename: The filename to save as (including extension).
+
+	append: If non-zero, then append a new page to existing file.
+
+	pwg: NULL, or a pointer to an options structure (initialised to zero
+	before being filled in, for future expansion).
+*/
 void
 fz_save_bitmap_as_pwg(fz_context *ctx, fz_bitmap *bitmap, char *filename, int append, const fz_pwg_options *pwg)
 {
@@ -176,7 +205,7 @@ fz_save_bitmap_as_pwg(fz_context *ctx, fz_bitmap *bitmap, char *filename, int ap
 }
 
 static void
-pwg_write_mono_header(fz_context *ctx, fz_band_writer *writer_, const fz_colorspace *cs)
+pwg_write_mono_header(fz_context *ctx, fz_band_writer *writer_, fz_colorspace *cs)
 {
 	pwg_band_writer *writer = (pwg_band_writer *)writer_;
 
@@ -259,6 +288,10 @@ pwg_write_mono_band(fz_context *ctx, fz_band_writer *writer_, int stride, int ba
 	}
 }
 
+/*
+	Generate a new band writer for
+	PWG format images.
+*/
 fz_band_writer *fz_new_mono_pwg_band_writer(fz_context *ctx, fz_output *out, const fz_pwg_options *pwg)
 {
 	pwg_band_writer *writer = fz_new_band_writer(ctx, pwg_band_writer, out);
@@ -274,7 +307,7 @@ fz_band_writer *fz_new_mono_pwg_band_writer(fz_context *ctx, fz_output *out, con
 }
 
 static void
-pwg_write_header(fz_context *ctx, fz_band_writer *writer_, const fz_colorspace *cs)
+pwg_write_header(fz_context *ctx, fz_band_writer *writer_, fz_colorspace *cs)
 {
 	pwg_band_writer *writer = (pwg_band_writer *)writer_;
 	int n = writer->super.n;
@@ -368,6 +401,10 @@ pwg_write_band(fz_context *ctx, fz_band_writer *writer_, int stride, int band_st
 	}
 }
 
+/*
+	Generate a new band writer for
+	contone PWG format images.
+*/
 fz_band_writer *fz_new_pwg_band_writer(fz_context *ctx, fz_output *out, const fz_pwg_options *pwg)
 {
 	pwg_band_writer *writer = fz_new_band_writer(ctx, pwg_band_writer, out);
@@ -420,31 +457,34 @@ static void
 pwg_end_page(fz_context *ctx, fz_document_writer *wri_, fz_device *dev)
 {
 	fz_pwg_writer *wri = (fz_pwg_writer*)wri_;
+	fz_bitmap *bitmap = NULL;
+
+	fz_var(bitmap);
 
 	fz_try(ctx)
+	{
 		fz_close_device(ctx, dev);
-	fz_always(ctx)
-		fz_drop_device(ctx, dev);
-	fz_catch(ctx)
-		fz_rethrow(ctx);
-
-	if (wri->mono)
-	{
-		fz_bitmap *bitmap = fz_new_bitmap_from_pixmap(ctx, wri->pixmap, NULL);
-		fz_try(ctx)
+		if (wri->mono)
+		{
+			bitmap = fz_new_bitmap_from_pixmap(ctx, wri->pixmap, NULL);
 			fz_write_bitmap_as_pwg_page(ctx, wri->out, bitmap, &wri->pwg);
-		fz_always(ctx)
-			fz_drop_bitmap(ctx, bitmap);
-		fz_catch(ctx)
-			fz_rethrow(ctx);
+		}
+		else
+		{
+			fz_write_pixmap_as_pwg_page(ctx, wri->out, wri->pixmap, &wri->pwg);
+		}
 	}
-	else
+	fz_always(ctx)
 	{
-		fz_write_pixmap_as_pwg_page(ctx, wri->out, wri->pixmap, &wri->pwg);
+		fz_drop_device(ctx, dev);
+		fz_drop_bitmap(ctx, bitmap);
+		fz_drop_pixmap(ctx, wri->pixmap);
+		wri->pixmap = NULL;
 	}
-
-	fz_drop_pixmap(ctx, wri->pixmap);
-	wri->pixmap = NULL;
+	fz_catch(ctx)
+	{
+		fz_rethrow(ctx);
+	}
 }
 
 static void

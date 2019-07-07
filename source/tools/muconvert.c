@@ -42,7 +42,7 @@ static void usage(void)
 		"\n"
 		"\t-o -\toutput file name (%%d for page number)\n"
 		"\t-F -\toutput format (default inferred from output file name)\n"
-		"\t\t\traster: cbz, png, pnm, pgm, ppm, pam, tga, pbm, pkm.\n"
+		"\t\t\traster: cbz, png, pnm, pgm, ppm, pam, pbm, pkm.\n"
 		"\t\t\tprint-raster: pcl, pclm, ps, pwg.\n"
 		"\t\t\tvector: pdf, svg.\n"
 		"\t\t\ttext: html, xhtml, text, stext.\n"
@@ -78,11 +78,10 @@ static void runpage(int number)
 		mediabox = fz_bound_page(ctx, page);
 		dev = fz_begin_page(ctx, out, mediabox);
 		fz_run_page(ctx, page, dev, fz_identity, NULL);
+		fz_end_page(ctx, out);
 	}
 	fz_always(ctx)
 	{
-		if (dev)
-			fz_end_page(ctx, out);
 		fz_drop_page(ctx, page);
 	}
 	fz_catch(ctx)

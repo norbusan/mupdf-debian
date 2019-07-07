@@ -104,6 +104,9 @@ static void xml_indent(int n)
 	}
 }
 
+/*
+	Pretty-print an XML tree to stdout.
+*/
 void fz_debug_xml(fz_xml *item, int level)
 {
 	if (item->text)
@@ -117,9 +120,9 @@ void fz_debug_xml(fz_xml *item, int level)
 			default:
 				if (c < 32 || c > 127) {
 					putchar('\\');
-					putchar('0' + ((c >> 6) & 7));
-					putchar('0' + ((c >> 3) & 7));
-					putchar('0' + ((c) & 7));
+					putchar('x');
+					putchar("0123456789ABCDEF"[(c>>4) & 15]);
+					putchar("0123456789ABCDEF"[(c) & 15]);
 				} else {
 					putchar(c);
 				}
@@ -153,36 +156,58 @@ void fz_debug_xml(fz_xml *item, int level)
 	}
 }
 
+/*
+	Return previous sibling of XML node.
+*/
 fz_xml *fz_xml_prev(fz_xml *item)
 {
 	return item ? item->prev : NULL;
 }
 
+/*
+	Return next sibling of XML node.
+*/
 fz_xml *fz_xml_next(fz_xml *item)
 {
 	return item ? item->next : NULL;
 }
 
+/*
+	Return parent of XML node.
+*/
 fz_xml *fz_xml_up(fz_xml *item)
 {
 	return item ? item->up : NULL;
 }
 
+/*
+	Return first child of XML node.
+*/
 fz_xml *fz_xml_down(fz_xml *item)
 {
 	return item ? item->down : NULL;
 }
 
+/*
+	Return the text content of an XML node.
+	Return NULL if the node is a tag.
+*/
 char *fz_xml_text(fz_xml *item)
 {
 	return item ? item->text : NULL;
 }
 
+/*
+	Return tag of XML node. Return NULL for text nodes.
+*/
 char *fz_xml_tag(fz_xml *item)
 {
 	return item && item->name[0] ? item->name : NULL;
 }
 
+/*
+	Return true if the tag name matches.
+*/
 int fz_xml_is_tag(fz_xml *item, const char *name)
 {
 	if (!item)
@@ -190,6 +215,10 @@ int fz_xml_is_tag(fz_xml *item, const char *name)
 	return !strcmp(item->name, name);
 }
 
+/*
+	Return the value of an attribute of an XML node.
+	NULL if the attribute doesn't exist.
+*/
 char *fz_xml_att(fz_xml *item, const char *name)
 {
 	struct attribute *att;
@@ -231,12 +260,19 @@ fz_xml *fz_xml_root(fz_xml_doc *xml)
 	return xml ? xml->root : NULL;
 }
 
+/*
+	Free the XML node and all its children and siblings.
+*/
 void fz_drop_xml(fz_context *ctx, fz_xml_doc *xml)
 {
 	if (xml)
 		fz_drop_pool(ctx, xml->pool);
 }
 
+/*
+	Detach a node from the tree, unlinking it from its parent,
+	and setting the document root to the node.
+*/
 void fz_detach_xml(fz_context *ctx, fz_xml_doc *xml, fz_xml *node)
 {
 	if (node->up)
@@ -581,15 +617,57 @@ parse_attribute_value:
 	return "end of data in attribute value";
 }
 
-static char *convert_to_utf8(fz_context *doc, const unsigned char *s, size_t n, int *dofree)
+static int startswith(const char *a, const char *b)
 {
+	return !fz_strncasecmp(a, b, strlen(b));
+}
+
+static const unsigned short *find_xml_encoding(char *s)
+{
+	const unsigned short *table = NULL;
+	char *end, *xml, *enc;
+
+	end = strchr(s, '>');
+	if (end)
+	{
+		*end = 0;
+		xml = strstr(s, "<?xml");
+		if (xml)
+		{
+			enc = strstr(xml, "encoding=");
+			if (enc)
+			{
+				enc += 10;
+				if (startswith(enc, "iso-8859-1") || startswith(enc, "latin1"))
+					table = fz_unicode_from_iso8859_1;
+				else if (startswith(enc, "iso-8859-7") || startswith(enc, "greek"))
+					table = fz_unicode_from_iso8859_7;
+				else if (startswith(enc, "koi8"))
+					table = fz_unicode_from_koi8u;
+				else if (startswith(enc, "windows-1250"))
+					table = fz_unicode_from_windows_1250;
+				else if (startswith(enc, "windows-1251"))
+					table = fz_unicode_from_windows_1251;
+				else if (startswith(enc, "windows-1252"))
+					table = fz_unicode_from_windows_1252;
+			}
+		}
+		*end = '>';
+	}
+
+	return table;
+}
+
+static char *convert_to_utf8(fz_context *ctx, unsigned char *s, size_t n, int *dofree)
+{
+	const unsigned short *table;
 	const unsigned char *e = s + n;
 	char *dst, *d;
 	int c;
 
 	if (s[0] == 0xFE && s[1] == 0xFF) {
 		s += 2;
-		dst = d = fz_malloc(doc, n * FZ_UTFMAX);
+		dst = d = fz_malloc(ctx, n * FZ_UTFMAX);
 		while (s + 1 < e) {
 			c = s[0] << 8 | s[1];
 			d += fz_runetochar(d, c);
@@ -602,11 +680,23 @@ static char *convert_to_utf8(fz_context *doc, const unsigned char *s, size_t n, 
 
 	if (s[0] == 0xFF && s[1] == 0xFE) {
 		s += 2;
-		dst = d = fz_malloc(doc, n * FZ_UTFMAX);
+		dst = d = fz_malloc(ctx, n * FZ_UTFMAX);
 		while (s + 1 < e) {
 			c = s[0] | s[1] << 8;
 			d += fz_runetochar(d, c);
 			s += 2;
+		}
+		*d = 0;
+		*dofree = 1;
+		return dst;
+	}
+
+	table = find_xml_encoding((char*)s);
+	if (table) {
+		dst = d = fz_malloc(ctx, n * FZ_UTFMAX);
+		while (*s) {
+			c = table[*s++];
+			d += fz_runetochar(d, c);
 		}
 		*d = 0;
 		*dofree = 1;
@@ -621,16 +711,24 @@ static char *convert_to_utf8(fz_context *doc, const unsigned char *s, size_t n, 
 	return (char*)s;
 }
 
+/*
+	Parse the contents of buffer into a tree of xml nodes.
+
+	preserve_white: whether to keep or delete all-whitespace nodes.
+*/
 fz_xml_doc *
 fz_parse_xml(fz_context *ctx, fz_buffer *buf, int preserve_white)
 {
 	struct parser parser;
 	fz_xml_doc *xml = NULL;
 	fz_xml root, *node;
-	char *p, *error;
+	char *p = NULL;
+	char *error;
 	int dofree;
 	unsigned char *s;
 	size_t n;
+
+	fz_var(p);
 
 	/* ensure we are zero-terminated */
 	fz_terminate_buffer(ctx, buf);
@@ -642,10 +740,10 @@ fz_parse_xml(fz_context *ctx, fz_buffer *buf, int preserve_white)
 	parser.preserve_white = preserve_white;
 	parser.depth = 0;
 
-	p = convert_to_utf8(ctx, s, n, &dofree);
-
 	fz_try(ctx)
 	{
+		p = convert_to_utf8(ctx, s, n, &dofree);
+
 		error = xml_parse_document_imp(ctx, &parser, p);
 		if (error)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "%s", error);
