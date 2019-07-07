@@ -7,7 +7,7 @@ Subject: Allow disabling objcopy
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/Makerules b/Makerules
-index 35c9cbe..54530cf 100644
+index 52f69be..9339e5d 100644
 --- a/Makerules
 +++ b/Makerules
 @@ -94,7 +94,7 @@ else ifeq ($(OS),MACOS)

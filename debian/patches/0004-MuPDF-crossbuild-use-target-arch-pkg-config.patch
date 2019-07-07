@@ -5,11 +5,11 @@ Subject: MuPDF crossbuild use target arch pkg-config
 mupdf fails to cross build, because it uses the build architecture
 pkg-config and thus fails to find a pile of .pc files.
 ---
- Makerules | 58 +++++++++++++++++++++++++++++++---------------------------
- 1 file changed, 31 insertions(+), 27 deletions(-)
+ Makerules | 52 ++++++++++++++++++++++++++++------------------------
+ 1 file changed, 28 insertions(+), 24 deletions(-)
 
 diff --git a/Makerules b/Makerules
-index b7e64f2..0d444f1 100644
+index 14c5c8c..ca2e96c 100644
 --- a/Makerules
 +++ b/Makerules
 @@ -6,6 +6,10 @@ OS := $(OS:MSYS%=MINGW)
@@ -23,7 +23,7 @@ index b7e64f2..0d444f1 100644
  ifeq ($(findstring -fembed-bitcode,$(XCFLAGS)),)
    # clang does not support these in combination with -fembed-bitcode
    CFLAGS += -ffunction-sections -fdata-sections
-@@ -91,35 +95,35 @@ else ifeq ($(OS),MACOS)
+@@ -91,29 +95,29 @@ else ifeq ($(OS),MACOS)
  else ifeq ($(OS),Linux)
    HAVE_OBJCOPY := yes
  
@@ -70,17 +70,8 @@ index b7e64f2..0d444f1 100644
 +	SYS_ZLIB_LIBS := $(shell $(PKG_CONFIG) --libs zlib)
    endif
  
--  HAVE_CURL := $(shell pkg-config --exists libcurl && echo yes)
-+  HAVE_CURL := $(shell $(PKG_CONFIG) --exists libcurl && echo yes)
-   ifeq ($(HAVE_CURL),yes)
--	SYS_CURL_CFLAGS := $(shell pkg-config --cflags libcurl)
--	SYS_CURL_LIBS := $(shell pkg-config --libs libcurl)
-+	SYS_CURL_CFLAGS := $(shell $(PKG_CONFIG) --cflags libcurl)
-+	SYS_CURL_LIBS := $(shell $(PKG_CONFIG) --libs libcurl)
-   endif
- 
    HAVE_GLUT := yes
-@@ -128,16 +132,16 @@ else ifeq ($(OS),Linux)
+@@ -122,16 +126,16 @@ else ifeq ($(OS),Linux)
  	SYS_GLUT_LIBS := -lglut -lGL
    endif
  
