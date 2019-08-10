@@ -239,7 +239,7 @@ xps_parse_abbreviated_geometry(fz_context *ctx, xps_document *doc, char *geom, i
 
 	fz_try(ctx)
 	{
-		args = fz_malloc_array(ctx, strlen(geom) + 1, sizeof(char*));
+		args = fz_malloc_array(ctx, strlen(geom) + 1, char*);
 		pargs = args;
 
 		while (*s)
@@ -1021,7 +1021,7 @@ xps_parse_path(fz_context *ctx, xps_document *doc, fz_matrix ctm, char *base_uri
 				samples[0] *= fz_atof(fill_opacity_att);
 			xps_set_color(ctx, doc, colorspace, samples);
 			fz_fill_path(ctx, dev, path, fill_rule == 0, ctm,
-				doc->colorspace, doc->color, doc->alpha, NULL);
+				doc->colorspace, doc->color, doc->alpha, fz_default_color_params);
 		}
 
 		if (fill_tag)
@@ -1038,7 +1038,7 @@ xps_parse_path(fz_context *ctx, xps_document *doc, fz_matrix ctm, char *base_uri
 				samples[0] *= fz_atof(stroke_opacity_att);
 			xps_set_color(ctx, doc, colorspace, samples);
 			fz_stroke_path(ctx, dev, stroke_path, stroke, ctm,
-				doc->colorspace, doc->color, doc->alpha, NULL);
+				doc->colorspace, doc->color, doc->alpha, fz_default_color_params);
 		}
 
 		if (stroke_tag)

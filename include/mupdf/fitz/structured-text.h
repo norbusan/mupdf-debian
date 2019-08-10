@@ -5,10 +5,45 @@
 #include "mupdf/fitz/context.h"
 #include "mupdf/fitz/geometry.h"
 #include "mupdf/fitz/font.h"
-#include "mupdf/fitz/colorspace.h"
 #include "mupdf/fitz/image.h"
 #include "mupdf/fitz/output.h"
 #include "mupdf/fitz/device.h"
+
+/*
+	Simple text layout (for use with annotation editing primarily).
+*/
+typedef struct fz_layout_char_s fz_layout_char;
+typedef struct fz_layout_line_s fz_layout_line;
+typedef struct fz_layout_block_s fz_layout_block;
+
+struct fz_layout_char_s
+{
+	float x, w;
+	const char *p; /* location in source text of character */
+	fz_layout_char *next;
+};
+
+struct fz_layout_line_s
+{
+	float x, y, h;
+	const char *p; /* location in source text of start of line */
+	fz_layout_char *text;
+	fz_layout_line *next;
+};
+
+struct fz_layout_block_s
+{
+	fz_pool *pool;
+	fz_matrix matrix;
+	fz_matrix inv_matrix;
+	fz_layout_line *head, **tailp;
+	fz_layout_char **text_tailp;
+};
+
+fz_layout_block *fz_new_layout(fz_context *ctx);
+void fz_drop_layout(fz_context *ctx, fz_layout_block *block);
+void fz_add_layout_line(fz_context *ctx, fz_layout_block *block, float x, float y, float h, const char *p);
+void fz_add_layout_char(fz_context *ctx, fz_layout_block *block, float x, float w, const char *p);
 
 /*
 	Text extraction device: Used for searching, format conversion etc.
@@ -99,6 +134,7 @@ struct fz_stext_line_s
 struct fz_stext_char_s
 {
 	int c;
+	int color; /* sRGB hex color */
 	fz_point origin;
 	fz_quad quad;
 	float size;
@@ -111,15 +147,15 @@ extern const char *fz_stext_options_usage;
 fz_stext_page *fz_new_stext_page(fz_context *ctx, fz_rect mediabox);
 void fz_drop_stext_page(fz_context *ctx, fz_stext_page *page);
 
-void fz_print_stext_page_as_html(fz_context *ctx, fz_output *out, fz_stext_page *page);
+void fz_print_stext_page_as_html(fz_context *ctx, fz_output *out, fz_stext_page *page, int id);
 void fz_print_stext_header_as_html(fz_context *ctx, fz_output *out);
 void fz_print_stext_trailer_as_html(fz_context *ctx, fz_output *out);
 
-void fz_print_stext_page_as_xhtml(fz_context *ctx, fz_output *out, fz_stext_page *page);
+void fz_print_stext_page_as_xhtml(fz_context *ctx, fz_output *out, fz_stext_page *page, int id);
 void fz_print_stext_header_as_xhtml(fz_context *ctx, fz_output *out);
 void fz_print_stext_trailer_as_xhtml(fz_context *ctx, fz_output *out);
 
-void fz_print_stext_page_as_xml(fz_context *ctx, fz_output *out, fz_stext_page *page);
+void fz_print_stext_page_as_xml(fz_context *ctx, fz_output *out, fz_stext_page *page, int id);
 
 void fz_print_stext_page_as_text(fz_context *ctx, fz_output *out, fz_stext_page *page);
 

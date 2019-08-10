@@ -1,8 +1,6 @@
 #include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
 
-#include "../fitz/font-imp.h"
-
 static void
 pdf_run_glyph_func(fz_context *ctx, void *doc, void *rdb, fz_buffer *contents, fz_device *dev, fz_matrix ctm, void *gstate, fz_default_colorspaces *default_cs)
 {
@@ -41,7 +39,7 @@ pdf_load_type3_font(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, pdf_obj *d
 
 		if (new_max == 0)
 			new_max = 4;
-		doc->type3_fonts = fz_resize_array(ctx, doc->type3_fonts, new_max, sizeof(*doc->type3_fonts));
+		doc->type3_fonts = fz_realloc_array(ctx, doc->type3_fonts, new_max, fz_font*);
 		doc->max_type3_fonts = new_max;
 	}
 
@@ -207,6 +205,7 @@ void pdf_load_type3_glyphs(fz_context *ctx, pdf_document *doc, pdf_font_desc *fo
 	}
 	fz_catch(ctx)
 	{
+		fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
 		fz_warn(ctx, "Type3 glyph load failed: %s", fz_caught_message(ctx));
 	}
 }

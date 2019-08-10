@@ -57,6 +57,7 @@ int pdf_count_objects(fz_context *ctx, pdf_document *doc);
 pdf_obj *pdf_resolve_indirect(fz_context *ctx, pdf_obj *ref);
 pdf_obj *pdf_resolve_indirect_chain(fz_context *ctx, pdf_obj *ref);
 pdf_obj *pdf_load_object(fz_context *ctx, pdf_document *doc, int num);
+pdf_obj *pdf_load_unencrypted_object(fz_context *ctx, pdf_document *doc, int num);
 
 fz_buffer *pdf_load_raw_stream_number(fz_context *ctx, pdf_document *doc, int num);
 fz_buffer *pdf_load_raw_stream(fz_context *ctx, pdf_obj *ref);
@@ -94,5 +95,7 @@ void pdf_clear_xref(fz_context *ctx, pdf_document *doc);
 void pdf_clear_xref_to_mark(fz_context *ctx, pdf_document *doc);
 
 int pdf_repair_obj(fz_context *ctx, pdf_document *doc, pdf_lexbuf *buf, int64_t *stmofsp, int *stmlenp, pdf_obj **encrypt, pdf_obj **id, pdf_obj **page, int64_t *tmpofs, pdf_obj **root);
+
+pdf_obj *pdf_progressive_advance(fz_context *ctx, pdf_document *doc, int pagenum);
 
 #endif

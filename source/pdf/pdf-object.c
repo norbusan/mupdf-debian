@@ -569,7 +569,7 @@ pdf_new_array(fz_context *ctx, pdf_document *doc, int initialcap)
 
 	fz_try(ctx)
 	{
-		obj->items = Memento_label(fz_malloc_array(ctx, obj->cap, sizeof(pdf_obj*)), "pdf_obj(array items)");
+		obj->items = fz_malloc_array(ctx, obj->cap, pdf_obj*);
 	}
 	fz_catch(ctx)
 	{
@@ -588,7 +588,7 @@ pdf_array_grow(fz_context *ctx, pdf_obj_array *obj)
 	int i;
 	int new_cap = (obj->cap * 3) / 2;
 
-	obj->items = fz_resize_array(ctx, obj->items, new_cap, sizeof(pdf_obj*));
+	obj->items = fz_realloc_array(ctx, obj->items, new_cap, pdf_obj*);
 	obj->cap = new_cap;
 
 	for (i = obj->len ; i < obj->cap; i++)
@@ -897,7 +897,7 @@ pdf_new_dict(fz_context *ctx, pdf_document *doc, int initialcap)
 
 	fz_try(ctx)
 	{
-		DICT(obj)->items = Memento_label(fz_malloc_array(ctx, DICT(obj)->cap, sizeof(struct keyval)), "pdf_obj(dict items)");
+		DICT(obj)->items = fz_malloc_array(ctx, DICT(obj)->cap, struct keyval);
 	}
 	fz_catch(ctx)
 	{
@@ -919,7 +919,7 @@ pdf_dict_grow(fz_context *ctx, pdf_obj *obj)
 	int i;
 	int new_cap = (DICT(obj)->cap * 3) / 2;
 
-	DICT(obj)->items = fz_resize_array(ctx, DICT(obj)->items, new_cap, sizeof(struct keyval));
+	DICT(obj)->items = fz_realloc_array(ctx, DICT(obj)->items, new_cap, struct keyval);
 	DICT(obj)->cap = new_cap;
 
 	for (i = DICT(obj)->len; i < DICT(obj)->cap; i++)
@@ -1823,7 +1823,7 @@ static inline void fmt_putc(fz_context *ctx, struct fmt *fmt, int c)
 		}
 		else
 		{
-			fmt->ptr = fz_resize_array(ctx, fmt->ptr, fmt->cap, 1);
+			fmt->ptr = fz_realloc(ctx, fmt->ptr, fmt->cap);
 		}
 	}
 
@@ -2206,8 +2206,10 @@ pdf_dict_get_inheritable(fz_context *ctx, pdf_obj *node, pdf_obj *key)
 {
 	pdf_obj *node2 = node;
 	pdf_obj *val = NULL;
+	pdf_obj *marked = NULL;
 
 	fz_var(node);
+	fz_var(marked);
 	fz_try(ctx)
 	{
 		do
@@ -2217,20 +2219,27 @@ pdf_dict_get_inheritable(fz_context *ctx, pdf_obj *node, pdf_obj *key)
 				break;
 			if (pdf_mark_obj(ctx, node))
 				fz_throw(ctx, FZ_ERROR_GENERIC, "cycle in tree (parents)");
+			marked = node;
 			node = pdf_dict_get(ctx, node, PDF_NAME(Parent));
 		}
 		while (node);
 	}
 	fz_always(ctx)
 	{
-		do
+		/* We assume that if we have marked an object, without an exception
+		 * being thrown, that we can always unmark the same object again
+		 * without an exception being thrown. */
+		if (marked)
 		{
-			pdf_unmark_obj(ctx, node2);
-			if (node2 == node)
-				break;
-			node2 = pdf_dict_get(ctx, node2, PDF_NAME(Parent));
+			do
+			{
+				pdf_unmark_obj(ctx, node2);
+				if (node2 == marked)
+					break;
+				node2 = pdf_dict_get(ctx, node2, PDF_NAME(Parent));
+			}
+			while (node2);
 		}
-		while (node2);
 	}
 	fz_catch(ctx)
 	{
@@ -2398,6 +2407,11 @@ int pdf_array_get_int(fz_context *ctx, pdf_obj *array, int index)
 float pdf_array_get_real(fz_context *ctx, pdf_obj *array, int index)
 {
 	return pdf_to_real(ctx, pdf_array_get(ctx, array, index));
+}
+
+const char *pdf_array_get_name(fz_context *ctx, pdf_obj *array, int index)
+{
+	return pdf_to_name(ctx, pdf_array_get(ctx, array, index));
 }
 
 const char *pdf_array_get_string(fz_context *ctx, pdf_obj *array, int index, size_t *sizep)

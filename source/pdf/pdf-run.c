@@ -13,6 +13,9 @@ pdf_run_annot_with_usage(fz_context *ctx, pdf_document *doc, pdf_page *page, pdf
 	fz_var(proc);
 	fz_var(default_cs);
 
+	if (cookie && page->super.incomplete)
+		cookie->incomplete = 1;
+
 	fz_try(ctx)
 	{
 		default_cs = pdf_load_default_colorspaces(ctx, doc, page);
@@ -34,7 +37,7 @@ pdf_run_annot_with_usage(fz_context *ctx, pdf_document *doc, pdf_page *page, pdf
 
 		ctm = fz_concat(page_ctm, ctm);
 
-		proc = pdf_new_run_processor(ctx, dev, ctm, usage, NULL, default_cs);
+		proc = pdf_new_run_processor(ctx, dev, ctm, usage, NULL, default_cs, cookie);
 		pdf_process_annot(ctx, proc, doc, page, annot, cookie);
 		pdf_close_processor(ctx, proc);
 	}
@@ -62,6 +65,9 @@ pdf_run_page_contents_with_usage(fz_context *ctx, pdf_document *doc, pdf_page *p
 	fz_var(colorspace);
 	fz_var(default_cs);
 
+	if (cookie && page->super.incomplete)
+		cookie->incomplete = 1;
+
 	fz_try(ctx)
 	{
 		default_cs = pdf_load_default_colorspaces(ctx, doc, page);
@@ -87,7 +93,16 @@ pdf_run_page_contents_with_usage(fz_context *ctx, pdf_document *doc, pdf_page *p
 					fz_try(ctx)
 						colorspace = pdf_load_colorspace(ctx, cs);
 					fz_catch(ctx)
+					{
+						fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
+						fz_warn(ctx, "Ignoring Page blending colorspace.");
+					}
+					if (!fz_is_valid_blend_colorspace(ctx, colorspace))
+					{
+						fz_warn(ctx, "Ignoring invalid Page blending colorspace: %s.", colorspace->name);
+						fz_drop_colorspace(ctx, colorspace);
 						colorspace = NULL;
+					}
 				}
 			}
 			else
@@ -96,7 +111,7 @@ pdf_run_page_contents_with_usage(fz_context *ctx, pdf_document *doc, pdf_page *p
 			fz_begin_group(ctx, dev, mediabox, colorspace, 1, 0, 0, 1);
 		}
 
-		proc = pdf_new_run_processor(ctx, dev, ctm, usage, NULL, default_cs);
+		proc = pdf_new_run_processor(ctx, dev, ctm, usage, NULL, default_cs, cookie);
 		pdf_process_contents(ctx, proc, doc, resources, contents, cookie);
 		pdf_close_processor(ctx, proc);
 
@@ -317,6 +332,7 @@ pdf_run_page_with_usage(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_d
 	{
 		pdf_run_page_contents_with_usage(ctx, doc, page, dev, ctm, usage, cookie);
 		pdf_run_page_annots_with_usage(ctx, doc, page, dev, ctm, usage, cookie);
+		pdf_run_page_widgets_with_usage(ctx, doc, page, dev, ctm, usage, cookie);
 	}
 	fz_always(ctx)
 	{
@@ -351,7 +367,7 @@ pdf_run_glyph(fz_context *ctx, pdf_document *doc, pdf_obj *resources, fz_buffer 
 {
 	pdf_processor *proc;
 
-	proc = pdf_new_run_processor(ctx, dev, ctm, "View", gstate, default_cs);
+	proc = pdf_new_run_processor(ctx, dev, ctm, "View", gstate, default_cs, NULL);
 	fz_try(ctx)
 	{
 		pdf_process_glyph(ctx, proc, doc, resources, contents);

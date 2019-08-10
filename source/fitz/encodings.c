@@ -6,6 +6,7 @@
 
 #include "encodings.h"
 #include "glyphlist.h"
+#include "smallcaps.h"
 
 #define FROM_UNICODE(ENC) \
 	int l = 0; \
@@ -30,6 +31,26 @@ int fz_koi8u_from_unicode(int u) { FROM_UNICODE(koi8u) }
 int fz_windows_1250_from_unicode(int u) { FROM_UNICODE(windows_1250) }
 int fz_windows_1251_from_unicode(int u) { FROM_UNICODE(windows_1251) }
 int fz_windows_1252_from_unicode(int u) { FROM_UNICODE(windows_1252) }
+
+int
+fz_unicode_from_glyph_name_strict(const char *name)
+{
+	int l = 0;
+	int r = nelem(single_name_list) - 1;
+
+	while (l <= r)
+	{
+		int m = (l + r) >> 1;
+		int c = strcmp(name, single_name_list[m]);
+		if (c < 0)
+			r = m - 1;
+		else if (c > 0)
+			l = m + 1;
+		else
+			return single_code_list[m];
+	}
+	return 0;
+}
 
 int
 fz_unicode_from_glyph_name(const char *name)
@@ -88,4 +109,22 @@ fz_duplicate_glyph_names_from_unicode(int ucs)
 			return agl_dup_names + agl_dup_offsets[(m << 1) + 1];
 	}
 	return empty_dup_list;
+}
+
+const char *
+fz_glyph_name_from_unicode_sc(int u)
+{
+	int l = 0;
+	int r = nelem(glyph_name_from_unicode_sc) / 2 - 1;
+	while (l <= r)
+	{
+		int m = (l + r) >> 1;
+		if (u < glyph_name_from_unicode_sc[m].u)
+			r = m - 1;
+		else if (u > glyph_name_from_unicode_sc[m].u)
+			l = m + 1;
+		else
+			return glyph_name_from_unicode_sc[m].n;
+	}
+	return NULL;
 }

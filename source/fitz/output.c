@@ -11,121 +11,6 @@
 #include <stdio.h>
 #include <string.h>
 
-struct fz_output_context_s
-{
-	int refs;
-	fz_output *out;
-	fz_output *err;
-};
-
-static void std_write(fz_context *ctx, void *opaque, const void *buffer, size_t count);
-
-static fz_output fz_stdout_global = {
-	&fz_stdout_global,
-	std_write,
-	NULL,
-	NULL,
-	NULL,
-};
-
-static fz_output fz_stderr_global = {
-	&fz_stderr_global,
-	std_write,
-	NULL,
-	NULL,
-	NULL,
-};
-
-void
-fz_new_output_context(fz_context *ctx)
-{
-	ctx->output = fz_malloc_struct(ctx, fz_output_context);
-	ctx->output->refs = 1;
-	ctx->output->out = &fz_stdout_global;
-	ctx->output->err = &fz_stderr_global;
-}
-
-fz_output_context *
-fz_keep_output_context(fz_context *ctx)
-{
-	if (!ctx)
-		return NULL;
-	return fz_keep_imp(ctx, ctx->output, &ctx->output->refs);
-}
-
-void
-fz_drop_output_context(fz_context *ctx)
-{
-	if (!ctx)
-		return;
-
-	if (fz_drop_imp(ctx, ctx->output, &ctx->output->refs))
-	{
-		fz_try(ctx)
-			fz_flush_output(ctx, ctx->output->out);
-		fz_catch(ctx)
-			fz_warn(ctx, "cannot flush stdout");
-		fz_drop_output(ctx, ctx->output->out);
-
-		fz_try(ctx)
-			fz_flush_output(ctx, ctx->output->err);
-		fz_catch(ctx)
-			fz_warn(ctx, "cannot flush stderr");
-		fz_drop_output(ctx, ctx->output->err);
-
-		fz_free(ctx, ctx->output);
-		ctx->output = NULL;
-	}
-}
-
-/*
-	Replace default standard output stream
-	with a given stream.
-
-	out: The new stream to use.
-*/
-void
-fz_set_stdout(fz_context *ctx, fz_output *out)
-{
-	fz_drop_output(ctx, ctx->output->out);
-	ctx->output->out = out ? out : &fz_stdout_global;
-}
-
-/*
-	Replace default standard error stream
-	with a given stream.
-
-	err: The new stream to use.
-*/
-void
-fz_set_stderr(fz_context *ctx, fz_output *err)
-{
-	fz_drop_output(ctx, ctx->output->err);
-	ctx->output->err = err ? err : &fz_stderr_global;
-}
-
-/*
-	The standard out output stream. By default
-	this stream writes to stdout. This may be overridden
-	using fz_set_stdout.
-*/
-fz_output *
-fz_stdout(fz_context *ctx)
-{
-	return ctx->output->out;
-}
-
-/*
-	The standard error output stream. By default
-	this stream writes to stderr. This may be overridden
-	using fz_set_stderr.
-*/
-fz_output *
-fz_stderr(fz_context *ctx)
-{
-	return ctx->output->err;
-}
-
 static void
 file_write(fz_context *ctx, void *opaque, const void *buffer, size_t count)
 {
@@ -149,10 +34,22 @@ file_write(fz_context *ctx, void *opaque, const void *buffer, size_t count)
 }
 
 static void
-std_write(fz_context *ctx, void *opaque, const void *buffer, size_t count)
+stdout_write(fz_context *ctx, void *opaque, const void *buffer, size_t count)
 {
-	FILE *f = opaque == &fz_stdout_global ? stdout : opaque == &fz_stderr_global ? stderr : NULL;
-	file_write(ctx, f, buffer, count);
+	file_write(ctx, stdout, buffer, count);
+}
+
+static fz_output fz_stdout_global = {
+	NULL,
+	stdout_write,
+	NULL,
+	NULL,
+	NULL,
+};
+
+fz_output *fz_stdout(fz_context *ctx)
+{
+	return &fz_stdout_global;
 }
 
 static void
@@ -197,7 +94,7 @@ file_as_stream(fz_context *ctx, void *opaque)
 	FILE *file = opaque;
 	fflush(file);
 	return fz_open_file_ptr_no_close(ctx, file);
-};
+}
 
 /*
 	Create a new output object with the given
@@ -363,7 +260,7 @@ fz_drop_output(fz_context *ctx, fz_output *out)
 		if (out->drop)
 			out->drop(ctx, out->state);
 		fz_free(ctx, out->bp);
-		if (out->state != &fz_stdout_global && out->state != &fz_stderr_global)
+		if (out != &fz_stdout_global)
 			fz_free(ctx, out);
 	}
 }
@@ -588,7 +485,7 @@ fz_write_base64(fz_context *ctx, fz_output *out, const unsigned char *data, int 
 {
 	static const char set[64] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 	int i;
-	for (i = 0; i + 3 < size; i += 3)
+	for (i = 0; i + 3 <= size; i += 3)
 	{
 		int c = data[i];
 		int d = data[i+1];

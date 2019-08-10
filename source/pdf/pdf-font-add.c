@@ -1,7 +1,6 @@
 #include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
 
-#include "../fitz/font-imp.h"
 #include "../fitz/fitz-imp.h"
 
 #include <ft2build.h>
@@ -29,6 +28,11 @@ static int ft_font_file_kind(FT_Face face)
 	if (!strcmp(kind, "CFF")) return 3;
 	if (!strcmp(kind, "CID Type 1")) return 1;
 	return 0;
+}
+
+static int is_ttc(fz_font *font)
+{
+	return !memcmp(font->buffer->data, "ttcf", 4);
 }
 
 static int is_truetype(FT_Face face)
@@ -222,9 +226,11 @@ pdf_add_cid_font_widths(fz_context *ctx, pdf_document *doc, pdf_obj *fobj, fz_fo
 		prev_size = fz_advance_glyph(ctx, font, 0, 0) * 1000;
 		first_code = prev_code;
 
-		while (prev_code < face->num_glyphs)
+		for (;;)
 		{
 			curr_code = prev_code + 1;
+			if (curr_code >= face->num_glyphs)
+				break;
 			curr_size = fz_advance_glyph(ctx, font, curr_code, 0) * 1000;
 
 			switch (state)
@@ -670,7 +676,9 @@ pdf_add_simple_font(fz_context *ctx, pdf_document *doc, fz_font *font, int encod
 int
 pdf_font_writing_supported(fz_font *font)
 {
-	if (font->ft_face == NULL)
+	if (font->ft_face == NULL || font->buffer == NULL || font->buffer->len < 4)
+		return 0;
+	if (is_ttc(font))
 		return 0;
 	if (is_truetype(font->ft_face))
 		return 1;

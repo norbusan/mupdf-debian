@@ -253,6 +253,12 @@ error_callback(void *data, const char *msg, Jbig2Severity severity, int32_t seg_
 		fz_warn(ctx, "jbig2dec error: %s (segment %d)", msg, seg_idx);
 	else if (severity == JBIG2_SEVERITY_WARNING)
 		fz_warn(ctx, "jbig2dec warning: %s (segment %d)", msg, seg_idx);
+#ifndef NDEBUG
+	else if (severity == JBIG2_SEVERITY_INFO)
+		fz_warn(ctx, "jbig2dec info: %s (segment %d)", msg, seg_idx);
+	else if (severity == JBIG2_SEVERITY_DEBUG)
+		fz_warn(ctx, "jbig2dec debug: %s (segment %d)", msg, seg_idx);
+#endif
 }
 
 static void *fz_jbig2_alloc(Jbig2Allocator *allocator, size_t size)
@@ -277,7 +283,7 @@ static void *fz_jbig2_realloc(Jbig2Allocator *allocator, void *p, size_t size)
 	}
 	if (p == NULL)
 		return fz_malloc(ctx, size);
-	return fz_resize_array_no_throw(ctx, p, 1, size);
+	return fz_realloc_no_throw(ctx, p, size);
 }
 
 static fz_pixmap *

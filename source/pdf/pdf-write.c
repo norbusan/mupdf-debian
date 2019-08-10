@@ -14,6 +14,11 @@
 
 #define SIG_EXTRAS_SIZE (1024)
 
+#define SLASH_BYTE_RANGE ("/ByteRange")
+#define SLASH_CONTENTS ("/Contents")
+#define SLASH_FILTER ("/Filter")
+
+
 typedef struct pdf_write_state_s pdf_write_state;
 
 /*
@@ -67,7 +72,7 @@ struct pdf_write_state_s
 	int do_garbage;
 	int do_linear;
 	int do_clean;
-	int do_decrypt;
+	int do_encrypt;
 
 	int list_len;
 	int *use_list;
@@ -96,6 +101,10 @@ struct pdf_write_state_s
 	int page_count;
 	page_objects_list *page_object_lists;
 	int crypt_object_number;
+	char opwd_utf8[128];
+	char upwd_utf8[128];
+	int permissions;
+	pdf_crypt *crypt;
 };
 
 /*
@@ -122,6 +131,30 @@ enum
 	USE_PAGE_MASK = ~255,
 	USE_PAGE_SHIFT = 8
 };
+
+static void
+expand_lists(fz_context *ctx, pdf_write_state *opts, int num)
+{
+	int i;
+
+	/* objects are numbered 0..num and maybe two additional objects for linearization */
+	num += 3;
+	opts->use_list = fz_realloc_array(ctx, opts->use_list, num, int);
+	opts->ofs_list = fz_realloc_array(ctx, opts->ofs_list, num, int64_t);
+	opts->gen_list = fz_realloc_array(ctx, opts->gen_list, num, int);
+	opts->renumber_map = fz_realloc_array(ctx, opts->renumber_map, num, int);
+	opts->rev_renumber_map = fz_realloc_array(ctx, opts->rev_renumber_map, num, int);
+
+	for (i = opts->list_len; i < num; i++)
+	{
+		opts->use_list[i] = 0;
+		opts->ofs_list[i] = 0;
+		opts->gen_list[i] = 0;
+		opts->renumber_map[i] = i;
+		opts->rev_renumber_map[i] = i;
+	}
+	opts->list_len = num;
+}
 
 /*
  * page_objects and page_object_list handling functions
@@ -156,7 +189,7 @@ page_objects_list_ensure(fz_context *ctx, page_objects_list **pol, int newcap)
 	int oldcap = (*pol)->cap;
 	if (newcap <= oldcap)
 		return;
-	*pol = fz_resize_array(ctx, *pol, 1, sizeof(page_objects_list) + (newcap-1)*sizeof(page_objects *));
+	*pol = fz_realloc(ctx, *pol, sizeof(page_objects_list) + (newcap-1)*sizeof(page_objects *));
 	memset(&(*pol)->page[oldcap], 0, (newcap-oldcap)*sizeof(page_objects *));
 	(*pol)->cap = newcap;
 }
@@ -185,7 +218,7 @@ page_objects_insert(fz_context *ctx, page_objects **ppo, int i)
 	/* page_objects insertion: extend the page_objects by 1, and put us on the end */
 	if (po->len == po->cap)
 	{
-		po = fz_resize_array(ctx, po, 1, sizeof(page_objects) + (po->cap*2 - 1)*sizeof(int));
+		po = fz_realloc(ctx, po, sizeof(page_objects) + (po->cap*2 - 1)*sizeof(int));
 		po->cap *= 2;
 		*ppo = po;
 	}
@@ -196,6 +229,8 @@ static void
 page_objects_list_insert(fz_context *ctx, pdf_write_state *opts, int page, int object)
 {
 	page_objects_list_ensure(ctx, &opts->page_object_lists, page+1);
+	if (object >= opts->list_len)
+		expand_lists(ctx, opts, object);
 	if (opts->page_object_lists->len < page+1)
 		opts->page_object_lists->len = page+1;
 	page_objects_insert(ctx, &opts->page_object_lists->page[page], object);
@@ -205,6 +240,8 @@ static void
 page_objects_list_set_page_object(fz_context *ctx, pdf_write_state *opts, int page, int object)
 {
 	page_objects_list_ensure(ctx, &opts->page_object_lists, page+1);
+	if (object >= opts->list_len)
+		expand_lists(ctx, opts, object);
 	opts->page_object_lists->page[page]->page_object_number = object;
 }
 
@@ -630,30 +667,6 @@ static int markobj(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, pd
 	return 0;
 }
 
-static void
-expand_lists(fz_context *ctx, pdf_write_state *opts, int num)
-{
-	int i;
-
-	/* objects are numbered 0..num and maybe two additional objects for linearization */
-	num += 3;
-	opts->use_list = fz_resize_array(ctx, opts->use_list, num, sizeof(*opts->use_list));
-	opts->ofs_list = fz_resize_array(ctx, opts->ofs_list, num, sizeof(*opts->ofs_list));
-	opts->gen_list = fz_resize_array(ctx, opts->gen_list, num, sizeof(*opts->gen_list));
-	opts->renumber_map = fz_resize_array(ctx, opts->renumber_map, num, sizeof(*opts->renumber_map));
-	opts->rev_renumber_map = fz_resize_array(ctx, opts->rev_renumber_map, num, sizeof(*opts->rev_renumber_map));
-
-	for (i = opts->list_len; i < num; i++)
-	{
-		opts->use_list[i] = 0;
-		opts->ofs_list[i] = 0;
-		opts->gen_list[i] = 0;
-		opts->renumber_map[i] = i;
-		opts->rev_renumber_map[i] = i;
-	}
-	opts->list_len = num;
-}
-
 /*
  * Scan for and remove duplicate objects (slow)
  */
@@ -898,7 +911,7 @@ static void renumberobjs(fz_context *ctx, pdf_document *doc, pdf_write_state *op
 		}
 
 		/* Create new table for the reordered, compacted xref */
-		newxref = fz_malloc_array(ctx, xref_len + 3, sizeof(pdf_xref_entry));
+		newxref = fz_malloc_array(ctx, xref_len + 3, pdf_xref_entry);
 		newxref[0] = *pdf_get_xref_entry(ctx, doc, 0);
 
 		/* Move used objects into the new compacted xref */
@@ -973,6 +986,8 @@ mark_all(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, pdf_obj *val
 		if (pdf_is_indirect(ctx, val))
 		{
 			int num = pdf_to_num(ctx, val);
+			if (num >= opts->list_len)
+				expand_lists(ctx, opts, num);
 			if (opts->use_list[num] & USE_PAGE_MASK)
 				/* Already used */
 				opts->use_list[num] |= USE_SHARED;
@@ -1549,10 +1564,8 @@ static inline int isbinary(int c)
 	return c < 32 || c > 127;
 }
 
-static int isbinarystream(fz_context *ctx, fz_buffer *buf)
+static int isbinarystream(fz_context *ctx, const unsigned char *data, size_t len)
 {
-	unsigned char *data;
-	size_t len = fz_buffer_storage(ctx, buf, &data);
 	size_t i;
 	for (i = 0; i < len; i++)
 		if (isbinary(data[i]))
@@ -1660,14 +1673,83 @@ static fz_buffer *deflatebuf(fz_context *ctx, const unsigned char *p, size_t n)
 	return buf;
 }
 
+static int striphexfilter(fz_context *ctx, pdf_document *doc, pdf_obj *dict)
+{
+	pdf_obj *f, *dp;
+	int is_hex = 0;
+
+	f = pdf_dict_get(ctx, dict, PDF_NAME(Filter));
+	dp = pdf_dict_get(ctx, dict, PDF_NAME(DecodeParms));
+
+	if (pdf_is_array(ctx, f))
+	{
+		/* Remove ASCIIHexDecode from head of filter list */
+		if (pdf_array_get(ctx, f, 0) == PDF_NAME(ASCIIHexDecode))
+		{
+			is_hex = 1;
+			pdf_array_delete(ctx, f, 0);
+			if (pdf_is_array(ctx, dp))
+				pdf_array_delete(ctx, dp, 0);
+		}
+		/* Unpack array if only one filter remains */
+		if (pdf_array_len(ctx, f) == 1)
+		{
+			f = pdf_array_get(ctx, f, 0);
+			pdf_dict_put(ctx, dict, PDF_NAME(Filter), f);
+			if (dp)
+			{
+				dp = pdf_array_get(ctx, dp, 0);
+				pdf_dict_put(ctx, dict, PDF_NAME(DecodeParms), dp);
+			}
+		}
+		/* Remove array if no filters remain */
+		else if (pdf_array_len(ctx, f) == 0)
+		{
+			pdf_dict_del(ctx, dict, PDF_NAME(Filter));
+			pdf_dict_del(ctx, dict, PDF_NAME(DecodeParms));
+		}
+	}
+	else if (f == PDF_NAME(ASCIIHexDecode))
+	{
+		is_hex = 1;
+		pdf_dict_del(ctx, dict, PDF_NAME(Filter));
+		pdf_dict_del(ctx, dict, PDF_NAME(DecodeParms));
+	}
+
+	return is_hex;
+}
+
+static fz_buffer *unhexbuf(fz_context *ctx, const unsigned char *p, size_t n)
+{
+	fz_stream *mstm = NULL;
+	fz_stream *xstm = NULL;
+	fz_buffer *out = NULL;
+	fz_var(mstm);
+	fz_var(xstm);
+	fz_try(ctx)
+	{
+		mstm = fz_open_memory(ctx, p, n);
+		xstm = fz_open_ahxd(ctx, mstm);
+		out = fz_read_all(ctx, xstm, n/2);
+	}
+	fz_always(ctx)
+	{
+		fz_drop_stream(ctx, xstm);
+		fz_drop_stream(ctx, mstm);
+	}
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+	return out;
+}
+
 static void write_data(fz_context *ctx, void *arg, const unsigned char *data, int len)
 {
 	fz_write_data(ctx, (fz_output *)arg, data, len);
 }
 
-static void copystream(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, pdf_obj *obj_orig, int num, int gen, int do_deflate)
+static void copystream(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, pdf_obj *obj_orig, int num, int gen, int do_deflate, int unenc)
 {
-	fz_buffer *tmp_flate = NULL, *tmp_hex = NULL, *buf = NULL;
+	fz_buffer *tmp_unhex = NULL, *tmp_flate = NULL, *tmp_hex = NULL, *buf = NULL;
 	pdf_obj *obj = NULL;
 	size_t len;
 	unsigned char *data;
@@ -1683,6 +1765,13 @@ static void copystream(fz_context *ctx, pdf_document *doc, pdf_write_state *opts
 		obj = pdf_copy_dict(ctx, obj_orig);
 
 		len = fz_buffer_storage(ctx, buf, &data);
+
+		if (do_deflate && striphexfilter(ctx, doc, obj))
+		{
+			tmp_unhex = unhexbuf(ctx, data, len);
+			len = fz_buffer_storage(ctx, tmp_unhex, &data);
+		}
+
 		if (do_deflate && !pdf_dict_get(ctx, obj, PDF_NAME(Filter)))
 		{
 			size_t clen;
@@ -1697,7 +1786,7 @@ static void copystream(fz_context *ctx, pdf_document *doc, pdf_write_state *opts
 			}
 		}
 
-		if (opts->do_ascii && isbinarystream(ctx, buf))
+		if (opts->do_ascii && isbinarystream(ctx, data, len))
 		{
 			tmp_hex = hexbuf(ctx, data, len);
 			len = fz_buffer_storage(ctx, tmp_hex, &data);
@@ -1706,7 +1795,7 @@ static void copystream(fz_context *ctx, pdf_document *doc, pdf_write_state *opts
 
 		fz_write_printf(ctx, opts->out, "%d %d obj\n", num, gen);
 
-		if (opts->do_decrypt)
+		if (unenc)
 		{
 			pdf_dict_put_int(ctx, obj, PDF_NAME(Length), len);
 			pdf_print_obj(ctx, opts->out, obj, opts->do_tight, opts->do_ascii);
@@ -1715,17 +1804,17 @@ static void copystream(fz_context *ctx, pdf_document *doc, pdf_write_state *opts
 		}
 		else
 		{
-			pdf_dict_put_int(ctx, obj, PDF_NAME(Length), pdf_encrypted_len(ctx, doc->crypt, num, gen, (int)len));
-			pdf_print_encrypted_obj(ctx, opts->out, obj, opts->do_tight, opts->do_ascii, doc->crypt, num, gen);
+			pdf_dict_put_int(ctx, obj, PDF_NAME(Length), pdf_encrypted_len(ctx, opts->crypt, num, gen, (int)len));
+			pdf_print_encrypted_obj(ctx, opts->out, obj, opts->do_tight, opts->do_ascii, opts->crypt, num, gen);
 			fz_write_string(ctx, opts->out, "\nstream\n");
-			pdf_encrypt_data(ctx, doc->crypt, num, gen, write_data, opts->out, data, len);
+			pdf_encrypt_data(ctx, opts->crypt, num, gen, write_data, opts->out, data, len);
 		}
 
 		fz_write_string(ctx, opts->out, "\nendstream\nendobj\n\n");
-
 	}
 	fz_always(ctx)
 	{
+		fz_drop_buffer(ctx, tmp_unhex);
 		fz_drop_buffer(ctx, tmp_hex);
 		fz_drop_buffer(ctx, tmp_flate);
 		fz_drop_buffer(ctx, buf);
@@ -1737,7 +1826,7 @@ static void copystream(fz_context *ctx, pdf_document *doc, pdf_write_state *opts
 	}
 }
 
-static void expandstream(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, pdf_obj *obj_orig, int num, int gen, int do_deflate)
+static void expandstream(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, pdf_obj *obj_orig, int num, int gen, int do_deflate, int unenc)
 {
 	fz_buffer *buf = NULL, *tmp_flate = NULL, *tmp_hex = NULL;
 	pdf_obj *obj = NULL;
@@ -1771,7 +1860,7 @@ static void expandstream(fz_context *ctx, pdf_document *doc, pdf_write_state *op
 			}
 		}
 
-		if (opts->do_ascii && isbinarystream(ctx, buf))
+		if (opts->do_ascii && isbinarystream(ctx, data, len))
 		{
 			tmp_hex = hexbuf(ctx, data, len);
 			len = fz_buffer_storage(ctx, tmp_hex, &data);
@@ -1780,7 +1869,7 @@ static void expandstream(fz_context *ctx, pdf_document *doc, pdf_write_state *op
 
 		fz_write_printf(ctx, opts->out, "%d %d obj\n", num, gen);
 
-		if (opts->do_decrypt)
+		if (unenc)
 		{
 			pdf_dict_put_int(ctx, obj, PDF_NAME(Length), len);
 			pdf_print_obj(ctx, opts->out, obj, opts->do_tight, opts->do_ascii);
@@ -1789,10 +1878,10 @@ static void expandstream(fz_context *ctx, pdf_document *doc, pdf_write_state *op
 		}
 		else
 		{
-			pdf_dict_put_int(ctx, obj, PDF_NAME(Length), pdf_encrypted_len(ctx, doc->crypt, num, gen, (int)len));
-			pdf_print_encrypted_obj(ctx, opts->out, obj, opts->do_tight, opts->do_ascii, doc->crypt, num, gen);
+			pdf_dict_put_int(ctx, obj, PDF_NAME(Length), pdf_encrypted_len(ctx, opts->crypt, num, gen, (int)len));
+			pdf_print_encrypted_obj(ctx, opts->out, obj, opts->do_tight, opts->do_ascii, opts->crypt, num, gen);
 			fz_write_string(ctx, opts->out, "\nstream\n");
-			pdf_encrypt_data(ctx, doc->crypt, num, gen, write_data, opts->out, data, len);
+			pdf_encrypt_data(ctx, opts->crypt, num, gen, write_data, opts->out, data, len);
 		}
 
 		fz_write_string(ctx, opts->out, "\nendstream\nendobj\n\n");
@@ -1911,7 +2000,7 @@ static void writeobject(fz_context *ctx, pdf_document *doc, pdf_write_state *opt
 	fz_var(obj);
 	fz_var(buf);
 
-	if (opts->do_decrypt)
+	if (opts->do_encrypt == PDF_ENCRYPT_NONE)
 		unenc = 1;
 
 	fz_try(ctx)
@@ -1950,14 +2039,14 @@ static void writeobject(fz_context *ctx, pdf_document *doc, pdf_write_state *opt
 					do_deflate = 0, do_expand = 0;
 
 				if (do_expand)
-					expandstream(ctx, doc, opts, obj, num, gen, do_deflate);
+					expandstream(ctx, doc, opts, obj, num, gen, do_deflate, unenc);
 				else
-					copystream(ctx, doc, opts, obj, num, gen, do_deflate);
+					copystream(ctx, doc, opts, obj, num, gen, do_deflate, unenc);
 			}
 			else
 			{
 				fz_write_printf(ctx, opts->out, "%d %d obj\n", num, gen);
-				pdf_print_encrypted_obj(ctx, opts->out, obj, opts->do_tight, opts->do_ascii, unenc ? NULL : doc->crypt, num, gen);
+				pdf_print_encrypted_obj(ctx, opts->out, obj, opts->do_tight, opts->do_ascii, unenc ? NULL : opts->crypt, num, gen);
 				fz_write_string(ctx, opts->out, "\nendobj\n\n");
 			}
 		}
@@ -2194,7 +2283,7 @@ static void writexrefstream(fz_context *ctx, pdf_document *doc, pdf_write_state 
 
 		pdf_update_stream(ctx, doc, dict, fzbuf, 0);
 
-		writeobject(ctx, doc, opts, num, 0, 0, 0);
+		writeobject(ctx, doc, opts, num, 0, 0, 1);
 		fz_write_printf(ctx, opts->out, "startxref\n%lu\n%%%%EOF\n", startxref);
 	}
 	fz_always(ctx)
@@ -2699,22 +2788,27 @@ static void complete_signatures(fz_context *ctx, pdf_document *doc, pdf_write_st
 				for (usig = xref->unsaved_sigs; usig; usig = usig->next)
 				{
 					char *bstr, *cstr, *fstr;
+					int bytes_read;
 					int pnum = pdf_obj_parent_num(ctx, pdf_dict_getl(ctx, usig->field, PDF_NAME(V), PDF_NAME(ByteRange), NULL));
 					fz_seek(ctx, stm, opts->ofs_list[pnum], SEEK_SET);
-					(void)fz_read(ctx, stm, (unsigned char *)buf, buf_size);
-					buf[buf_size-1] = 0;
+					/* SIG_EXTRAS_SIZE is an arbitrary value and its addition above to buf_size
+					 * could cause an attempt to read off the end of the file. That's not an
+					 * error, but we need to keep track of how many bytes are read and search
+					 * for markers only in defined data */
+					bytes_read = fz_read(ctx, stm, (unsigned char *)buf, buf_size);
+					assert(bytes_read <= buf_size);
 
-					bstr = strstr(buf, "/ByteRange");
-					cstr = strstr(buf, "/Contents");
-					fstr = strstr(buf, "/Filter");
+					bstr = fz_memmem(buf, bytes_read, SLASH_BYTE_RANGE, sizeof(SLASH_BYTE_RANGE)-1);
+					cstr = fz_memmem(buf, bytes_read, SLASH_CONTENTS, sizeof(SLASH_CONTENTS)-1);
+					fstr = fz_memmem(buf, bytes_read, SLASH_FILTER, sizeof(SLASH_FILTER)-1);
 
-					if (bstr && cstr && fstr && bstr < cstr && cstr < fstr)
-					{
-						usig->byte_range_start = bstr - buf + 10 + opts->ofs_list[pnum];
-						usig->byte_range_end = cstr - buf + opts->ofs_list[pnum];
-						usig->contents_start = cstr - buf + 9 + opts->ofs_list[pnum];
-						usig->contents_end = fstr - buf + opts->ofs_list[pnum];
-					}
+					if (!(bstr && cstr && fstr && bstr < cstr && cstr < fstr))
+						fz_throw(ctx, FZ_ERROR_GENERIC, "Failed to determine byte ranges while writing signature");
+
+					usig->byte_range_start = bstr - buf + sizeof(SLASH_BYTE_RANGE)-1 + opts->ofs_list[pnum];
+					usig->byte_range_end = cstr - buf + opts->ofs_list[pnum];
+					usig->contents_start = cstr - buf + sizeof(SLASH_CONTENTS)-1 + opts->ofs_list[pnum];
+					usig->contents_end = fstr - buf + opts->ofs_list[pnum];
 				}
 
 				fz_drop_stream(ctx, stm);
@@ -2823,9 +2917,13 @@ static void initialise_write_state(fz_context *ctx, pdf_document *doc, const pdf
 	opts->do_garbage = in_opts->do_garbage;
 	opts->do_linear = in_opts->do_linear;
 	opts->do_clean = in_opts->do_clean;
-	opts->do_decrypt = in_opts->do_decrypt;
+	opts->do_encrypt = in_opts->do_encrypt;
 	opts->start = 0;
 	opts->main_xref_offset = INT_MIN;
+
+	opts->permissions = in_opts->permissions;
+	memcpy(opts->opwd_utf8, in_opts->opwd_utf8, nelem(opts->opwd_utf8));
+	memcpy(opts->upwd_utf8, in_opts->upwd_utf8, nelem(opts->upwd_utf8));
 
 	/* We deliberately make these arrays long enough to cope with
 	* 1 to n access rather than 0..n-1, and add space for 2 new
@@ -2860,6 +2958,25 @@ static void finalise_write_state(fz_context *ctx, pdf_write_state *opts)
 	page_objects_list_destroy(ctx, opts->page_object_lists);
 }
 
+const pdf_write_options pdf_default_write_options = {
+	0, /* do_incremental */
+	0, /* do_pretty */
+	0, /* do_ascii */
+	0, /* do_compress */
+	0, /* do_compress_images */
+	0, /* do_compress_fonts */
+	0, /* do_decompress */
+	0, /* do_garbage */
+	0, /* do_linear */
+	0, /* do_clean */
+	0, /* do_sanitize */
+	0, /* do_appearance */
+	0, /* do_encrypt */
+	~0, /* permissions */
+	"", /* opwd_utf8[128] */
+	"", /* upwd_utf8[128] */
+};
+
 const char *fz_pdf_write_options_usage =
 	"PDF output options:\n"
 	"\tdecompress: decompress all streams (except compress-fonts/images)\n"
@@ -2876,6 +2993,11 @@ const char *fz_pdf_write_options_usage =
 	"\tcontinue-on-error: continue saving the document even if there is an error\n"
 	"\tor garbage=compact: ... and compact cross reference table\n"
 	"\tor garbage=deduplicate: ... and remove duplicate objects\n"
+	"\tdecrypt: write unencrypted document\n"
+	"\tencrypt=rc4-40|rc4-128|aes-128|aes-256: write encrypted document\n"
+	"\tpermissions=NUMBER: document permissions to grant when encrypting\n"
+	"\tuser-password=PASSWORD: password required to read document\n"
+	"\towner-password=PASSWORD: password required to edit document\n"
 	"\n";
 
 /*
@@ -2917,7 +3039,31 @@ pdf_parse_write_options(fz_context *ctx, pdf_write_options *opts, const char *ar
 	if (fz_has_option(ctx, args, "incremental", &val))
 		opts->do_incremental = fz_option_eq(val, "yes");
 	if (fz_has_option(ctx, args, "decrypt", &val))
-		opts->do_decrypt = fz_option_eq(val, "yes");
+		opts->do_encrypt = fz_option_eq(val, "yes") ? PDF_ENCRYPT_NONE : PDF_ENCRYPT_KEEP;
+	if (fz_has_option(ctx, args, "encrypt", &val))
+	{
+		opts->do_encrypt = PDF_ENCRYPT_UNKNOWN;
+		if (fz_option_eq(val, "none") || fz_option_eq(val, "no"))
+			opts->do_encrypt = PDF_ENCRYPT_NONE;
+		if (fz_option_eq(val, "keep"))
+			opts->do_encrypt = PDF_ENCRYPT_KEEP;
+		if (fz_option_eq(val, "rc4-40") || fz_option_eq(val, "yes"))
+			opts->do_encrypt = PDF_ENCRYPT_RC4_40;
+		if (fz_option_eq(val, "rc4-128"))
+			opts->do_encrypt = PDF_ENCRYPT_RC4_128;
+		if (fz_option_eq(val, "aes-128"))
+			opts->do_encrypt = PDF_ENCRYPT_AES_128;
+		if (fz_option_eq(val, "aes-256"))
+			opts->do_encrypt = PDF_ENCRYPT_AES_256;
+	}
+	if (fz_has_option(ctx, args, "owner-password", &val))
+		fz_copy_option(ctx, val, opts->opwd_utf8, nelem(opts->opwd_utf8));
+	if (fz_has_option(ctx, args, "user-password", &val))
+		fz_copy_option(ctx, val, opts->upwd_utf8, nelem(opts->upwd_utf8));
+	if (fz_has_option(ctx, args, "permissions", &val))
+		opts->permissions = fz_atoi(val);
+	else
+		opts->permissions = ~0;
 	if (fz_has_option(ctx, args, "garbage", &val))
 	{
 		if (fz_option_eq(val, "yes"))
@@ -2941,18 +3087,18 @@ pdf_parse_write_options(fz_context *ctx, pdf_write_options *opts, const char *ar
 }
 
 /*
-	Return true if the document can be saved
-	incrementally. (e.g. it has not been repaired, and it is not encrypted)
+	Return true if the document can be saved incrementally. Applying
+	redactions or having a repaired document make incremental saving
+	impossible.
 */
 int pdf_can_be_saved_incrementally(fz_context *ctx, pdf_document *doc)
 {
 	if (doc->repair_attempted)
 		return 0;
-	if (doc->crypt != NULL)
+	if (doc->redacted)
 		return 0;
 	if (doc->has_xref_streams && doc->has_old_style_xrefs)
 		return 0;
-
 	return 1;
 }
 
@@ -2968,20 +3114,94 @@ prepare_for_save(fz_context *ctx, pdf_document *doc, pdf_write_options *in_opts)
 	presize_unsaved_signature_byteranges(ctx, doc);
 }
 
-static void
-change_identity(fz_context *ctx, pdf_document *doc)
+static pdf_obj *
+new_identity(fz_context *ctx, pdf_document *doc)
 {
-	pdf_obj *identity = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(ID));
-	pdf_obj *str;
+	unsigned char rnd[32];
+	pdf_obj *id;
+
+	fz_memrnd(ctx, rnd, nelem(rnd));
+
+	id = pdf_dict_put_array(ctx, pdf_trailer(ctx, doc), PDF_NAME(ID), 2);
+	pdf_array_push_drop(ctx, id, pdf_new_string(ctx, (char *) rnd + 0, nelem(rnd) / 2));
+	pdf_array_push_drop(ctx, id, pdf_new_string(ctx, (char *) rnd + 16, nelem(rnd) / 2));
+
+	return id;
+}
+
+static void
+change_identity(fz_context *ctx, pdf_document *doc, pdf_obj *id)
+{
 	unsigned char rnd[16];
+	if (pdf_array_len(ctx, id) >= 2)
+	{
+		/* Update second half of ID array with new random data. */
+		fz_memrnd(ctx, rnd, 16);
+		pdf_array_put_drop(ctx, id, 1, pdf_new_string(ctx, (char *)rnd, 16));
+	}
+}
 
-	if (pdf_array_len(ctx, identity) < 2)
-		return;
+static void
+create_encryption_dictionary(fz_context *ctx, pdf_document *doc, pdf_crypt *crypt)
+{
+	unsigned char *o, *u;
+	pdf_obj *encrypt;
+	int r;
 
-	/* Maybe recalculate this in future. For now, just change the second one. */
-	fz_memrnd(ctx, rnd, 16);
-	str = pdf_new_string(ctx, (char *)rnd, 16);
-	pdf_array_put_drop(ctx, identity, 1, str);
+	r = pdf_crypt_revision(ctx, crypt);
+
+	encrypt = pdf_dict_put_dict(ctx, pdf_trailer(ctx, doc), PDF_NAME(Encrypt), 10);
+
+	pdf_dict_put_name(ctx, encrypt, PDF_NAME(Filter), "Standard");
+	pdf_dict_put_int(ctx, encrypt, PDF_NAME(R), r);
+	pdf_dict_put_int(ctx, encrypt, PDF_NAME(V), pdf_crypt_version(ctx, crypt));
+	pdf_dict_put_int(ctx, encrypt, PDF_NAME(Length), pdf_crypt_length(ctx, crypt));
+	pdf_dict_put_int(ctx, encrypt, PDF_NAME(P), pdf_crypt_permissions(ctx, crypt));
+	pdf_dict_put_bool(ctx, encrypt, PDF_NAME(EncryptMetadata), pdf_crypt_encrypt_metadata(ctx, crypt));
+
+	o = pdf_crypt_owner_password(ctx, crypt);
+	u = pdf_crypt_user_password(ctx, crypt);
+
+	if (r < 4)
+	{
+		pdf_dict_put_string(ctx, encrypt, PDF_NAME(O), (char *) o, 32);
+		pdf_dict_put_string(ctx, encrypt, PDF_NAME(U), (char *) u, 32);
+	}
+	else if (r == 4)
+	{
+		pdf_obj *cf;
+
+		pdf_dict_put_name(ctx, encrypt, PDF_NAME(StmF), "StdCF");
+		pdf_dict_put_name(ctx, encrypt, PDF_NAME(StrF), "StdCF");
+
+		cf = pdf_dict_put_dict(ctx, encrypt, PDF_NAME(CF), 1);
+		cf = pdf_dict_put_dict(ctx, cf, PDF_NAME(StdCF), 3);
+		pdf_dict_put_name(ctx, cf, PDF_NAME(AuthEvent), "DocOpen");
+		pdf_dict_put_name(ctx, cf, PDF_NAME(CFM), "AESV2");
+		pdf_dict_put_int(ctx, cf, PDF_NAME(Length), 16);
+		pdf_dict_put_string(ctx, encrypt, PDF_NAME(O), (char *) o, 32);
+		pdf_dict_put_string(ctx, encrypt, PDF_NAME(U), (char *) u, 32);
+	}
+	else if (r == 6)
+	{
+		unsigned char *oe = pdf_crypt_owner_encryption(ctx, crypt);
+		unsigned char *ue = pdf_crypt_user_encryption(ctx, crypt);
+		pdf_obj *cf;
+
+		pdf_dict_put_name(ctx, encrypt, PDF_NAME(StmF), "StdCF");
+		pdf_dict_put_name(ctx, encrypt, PDF_NAME(StrF), "StdCF");
+
+		cf = pdf_dict_put_dict(ctx, encrypt, PDF_NAME(CF), 1);
+		cf = pdf_dict_put_dict(ctx, cf, PDF_NAME(StdCF), 3);
+		pdf_dict_put_name(ctx, cf, PDF_NAME(AuthEvent), "DocOpen");
+		pdf_dict_put_name(ctx, cf, PDF_NAME(CFM), "AESV3");
+		pdf_dict_put_int(ctx, cf, PDF_NAME(Length), 32);
+		pdf_dict_put_string(ctx, encrypt, PDF_NAME(O), (char *) o, 48);
+		pdf_dict_put_string(ctx, encrypt, PDF_NAME(U), (char *) u, 48);
+		pdf_dict_put_string(ctx, encrypt, PDF_NAME(OE), (char *) oe, 32);
+		pdf_dict_put_string(ctx, encrypt, PDF_NAME(UE), (char *) ue, 32);
+		pdf_dict_put_string(ctx, encrypt, PDF_NAME(Perms), (char *) pdf_crypt_permissions_encryption(ctx, crypt), 16);
+	}
 }
 
 static void
@@ -2990,6 +3210,7 @@ do_pdf_save_document(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, 
 	int lastfree;
 	int num;
 	int xref_len;
+	pdf_obj *id, *id1;
 
 	if (in_opts->do_incremental)
 	{
@@ -3009,10 +3230,31 @@ do_pdf_save_document(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, 
 	{
 		initialise_write_state(ctx, doc, in_opts, opts);
 
+		/* Update second half of ID array if it exists. */
+		id = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(ID));
+		if (id)
+			change_identity(ctx, doc, id);
+
 		/* Remove encryption dictionary if saving without encryption. */
-		if (opts->do_decrypt)
+		if (opts->do_encrypt == PDF_ENCRYPT_NONE)
 		{
 			pdf_dict_del(ctx, pdf_trailer(ctx, doc), PDF_NAME(Encrypt));
+		}
+
+		/* Keep encryption dictionary if saving with old encryption. */
+		else if (opts->do_encrypt == PDF_ENCRYPT_KEEP)
+		{
+			opts->crypt = doc->crypt;
+		}
+
+		/* Create encryption dictionary if saving with new encryption. */
+		else
+		{
+			if (!id)
+				id = new_identity(ctx, doc);
+			id1 = pdf_array_get(ctx, id, 0);
+			opts->crypt = pdf_new_encrypt(ctx, opts->opwd_utf8, opts->upwd_utf8, id1, opts->permissions, opts->do_encrypt);
+			create_encryption_dictionary(ctx, doc, opts->crypt);
 		}
 
 		/* Make sure any objects hidden in compressed streams have been loaded */
@@ -3020,7 +3262,6 @@ do_pdf_save_document(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, 
 		{
 			pdf_ensure_solid_xref(ctx, doc, xref_len);
 			preloadobjstms(ctx, doc);
-			change_identity(ctx, doc);
 			xref_len = pdf_xref_len(ctx, doc); /* May have changed due to repair */
 			expand_lists(ctx, opts, xref_len);
 		}
@@ -3045,7 +3286,7 @@ do_pdf_save_document(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, 
 			compactxref(ctx, doc, opts);
 
 		opts->crypt_object_number = 0;
-		if (doc->crypt)
+		if (opts->crypt)
 		{
 			pdf_obj *crypt = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(Encrypt));
 			int crypt_num = pdf_to_num(ctx, crypt);
@@ -3167,7 +3408,8 @@ do_pdf_save_document(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, 
 		objects_dump(ctx, doc, opts);
 #endif
 		finalise_write_state(ctx, opts);
-
+		if (opts->crypt != doc->crypt)
+			pdf_drop_crypt(ctx, opts->crypt);
 		doc->freeze_updates = 0;
 	}
 	fz_catch(ctx)
@@ -3198,7 +3440,7 @@ int pdf_has_unsaved_sigs(fz_context *ctx, pdf_document *doc)
 */
 void pdf_write_document(fz_context *ctx, pdf_document *doc, fz_output *out, pdf_write_options *in_opts)
 {
-	pdf_write_options opts_defaults = { 0 };
+	pdf_write_options opts_defaults = pdf_default_write_options;
 	pdf_write_state opts = { 0 };
 
 	if (!doc)
@@ -3213,8 +3455,8 @@ void pdf_write_document(fz_context *ctx, pdf_document *doc, fz_output *out, pdf_
 		fz_throw(ctx, FZ_ERROR_GENERIC, "Can't do incremental writes with garbage collection");
 	if (in_opts->do_incremental && in_opts->do_linear)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "Can't do incremental writes with linearisation");
-	if (in_opts->do_incremental && in_opts->do_decrypt)
-		fz_throw(ctx, FZ_ERROR_GENERIC, "Can't do incremental writes with decryption");
+	if (in_opts->do_incremental && in_opts->do_encrypt != PDF_ENCRYPT_KEEP)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "Can't do incremental writes when changing encryption");
 	if (pdf_has_unsaved_sigs(ctx, doc) && !out->as_stream)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "Can't write pdf that has unsaved sigs to a fz_output unless it supports fz_stream_from_output!");
 
@@ -3230,7 +3472,7 @@ void pdf_write_document(fz_context *ctx, pdf_document *doc, fz_output *out, pdf_
 */
 void pdf_save_document(fz_context *ctx, pdf_document *doc, const char *filename, pdf_write_options *in_opts)
 {
-	pdf_write_options opts_defaults = { 0 };
+	pdf_write_options opts_defaults = pdf_default_write_options;
 	pdf_write_state opts = { 0 };
 
 	if (!doc)
@@ -3247,8 +3489,8 @@ void pdf_save_document(fz_context *ctx, pdf_document *doc, const char *filename,
 		fz_throw(ctx, FZ_ERROR_GENERIC, "Can't do incremental writes with garbage collection");
 	if (in_opts->do_incremental && in_opts->do_linear)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "Can't do incremental writes with linearisation");
-	if (in_opts->do_incremental && in_opts->do_decrypt)
-		fz_throw(ctx, FZ_ERROR_GENERIC, "Can't do incremental writes with decryption");
+	if (in_opts->do_incremental && in_opts->do_encrypt != PDF_ENCRYPT_KEEP)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "Can't do incremental writes when changing encryption");
 
 	if (in_opts->do_appearance > 0)
 	{

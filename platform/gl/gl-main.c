@@ -44,11 +44,6 @@ enum
 	/* Screen furniture: aggregate size of unusable space from title bars, task bars, window borders, etc */
 	SCREEN_FURNITURE_W = 20,
 	SCREEN_FURNITURE_H = 40,
-
-	/* Default EPUB/HTML layout dimensions */
-	DEFAULT_LAYOUT_W = 450,
-	DEFAULT_LAYOUT_H = 600,
-	DEFAULT_LAYOUT_EM = 12,
 };
 
 static void open_browser(const char *uri)
@@ -112,15 +107,35 @@ static int zoom_out(int oldres)
 	return zoom_list[0];
 }
 
+static const char *paper_size_name(int w, int h)
+{
+	/* ISO A */
+	if (w == 2384 && h == 3370) return "A0";
+	if (w == 1684 && h == 2384) return "A1";
+	if (w == 1191 && h == 1684) return "A2";
+	if (w == 842 && h == 1191) return "A3";
+	if (w == 595 && h == 842) return "A4";
+	if (w == 420 && h == 595) return "A5";
+	if (w == 297 && h == 420) return "A6";
+
+	/* US */
+	if (w == 612 && h == 792) return "Letter";
+	if (w == 612 && h == 1008) return "Legal";
+	if (w == 792 && h == 1224) return "Ledger";
+	if (w == 1224 && h == 792) return "Tabloid";
+
+	return NULL;
+}
+
 #define MINRES (zoom_list[0])
 #define MAXRES (zoom_list[nelem(zoom_list)-1])
 #define DEFRES 96
 
 static char *password = "";
 static char *anchor = NULL;
-static float layout_w = DEFAULT_LAYOUT_W;
-static float layout_h = DEFAULT_LAYOUT_H;
-static float layout_em = DEFAULT_LAYOUT_EM;
+static float layout_w = FZ_DEFAULT_LAYOUT_W;
+static float layout_h = FZ_DEFAULT_LAYOUT_H;
+static float layout_em = FZ_DEFAULT_LAYOUT_EM;
 static char *layout_css = NULL;
 static int layout_use_doc_css = 1;
 static int enable_js = 1;
@@ -146,6 +161,8 @@ static int annotate_w = 12; /* to be scaled by lineheight */
 
 static int oldtint = 0, currenttint = 0;
 static int oldinvert = 0, currentinvert = 0;
+static int oldicc = 1, currenticc = 1;
+static int oldaa = 8, currentaa = 8;
 static int oldseparations = 0, currentseparations = 0;
 static int oldpage = 0, currentpage = 0;
 static float oldzoom = DEFRES, currentzoom = DEFRES;
@@ -156,9 +173,10 @@ static int showoutline = 0;
 static int showlinks = 0;
 static int showsearch = 0;
 static int showinfo = 0;
-static int showhelp = 0;
 int showannotate = 0;
 int showform = 0;
+
+static const char *tooltip = NULL;
 
 struct mark
 {
@@ -381,6 +399,79 @@ static int search_hit_page = -1;
 static int search_hit_count = 0;
 static fz_quad search_hit_quads[5000];
 
+static char *help_dialog_text =
+	"The middle mouse button (scroll wheel button) pans the document view. "
+	"The right mouse button selects a region and copies the marked text to the clipboard."
+	"\n"
+	"\n"
+	"F1 - show this message\n"
+	"i - show document information\n"
+	"o - show document outline\n"
+	"a - show annotation editor\n"
+	"L - highlight links\n"
+	"F - highlight form fields\n"
+	"r - reload file\n"
+	"S - save file (only for PDF)\n"
+	"q - quit\n"
+	"\n"
+	"< - decrease E-book font size\n"
+	"> - increase E-book font size\n"
+	"A - toggle anti-aliasing\n"
+	"I - toggle inverted color mode\n"
+	"C - toggle tinted color mode\n"
+	"E - toggle ICC color management\n"
+	"e - toggle spot color emulation\n"
+	"\n"
+	"f - fullscreen window\n"
+	"w - shrink wrap window\n"
+	"W - fit to width\n"
+	"H - fit to height\n"
+	"Z - fit to page\n"
+	"z - reset zoom\n"
+	"[number] z - set zoom resolution in DPI\n"
+	"plus - zoom in\n"
+	"minus - zoom out\n"
+	"[ - rotate counter-clockwise\n"
+	"] - rotate clockwise\n"
+	"arrow keys - scroll in small increments\n"
+	"h, j, k, l - scroll in small increments\n"
+	"\n"
+	"b - smart move backward\n"
+	"space - smart move forward\n"
+	"comma or page up - go backward\n"
+	"period or page down - go forward\n"
+	"g - go to first page\n"
+	"G - go to last page\n"
+	"[number] g - go to page number\n"
+	"\n"
+	"m - save current location in history\n"
+	"t - go backward in history\n"
+	"T - go forward in history\n"
+	"[number] m - save current location in numbered bookmark\n"
+	"[number] t - go to numbered bookmark\n"
+	"\n"
+	"/ - search for text forward\n"
+	"? - search for text backward\n"
+	"n - repeat search\n"
+	"N - repeat search in reverse direction"
+	;
+
+static void help_dialog(void)
+{
+	static int scroll;
+	ui_dialog_begin(500, 1000);
+	ui_layout(T, X, W, 2, 2);
+	ui_label("MuPDF %s", FZ_VERSION);
+	ui_spacer();
+	ui_layout(B, NONE, S, 2, 2);
+	if (ui_button("Okay") || ui.key == KEY_ENTER || ui.key == KEY_ESCAPE)
+		ui.dialog = NULL;
+	ui_spacer();
+	ui_layout(ALL, BOTH, CENTER, 2, 2);
+	ui_label_with_scrollbar(help_dialog_text, 0, 0, &scroll);
+	ui_dialog_end();
+}
+
 static char error_message[256];
 static void error_dialog(void)
 {
@@ -479,6 +570,11 @@ void load_page(void)
 	links = fz_load_links(ctx, fzpage);
 	page_text = fz_new_stext_page_from_page(ctx, fzpage, NULL);
 
+	if (currenticc)
+		fz_enable_icc(ctx);
+	else
+		fz_disable_icc(ctx);
+
 	if (currentseparations)
 	{
 		seps = fz_page_separations(ctx, &page->super);
@@ -509,15 +605,17 @@ void render_page(void)
 
 	transform_page();
 
+	fz_set_aa_level(ctx, currentaa);
+
 	pix = fz_new_pixmap_from_page_with_separations(ctx, fzpage, draw_page_ctm, fz_device_rgb(ctx), seps, 0);
+	if (currentinvert)
+	{
+		fz_invert_pixmap_luminance(ctx, pix);
+		fz_gamma_pixmap(ctx, pix, 1 / 1.4f);
+	}
 	if (currenttint)
 	{
 		fz_tint_pixmap(ctx, pix, tint_black, tint_white);
-	}
-	if (currentinvert)
-	{
-		fz_invert_pixmap(ctx, pix);
-		fz_gamma_pixmap(ctx, pix, 1 / 1.4f);
 	}
 
 	ui_texture_from_pixmap(&page_tex, pix);
@@ -526,8 +624,14 @@ void render_page(void)
 
 void render_page_if_changed(void)
 {
-	if (oldpage != currentpage || oldzoom != currentzoom || oldrotate != currentrotate ||
-		oldinvert != currentinvert || oldtint != currenttint || oldseparations != currentseparations)
+	if (oldpage != currentpage ||
+		oldzoom != currentzoom ||
+		oldrotate != currentrotate ||
+		oldinvert != currentinvert ||
+		oldtint != currenttint ||
+		oldicc != currenticc ||
+		oldseparations != currentseparations ||
+		oldaa != currentaa)
 	{
 		render_page();
 		oldpage = currentpage;
@@ -535,7 +639,9 @@ void render_page_if_changed(void)
 		oldrotate = currentrotate;
 		oldinvert = currentinvert;
 		oldtint = currenttint;
+		oldicc = currenticc;
 		oldseparations = currentseparations;
+		oldaa = currentaa;
 	}
 }
 
@@ -626,6 +732,24 @@ static void pop_future(void)
 	push_history();
 }
 
+static void relayout(void)
+{
+	if (layout_em < 6) layout_em = 6;
+	if (layout_em > 36) layout_em = 36;
+	if (fz_is_document_reflowable(ctx, doc))
+	{
+		fz_bookmark mark = fz_make_bookmark(ctx, doc, currentpage);
+		fz_layout_document(ctx, doc, layout_w, layout_h, layout_em);
+		currentpage = fz_lookup_bookmark(ctx, doc, mark);
+		history_count = 0;
+		future_count = 0;
+
+		load_page();
+		render_page();
+		update_title();
+	}
+}
+
 static int count_outline(fz_outline *node, int end)
 {
 	int is_selected, n, p;
@@ -698,8 +822,9 @@ static void do_links(fz_link *link)
 		bounds = fz_transform_rect(link->rect, view_page_ctm);
 		area = fz_irect_from_rect(bounds);
 
-		if (ui_mouse_inside(&area))
+		if (ui_mouse_inside(area))
 		{
+			tooltip = link->uri;
 			ui.hot = link;
 			if (!ui.active && ui.down)
 				ui.active = link;
@@ -745,7 +870,7 @@ static void do_page_selection(void)
 	fz_quad hits[1000];
 	int i, n;
 
-	if (ui_mouse_inside(&view_page_area))
+	if (ui_mouse_inside(view_page_area))
 	{
 		ui.hot = &pt;
 		if (!ui.active && ui.right)
@@ -1057,14 +1182,14 @@ static void do_app(void)
 		glutLeaveMainLoop();
 
 	if (ui.down || ui.middle || ui.right || ui.key)
-		showinfo = showhelp = 0;
+		showinfo = 0;
 
 	if (!ui.focus && ui.key && ui.plain)
 	{
 		switch (ui.key)
 		{
 		case KEY_ESCAPE: clear_search(); selected_annot = NULL; break;
-		case KEY_F1: showhelp = !showhelp; break;
+		case KEY_F1: ui.dialog = help_dialog; break;
 		case 'a': toggle_annotate(); break;
 		case 'o': toggle_outline(); break;
 		case 'L': showlinks = !showlinks; break;
@@ -1072,10 +1197,15 @@ static void do_app(void)
 		case 'i': showinfo = !showinfo; break;
 		case 'r': reload(); break;
 		case 'q': glutLeaveMainLoop(); break;
+		case 'S': do_save_pdf_file(); break;
+
+		case '>': layout_em = number > 0 ? number : layout_em + 1; relayout(); break;
+		case '<': layout_em = number > 0 ? number : layout_em - 1; relayout(); break;
 
 		case 'C': currenttint = !currenttint; break;
 		case 'I': currentinvert = !currentinvert; break;
 		case 'e': currentseparations = !currentseparations; break;
+		case 'E': currenticc = !currenticc; break;
 		case 'f': toggle_fullscreen(); break;
 		case 'w': shrinkwrap(); break;
 		case 'W': auto_zoom_w(); break;
@@ -1095,10 +1225,15 @@ static void do_app(void)
 		case ' ': number = fz_maxi(number, 1); while (number--) smart_move_forward(); break;
 		case ',': case KEY_PAGE_UP: currentpage -= fz_maxi(number, 1); break;
 		case '.': case KEY_PAGE_DOWN: currentpage += fz_maxi(number, 1); break;
-		case '<': currentpage -= 10 * fz_maxi(number, 1); break;
-		case '>': currentpage += 10 * fz_maxi(number, 1); break;
 		case 'g': jump_to_page(number - 1); break;
 		case 'G': jump_to_page(fz_count_pages(ctx, doc) - 1); break;
+
+		case 'A':
+			if (number == 0)
+				currentaa = (currentaa == 8 ? 0 : 8);
+			else
+				currentaa = number;
+			break;
 
 		case 'm':
 			if (number == 0)
@@ -1191,7 +1326,7 @@ static void do_info(void)
 {
 	char buf[100];
 
-	ui_dialog_begin(500, 12 * ui.lineheight);
+	ui_dialog_begin(500, 14 * ui.lineheight);
 	ui_layout(T, X, W, 0, 0);
 
 	if (fz_lookup_metadata(ctx, doc, FZ_META_INFO_TITLE, buf, sizeof buf) > 0)
@@ -1224,74 +1359,19 @@ static void do_info(void)
 		ui_label("Permissions: %s", buf);
 	}
 	ui_label("Page: %d / %d", currentpage + 1, fz_count_pages(ctx, doc));
-	ui_label("Spot rendering: %s.", currentseparations ? "on" : "off");
-
-	ui_dialog_end();
-}
-
-static void do_help_line(char *label, char *text)
-{
-	ui_panel_begin(0, ui.lineheight, 0, 0, 0);
 	{
-		ui_layout(L, NONE, W, 0, 0);
-		ui_panel_begin(150, ui.lineheight, 0, 0, 0);
-		ui_layout(R, NONE, W, 20, 0);
-		ui_label("%s", label);
-		ui_panel_end();
-
-		ui_layout(ALL, X, W, 0, 0);
-		ui_panel_begin(0, ui.lineheight, 0, 0, 0);
-		ui_label("%s", text);
-		ui_panel_end();
+		int w = (int)(page_bounds.x1 - page_bounds.x0 + 0.5f);
+		int h = (int)(page_bounds.y1 - page_bounds.y0 + 0.5f);
+		const char *size = paper_size_name(w, h);
+		if (!size)
+			size = paper_size_name(h, w);
+		if (size)
+			ui_label("Size: %d x %d (%s)", w, h, size);
+		else
+			ui_label("Size: %d x %d", w, h);
 	}
-	ui_panel_end();
-}
-
-static void do_help(void)
-{
-	ui_dialog_begin(500, 38 * ui.lineheight);
-	ui_layout(T, X, W, 0, 0);
-
-	do_help_line("MuPDF", FZ_VERSION);
-	ui_spacer();
-	do_help_line("F1", "show this message");
-	do_help_line("i", "show document information");
-	do_help_line("o", "show/hide outline");
-	do_help_line("a", "show/hide annotation editor");
-	do_help_line("L", "show/hide links");
-	do_help_line("F", "show/hide form fields");
-	do_help_line("r", "reload file");
-	do_help_line("q", "quit");
-	ui_spacer();
-	do_help_line("I", "toggle inverted color mode");
-	do_help_line("C", "toggle tinted color mode");
-	do_help_line("e", "enable/disable spot color mode");
-	do_help_line("f", "fullscreen window");
-	do_help_line("w", "shrink wrap window");
-	do_help_line("W or H", "fit to width or height");
-	do_help_line("Z", "fit to page");
-	do_help_line("z", "reset zoom");
-	do_help_line("N z", "set zoom to N");
-	do_help_line("+ or -", "zoom in or out");
-	do_help_line("[ or ]", "rotate left or right");
-	do_help_line("arrow keys", "pan in small increments");
-	ui_spacer();
-	do_help_line("b", "smart move backward");
-	do_help_line("Space", "smart move forward");
-	do_help_line(", or PgUp", "go backward");
-	do_help_line(". or PgDn", "go forward");
-	do_help_line("<", "go backward 10 pages");
-	do_help_line(">", "go forward 10 pages");
-	do_help_line("N g", "go to page N");
-	do_help_line("G", "go to last page");
-	ui_spacer();
-	do_help_line("t", "go backward in history");
-	do_help_line("T", "go forward in history");
-	do_help_line("N m", "save location in bookmark N");
-	do_help_line("N t", "go to bookmark N");
-	ui_spacer();
-	do_help_line("/ or ?", "search for text");
-	do_help_line("n or N", "repeat search");
+	ui_label("ICC rendering: %s.", currenticc ? "on" : "off");
+	ui_label("Spot rendering: %s.", currentseparations ? "on" : "off");
 
 	ui_dialog_end();
 }
@@ -1305,6 +1385,8 @@ static void do_canvas(void)
 	fz_irect area;
 	int page_x, page_y;
 
+	tooltip = NULL;
+
 	ui_layout(ALL, BOTH, NW, 0, 0);
 	ui_pack_push(area = ui_pack(0, 0));
 	glScissor(area.x0, ui.window_h-area.y1, area.x1-area.x0, area.y1-area.y0);
@@ -1315,7 +1397,7 @@ static void do_canvas(void)
 	canvas_w = area.x1 - area.x0;
 	canvas_h = area.y1 - area.y0;
 
-	if (ui_mouse_inside(&area))
+	if (ui_mouse_inside(area))
 	{
 		ui.hot = doc;
 		if (!ui.active && ui.middle)
@@ -1431,6 +1513,15 @@ static void do_canvas(void)
 		ui_panel_end();
 	}
 
+	if (tooltip)
+	{
+		ui_layout(B, X, N, 0, 0);
+		ui_panel_begin(0, ui.gridsize, 4, 4, 1);
+		ui_layout(L, NONE, W, 2, 0);
+		ui_label("%s", tooltip);
+		ui_panel_end();
+	}
+
 	ui_pack_pop();
 	glDisable(GL_SCISSOR_TEST);
 }
@@ -1480,7 +1571,7 @@ void do_main(void)
 	if (showoutline)
 		do_outline(outline);
 
-	if (oldpage != currentpage || oldseparations != currentseparations)
+	if (oldpage != currentpage || oldseparations != currentseparations || oldicc != currenticc)
 	{
 		load_page();
 		update_title();
@@ -1498,8 +1589,6 @@ void do_main(void)
 
 	if (showinfo)
 		do_info();
-	else if (showhelp)
-		do_help();
 }
 
 void run_main_loop(void)
@@ -1600,7 +1689,6 @@ int main_utf8(int argc, char **argv)
 int main(int argc, char **argv)
 #endif
 {
-	int aa_level = 8;
 	int c;
 
 #ifndef _WIN32
@@ -1626,7 +1714,7 @@ int main(int argc, char **argv)
 		case 'U': layout_css = fz_optarg; break;
 		case 'X': layout_use_doc_css = 0; break;
 		case 'J': enable_js = !enable_js; break;
-		case 'A': aa_level = fz_atoi(fz_optarg); break;
+		case 'A': currentaa = fz_atoi(fz_optarg); break;
 		case 'C': currenttint = 1; tint_white = strtol(fz_optarg, NULL, 16); break;
 		case 'B': currenttint = 1; tint_black = strtol(fz_optarg, NULL, 16); break;
 		}
@@ -1641,7 +1729,6 @@ int main(int argc, char **argv)
 		fz_drop_buffer(ctx, buf);
 	}
 	fz_set_use_document_css(ctx, layout_use_doc_css);
-	fz_set_aa_level(ctx, aa_level);
 
 	if (fz_optind < argc)
 	{

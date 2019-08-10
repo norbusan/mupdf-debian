@@ -369,8 +369,9 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_compressed_image
 			tile->flags &= ~FZ_PIXMAP_FLAG_INTERPOLATE;
 
 		stride = (w * image->n * image->bpc + 7) / 8;
-
-		samples = fz_malloc_array(ctx, h, stride);
+		if (h > SIZE_MAX / stride)
+			fz_throw(ctx, FZ_ERROR_MEMORY, "image too large");
+		samples = fz_malloc(ctx, h * stride);
 
 		if (subarea)
 		{
@@ -443,7 +444,7 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_compressed_image
 		{
 			fz_pixmap *conv;
 			fz_decode_indexed_tile(ctx, tile, image->decode, (1 << image->bpc) - 1);
-			conv = fz_expand_indexed_pixmap(ctx, tile, alpha);
+			conv = fz_convert_indexed_pixmap_to_base(ctx, tile);
 			fz_drop_pixmap(ctx, tile);
 			tile = conv;
 		}

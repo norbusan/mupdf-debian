@@ -141,6 +141,7 @@ pdf_obj *pdf_array_push_dict(fz_context *ctx, pdf_obj *array, int initial);
 int pdf_array_get_bool(fz_context *ctx, pdf_obj *array, int index);
 int pdf_array_get_int(fz_context *ctx, pdf_obj *array, int index);
 float pdf_array_get_real(fz_context *ctx, pdf_obj *array, int index);
+const char *pdf_array_get_name(fz_context *ctx, pdf_obj *array, int index);
 const char *pdf_array_get_string(fz_context *ctx, pdf_obj *array, int index, size_t *sizep);
 const char *pdf_array_get_text_string(fz_context *ctx, pdf_obj *array, int index);
 fz_rect pdf_array_get_rect(fz_context *ctx, pdf_obj *array, int index);
@@ -163,6 +164,7 @@ char *pdf_new_utf8_from_pdf_string_obj(fz_context *ctx, pdf_obj *src);
 char *pdf_new_utf8_from_pdf_stream_obj(fz_context *ctx, pdf_obj *src);
 char *pdf_load_stream_or_string_as_utf8(fz_context *ctx, pdf_obj *src);
 
+fz_quad pdf_to_quad(fz_context *ctx, pdf_obj *array, int offset);
 fz_rect pdf_to_rect(fz_context *ctx, pdf_obj *array);
 fz_matrix pdf_to_matrix(fz_context *ctx, pdf_obj *array);
 

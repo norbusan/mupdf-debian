@@ -201,14 +201,6 @@ extern "C" {
 JNIEXPORT jint JNICALL Java_com_artifex_mupdf_fitz_Context_initNative
   (JNIEnv *, jclass);
 
-/*
- * Class:     com_artifex_mupdf_fitz_Context
- * Method:    gprfSupportedNative
- * Signature: ()I
- */
-JNIEXPORT jint JNICALL Java_com_artifex_mupdf_fitz_Context_gprfSupportedNative
-  (JNIEnv *, jclass);
-
 #ifdef __cplusplus
 }
 #endif
@@ -561,14 +553,6 @@ JNIEXPORT jint JNICALL Java_com_artifex_mupdf_fitz_Document_findBookmark
  */
 JNIEXPORT jboolean JNICALL Java_com_artifex_mupdf_fitz_Document_isUnencryptedPDF
   (JNIEnv *, jobject);
-
-/*
- * Class:     com_artifex_mupdf_fitz_Document
- * Method:    proofNative
- * Signature: (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_com_artifex_mupdf_fitz_Document_proofNative
-  (JNIEnv *, jobject, jstring, jstring, jstring, jint);
 
 #ifdef __cplusplus
 }
@@ -1142,32 +1126,34 @@ extern "C" {
 #define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_SQUIGGLY 10L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_STRIKE_OUT
 #define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_STRIKE_OUT 11L
+#undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_REDACT
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_REDACT 12L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_STAMP
-#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_STAMP 12L
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_STAMP 13L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_CARET
-#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_CARET 13L
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_CARET 14L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_INK
-#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_INK 14L
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_INK 15L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_POPUP
-#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_POPUP 15L
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_POPUP 16L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_FILE_ATTACHMENT
-#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_FILE_ATTACHMENT 16L
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_FILE_ATTACHMENT 17L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_SOUND
-#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_SOUND 17L
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_SOUND 18L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_MOVIE
-#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_MOVIE 18L
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_MOVIE 19L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_WIDGET
-#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_WIDGET 19L
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_WIDGET 20L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_SCREEN
-#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_SCREEN 20L
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_SCREEN 21L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_PRINTER_MARK
-#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_PRINTER_MARK 21L
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_PRINTER_MARK 22L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_TRAP_NET
-#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_TRAP_NET 22L
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_TRAP_NET 23L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_WATERMARK
-#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_WATERMARK 23L
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_WATERMARK 24L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_3D
-#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_3D 24L
+#define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_3D 25L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_TYPE_UNKNOWN
 #define com_artifex_mupdf_fitz_PDFAnnotation_TYPE_UNKNOWN -1L
 #undef com_artifex_mupdf_fitz_PDFAnnotation_LINE_ENDING_NONE
@@ -2368,6 +2354,14 @@ JNIEXPORT void JNICALL Java_com_artifex_mupdf_fitz_PDFPage_deleteAnnotation
 
 /*
  * Class:     com_artifex_mupdf_fitz_PDFPage
+ * Method:    applyRedactions
+ * Signature: ()Z
+ */
+JNIEXPORT jboolean JNICALL Java_com_artifex_mupdf_fitz_PDFPage_applyRedactions
+  (JNIEnv *, jobject);
+
+/*
+ * Class:     com_artifex_mupdf_fitz_PDFPage
  * Method:    update
  * Signature: ()Z
  */
@@ -2419,32 +2413,34 @@ extern "C" {
 #define com_artifex_mupdf_fitz_PDFWidget_TYPE_SQUIGGLY 10L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_STRIKE_OUT
 #define com_artifex_mupdf_fitz_PDFWidget_TYPE_STRIKE_OUT 11L
+#undef com_artifex_mupdf_fitz_PDFWidget_TYPE_REDACT
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_REDACT 12L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_STAMP
-#define com_artifex_mupdf_fitz_PDFWidget_TYPE_STAMP 12L
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_STAMP 13L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_CARET
-#define com_artifex_mupdf_fitz_PDFWidget_TYPE_CARET 13L
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_CARET 14L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_INK
-#define com_artifex_mupdf_fitz_PDFWidget_TYPE_INK 14L
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_INK 15L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_POPUP
-#define com_artifex_mupdf_fitz_PDFWidget_TYPE_POPUP 15L
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_POPUP 16L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_FILE_ATTACHMENT
-#define com_artifex_mupdf_fitz_PDFWidget_TYPE_FILE_ATTACHMENT 16L
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_FILE_ATTACHMENT 17L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_SOUND
-#define com_artifex_mupdf_fitz_PDFWidget_TYPE_SOUND 17L
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_SOUND 18L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_MOVIE
-#define com_artifex_mupdf_fitz_PDFWidget_TYPE_MOVIE 18L
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_MOVIE 19L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_WIDGET
-#define com_artifex_mupdf_fitz_PDFWidget_TYPE_WIDGET 19L
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_WIDGET 20L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_SCREEN
-#define com_artifex_mupdf_fitz_PDFWidget_TYPE_SCREEN 20L
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_SCREEN 21L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_PRINTER_MARK
-#define com_artifex_mupdf_fitz_PDFWidget_TYPE_PRINTER_MARK 21L
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_PRINTER_MARK 22L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_TRAP_NET
-#define com_artifex_mupdf_fitz_PDFWidget_TYPE_TRAP_NET 22L
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_TRAP_NET 23L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_WATERMARK
-#define com_artifex_mupdf_fitz_PDFWidget_TYPE_WATERMARK 23L
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_WATERMARK 24L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_3D
-#define com_artifex_mupdf_fitz_PDFWidget_TYPE_3D 24L
+#define com_artifex_mupdf_fitz_PDFWidget_TYPE_3D 25L
 #undef com_artifex_mupdf_fitz_PDFWidget_TYPE_UNKNOWN
 #define com_artifex_mupdf_fitz_PDFWidget_TYPE_UNKNOWN -1L
 #undef com_artifex_mupdf_fitz_PDFWidget_LINE_ENDING_NONE

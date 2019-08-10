@@ -15,8 +15,6 @@ struct fz_buffer_s
 };
 
 void fz_new_colorspace_context(fz_context *ctx);
-void fz_new_cmm_context(fz_context *ctx);
-void fz_drop_cmm_context(fz_context *ctx);
 fz_colorspace_context *fz_keep_colorspace_context(fz_context *ctx);
 void fz_drop_colorspace_context(fz_context *ctx);
 
@@ -39,9 +37,7 @@ int fz_default_image_scale(void *arg, int dst_w, int dst_h, int src_w, int src_h
 
 fz_context *fz_clone_context_internal(fz_context *ctx);
 
-void fz_new_aa_context(fz_context *ctx);
-void fz_drop_aa_context(fz_context *ctx);
-void fz_copy_aa_context(fz_context *dst, fz_context *src);
+void fz_init_aa_context(fz_context *ctx);
 
 void fz_new_glyph_cache_context(fz_context *ctx);
 fz_glyph_cache *fz_keep_glyph_cache(fz_context *ctx);
@@ -50,10 +46,6 @@ void fz_drop_glyph_cache_context(fz_context *ctx);
 void fz_new_document_handler_context(fz_context *ctx);
 void fz_drop_document_handler_context(fz_context *ctx);
 fz_document_handler_context *fz_keep_document_handler_context(fz_context *ctx);
-
-void fz_new_output_context(fz_context *ctx);
-void fz_drop_output_context(fz_context *ctx);
-fz_output_context *fz_keep_output_context(fz_context *ctx);
 
 fz_stream *fz_open_file_ptr_no_close(fz_context *ctx, FILE *file);
 

@@ -38,7 +38,9 @@ int fz_windows_1251_from_unicode(int u);
 int fz_windows_1252_from_unicode(int u);
 
 int fz_unicode_from_glyph_name(const char *name);
-const char **fz_duplicate_glyph_names_from_unicode(int ucs);
+int fz_unicode_from_glyph_name_strict(const char *name);
+const char **fz_duplicate_glyph_names_from_unicode(int unicode);
+const char *fz_glyph_name_from_unicode_sc(int unicode);
 
 /*
 	An abstract font handle.
@@ -100,6 +102,51 @@ typedef struct
 
 fz_shaper_data_t *fz_font_shaper_data(fz_context *ctx, fz_font *font);
 
+struct fz_font_s
+{
+	int refs;
+	char name[32];
+	fz_buffer *buffer;
+
+	fz_font_flags_t flags;
+
+	void *ft_face; /* has an FT_Face if used */
+	fz_shaper_data_t shaper_data;
+
+	fz_matrix t3matrix;
+	void *t3resources;
+	fz_buffer **t3procs; /* has 256 entries if used */
+	struct fz_display_list_s **t3lists; /* has 256 entries if used */
+	float *t3widths; /* has 256 entries if used */
+	unsigned short *t3flags; /* has 256 entries if used */
+	void *t3doc; /* a pdf_document for the callback */
+	void (*t3run)(fz_context *ctx, void *doc, void *resources, fz_buffer *contents, struct fz_device_s *dev, fz_matrix ctm, void *gstate, fz_default_colorspaces *default_cs);
+	void (*t3freeres)(fz_context *ctx, void *doc, void *resources);
+
+	fz_rect bbox;	/* font bbox is used only for t3 fonts */
+
+	int glyph_count;
+
+	/* per glyph bounding box cache */
+	fz_rect *bbox_table;
+
+	/* substitute metrics */
+	int width_count;
+	short width_default; /* in 1000 units */
+	short *width_table; /* in 1000 units */
+
+	/* cached glyph metrics */
+	float *advance_cache;
+
+	/* cached encoding lookup */
+	uint16_t *encoding_cache[256];
+
+	/* cached md5sum for caching */
+	int has_digest;
+	unsigned char digest[16];
+};
+
+
 const char *fz_font_name(fz_context *ctx, fz_font *font);
 
 int fz_font_is_bold(fz_context *ctx, fz_font *font);
@@ -157,8 +204,6 @@ const unsigned char *fz_lookup_builtin_font(fz_context *ctx, const char *name, i
 
 const unsigned char *fz_lookup_base14_font(fz_context *ctx, const char *name, int *len);
 
-const unsigned char *fz_lookup_icc(fz_context *ctx, enum fz_colorspace_type name, size_t *len);
-
 const unsigned char *fz_lookup_cjk_font(fz_context *ctx, int ordering, int *len, int *index);
 const unsigned char *fz_lookup_cjk_font_by_language(fz_context *ctx, const char *lang, int *size, int *subfont);
 
@@ -166,6 +211,8 @@ int fz_lookup_cjk_ordering_by_language(const char *name);
 
 const unsigned char *fz_lookup_noto_font(fz_context *ctx, int script, int lang, int *len, int *subfont);
 
+const unsigned char *fz_lookup_noto_math_font(fz_context *ctx, int *len);
+const unsigned char *fz_lookup_noto_music_font(fz_context *ctx, int *len);
 const unsigned char *fz_lookup_noto_symbol1_font(fz_context *ctx, int *len);
 const unsigned char *fz_lookup_noto_symbol2_font(fz_context *ctx, int *len);
 
@@ -202,6 +249,7 @@ void fz_decouple_type3_font(fz_context *ctx, fz_font *font, void *t3doc);
 float fz_advance_glyph(fz_context *ctx, fz_font *font, int glyph, int wmode);
 
 int fz_encode_character(fz_context *ctx, fz_font *font, int unicode);
+int fz_encode_character_sc(fz_context *ctx, fz_font *font, int unicode);
 int fz_encode_character_by_glyph_name(fz_context *ctx, fz_font *font, const char *glyphname);
 
 int fz_encode_character_with_fallback(fz_context *ctx, fz_font *font, int unicode, int script, int language, fz_font **out_font);
