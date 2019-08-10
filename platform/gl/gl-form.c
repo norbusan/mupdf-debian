@@ -11,8 +11,10 @@
 #include "mupdf/helpers/pkcs7-openssl.h"
 
 static pdf_widget *sig_widget;
-static char sig_status[500];
-static int sig_result;
+static char sig_designated_name[500];
+static enum pdf_signature_error sig_cert_error;
+static enum pdf_signature_error sig_digest_error;
+static int sig_subsequent_edits;
 
 static char cert_filename[PATH_MAX];
 static struct input cert_password;
@@ -33,6 +35,20 @@ static void do_sign(void)
 	{
 		if (signer)
 			signer->drop(signer);
+	}
+	fz_catch(ctx)
+		ui_show_warning_dialog("%s", fz_caught_message(ctx));
+
+	if (pdf_update_page(ctx, sig_widget->page))
+		render_page();
+}
+
+static void do_clear_signature(void)
+{
+	fz_try(ctx)
+	{
+		pdf_clear_signature(ctx, pdf, sig_widget);
+		ui_show_warning_dialog("Signature cleared successfully.");
 	}
 	fz_catch(ctx)
 		ui_show_warning_dialog("%s", fz_caught_message(ctx));
@@ -88,7 +104,7 @@ static void cert_file_dialog(void)
 	}
 }
 
-static void sig_dialog(void)
+static void sig_sign_dialog(void)
 {
 	const char *label = pdf_field_label(ctx, sig_widget->obj);
 
@@ -99,10 +115,7 @@ static void sig_dialog(void)
 		ui_label("%s", label);
 		ui_spacer();
 
-		if (sig_result)
-			ui_label("Signature is valid.\n%s", sig_status);
-		else
-			ui_label("Could not verify signature:\n%s", sig_status);
+		ui_label("Would you like to sign this field?");
 
 		ui_layout(B, X, NW, 2, 2);
 		ui_panel_begin(0, ui.gridsize, 0, 0, 0);
@@ -111,12 +124,61 @@ static void sig_dialog(void)
 			if (ui_button("Cancel") || (!ui.focus && ui.key == KEY_ESCAPE))
 				ui.dialog = NULL;
 			ui_spacer();
-			if (ui_button("Sign"))
+			if (!(pdf_field_flags(ctx, sig_widget->obj) & PDF_FIELD_IS_READ_ONLY))
 			{
-				fz_strlcpy(cert_filename, filename, sizeof cert_filename);
-				ui_init_open_file(".", cert_file_filter);
-				ui.dialog = cert_file_dialog;
+				if (ui_button("Sign"))
+				{
+					fz_strlcpy(cert_filename, filename, sizeof cert_filename);
+					ui_init_open_file(".", cert_file_filter);
+					ui.dialog = cert_file_dialog;
+				}
 			}
+		}
+		ui_panel_end();
+	}
+	ui_dialog_end();
+}
+
+static void sig_verify_dialog(void)
+{
+	const char *label = pdf_field_label(ctx, sig_widget->obj);
+
+	ui_dialog_begin(400, (ui.gridsize+4)*3 + ui.lineheight*10);
+	{
+		ui_layout(T, X, NW, 2, 2);
+
+		ui_label("%s", label);
+		ui_spacer();
+
+		ui_label("Designated name: %s.", sig_designated_name);
+		ui_spacer();
+
+		if (sig_cert_error)
+			ui_label("Certificate error: %s", pdf_signature_error_description(sig_cert_error));
+		else
+			ui_label("Certificate is trusted.");
+
+		ui_spacer();
+
+		if (sig_digest_error)
+			ui_label("Digest error: %s", pdf_signature_error_description(sig_digest_error));
+		else if (sig_subsequent_edits)
+			ui_label("The signature is valid but there have been edits since signing.");
+		else
+			ui_label("The document is unchanged since signing.");
+
+		ui_layout(B, X, NW, 2, 2);
+		ui_panel_begin(0, ui.gridsize, 0, 0, 0);
+		{
+			ui_layout(L, NONE, S, 0, 0);
+			if (ui_button("Clear"))
+			{
+				ui.dialog = NULL;
+				do_clear_signature();
+			}
+			ui_layout(R, NONE, S, 0, 0);
+			if (ui_button("Close") || (!ui.focus && ui.key == KEY_ESCAPE))
+				ui.dialog = NULL;
 		}
 		ui_panel_end();
 	}
@@ -125,9 +187,25 @@ static void sig_dialog(void)
 
 static void show_sig_dialog(pdf_widget *widget)
 {
-	sig_widget = widget;
-	sig_result = pdf_check_signature(ctx, pdf, widget, sig_status, sizeof sig_status);
-	ui.dialog = sig_dialog;
+	fz_try(ctx)
+	{
+		sig_widget = widget;
+
+		if (pdf_signature_is_signed(ctx, pdf, widget->obj))
+		{
+			sig_cert_error = pdf_check_certificate(ctx, pdf, widget->obj);
+			sig_digest_error = pdf_check_digest(ctx, pdf, widget->obj);
+			sig_subsequent_edits = pdf_signature_incremental_change_since_signing(ctx, pdf, widget->obj);
+			pdf_signature_designated_name(ctx, pdf, widget->obj, sig_designated_name, sizeof(sig_designated_name));
+			ui.dialog = sig_verify_dialog;
+		}
+		else
+		{
+			ui.dialog = sig_sign_dialog;
+		}
+	}
+	fz_catch(ctx)
+		ui_show_warning_dialog("%s", fz_caught_message(ctx));
 }
 
 static pdf_widget *tx_widget;
@@ -187,7 +265,7 @@ static void ch_dialog(void)
 	label = pdf_field_label(ctx, ch_widget->obj);
 	label_h = ui_break_lines((char*)label, NULL, 20, 394, NULL);
 	n = pdf_choice_widget_options(ctx, ch_widget->page->doc, ch_widget, 0, NULL);
-	options = fz_malloc_array(ctx, n, sizeof(char*));
+	options = fz_malloc_array(ctx, n, const char *);
 	pdf_choice_widget_options(ctx, ch_widget->page->doc, ch_widget, 0, options);
 	value = pdf_field_value(ctx, ch_widget->obj);
 
@@ -236,7 +314,7 @@ void do_widget_canvas(fz_irect canvas_area)
 		bounds = fz_transform_rect(bounds, view_page_ctm);
 		area = fz_irect_from_rect(bounds);
 
-		if (ui_mouse_inside(&canvas_area) && ui_mouse_inside(&area))
+		if (ui_mouse_inside(canvas_area) && ui_mouse_inside(area))
 		{
 			if (!widget->is_hot)
 				pdf_annot_event_enter(ctx, widget);
@@ -296,29 +374,34 @@ void do_widget_canvas(fz_irect canvas_area)
 		{
 			pdf_annot_event_up(ctx, widget);
 
-			if (pdf_field_flags(ctx, widget->obj) & PDF_FIELD_IS_READ_ONLY)
-				continue;
-
-			switch (pdf_widget_type(ctx, widget))
+			if (pdf_widget_type(ctx, widget) == PDF_WIDGET_TYPE_SIGNATURE)
 			{
-			default:
-				break;
-			case PDF_WIDGET_TYPE_CHECKBOX:
-			case PDF_WIDGET_TYPE_RADIOBUTTON:
-				pdf_toggle_widget(ctx, widget);
-				break;
-			case PDF_WIDGET_TYPE_TEXT:
-				show_tx_dialog(widget);
-				break;
-			case PDF_WIDGET_TYPE_COMBOBOX:
-			case PDF_WIDGET_TYPE_LISTBOX:
-				ui.dialog = ch_dialog;
-				ch_widget = widget;
-				break;
-			case PDF_WIDGET_TYPE_SIGNATURE:
 				show_sig_dialog(widget);
-				break;
 			}
+			else
+			{
+				if (pdf_field_flags(ctx, widget->obj) & PDF_FIELD_IS_READ_ONLY)
+					continue;
+
+				switch (pdf_widget_type(ctx, widget))
+				{
+				default:
+					break;
+				case PDF_WIDGET_TYPE_CHECKBOX:
+				case PDF_WIDGET_TYPE_RADIOBUTTON:
+					pdf_toggle_widget(ctx, widget);
+					break;
+				case PDF_WIDGET_TYPE_TEXT:
+					show_tx_dialog(widget);
+					break;
+				case PDF_WIDGET_TYPE_COMBOBOX:
+				case PDF_WIDGET_TYPE_LISTBOX:
+					ui.dialog = ch_dialog;
+					ch_widget = widget;
+					break;
+				}
+			}
+
 		}
 	}
 

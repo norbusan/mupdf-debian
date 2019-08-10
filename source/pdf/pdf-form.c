@@ -1083,28 +1083,123 @@ void pdf_choice_widget_set_value(fz_context *ctx, pdf_document *doc, pdf_widget 
 	}
 }
 
-int pdf_signature_widget_byte_range(fz_context *ctx, pdf_document *doc, pdf_widget *widget, fz_range *byte_range)
+int pdf_signature_byte_range(fz_context *ctx, pdf_document *doc, pdf_obj *signature, fz_range *byte_range)
 {
-	pdf_annot *annot = (pdf_annot *)widget;
-	pdf_obj *br = pdf_dict_getl(ctx, annot->obj, PDF_NAME(V), PDF_NAME(ByteRange), NULL);
+	pdf_obj *br = pdf_dict_getl(ctx, signature, PDF_NAME(V), PDF_NAME(ByteRange), NULL);
 	int i, n = pdf_array_len(ctx, br)/2;
 
 	if (byte_range)
 	{
 		for (i = 0; i < n; i++)
 		{
-			byte_range[i].offset = pdf_array_get_int(ctx, br, 2*i);
-			byte_range[i].length = pdf_array_get_int(ctx, br, 2*i+1);
+			int offset = pdf_array_get_int(ctx, br, 2*i);
+			int length = pdf_array_get_int(ctx, br, 2*i+1);
+
+			if (offset < 0 || offset > doc->file_size)
+				fz_throw(ctx, FZ_ERROR_GENERIC, "offset of signature byte range outside of file");
+			else if (length < 0)
+				fz_throw(ctx, FZ_ERROR_GENERIC, "length of signature byte range negative");
+			else if (offset + length > doc->file_size)
+				fz_throw(ctx, FZ_ERROR_GENERIC, "signature byte range extends past end of file");
+
+			byte_range[i].offset = offset;
+			byte_range[i].length = length;
 		}
 	}
 
 	return n;
 }
 
+static int is_white(int c)
+{
+	return c == '\x00' || c == '\x09' || c == '\x0a' || c == '\x0c' || c == '\x0d' || c == '\x20';
+}
+
+static int is_hex_or_white(int c)
+{
+	return (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f') || (c >= '0' && c <= '9') || is_white(c);
+}
+
+static void validate_certificate_data(fz_context *ctx, pdf_document *doc, fz_range *hole)
+{
+	fz_stream *stm;
+	int c;
+
+	stm = fz_open_range_filter(ctx, doc->file, hole, 1);
+	fz_try(ctx)
+	{
+		while (is_white((c = fz_read_byte(ctx, stm))))
+			;
+
+		if (c == '<')
+			c = fz_read_byte(ctx, stm);
+
+		while (is_hex_or_white((c = fz_read_byte(ctx, stm))))
+			;
+
+		if (c == '>')
+			c = fz_read_byte(ctx, stm);
+
+		while (is_white((c = fz_read_byte(ctx, stm))))
+			;
+
+		if (c != EOF)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "signature certificate data contains invalid character");
+		if (fz_tell(ctx, stm) != hole->length)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "premature end of signature certificate data");
+	}
+	fz_always(ctx)
+		fz_drop_stream(ctx, stm);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+}
+
+static int rangecmp(const void *a_, const void *b_)
+{
+	const fz_range *a = (const fz_range *) a_;
+	const fz_range *b = (const fz_range *) b_;
+	return (int) (a->offset - b->offset);
+}
+
+static void validate_byte_ranges(fz_context *ctx, pdf_document *doc, fz_range *unsorted, int nranges)
+{
+	int64_t offset = 0;
+	fz_range *sorted;
+	int i;
+
+	sorted = fz_calloc(ctx, nranges, sizeof(*sorted));
+	memcpy(sorted, unsorted, nranges * sizeof(*sorted));
+	qsort(sorted, nranges, sizeof(*sorted), rangecmp);
+
+	fz_try(ctx)
+	{
+		offset = 0;
+
+		for (i = 0; i < nranges; i++)
+		{
+			if (sorted[i].offset > offset)
+			{
+				fz_range hole;
+
+				hole.offset = offset;
+				hole.length = sorted[i].offset - offset;
+
+				validate_certificate_data(ctx, doc, &hole);
+			}
+
+			offset = fz_maxi64(offset, sorted[i].offset + sorted[i].length);
+		}
+	}
+	fz_always(ctx)
+		fz_free(ctx, sorted);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+}
+
 /*
 	retrieve an fz_stream to read the bytes hashed for the signature
 */
-fz_stream *pdf_signature_widget_hash_bytes(fz_context *ctx, pdf_document *doc, pdf_widget *widget)
+fz_stream *pdf_signature_hash_bytes(fz_context *ctx, pdf_document *doc, pdf_obj *signature)
 {
 	fz_range *byte_range = NULL;
 	int byte_range_len;
@@ -1113,13 +1208,14 @@ fz_stream *pdf_signature_widget_hash_bytes(fz_context *ctx, pdf_document *doc, p
 	fz_var(byte_range);
 	fz_try(ctx)
 	{
-		byte_range_len = pdf_signature_widget_byte_range(ctx, doc, widget, NULL);
+		byte_range_len = pdf_signature_byte_range(ctx, doc, signature, NULL);
 		if (byte_range_len)
 		{
 			byte_range = fz_calloc(ctx, byte_range_len, sizeof(*byte_range));
-			pdf_signature_widget_byte_range(ctx, doc, widget, byte_range);
+			pdf_signature_byte_range(ctx, doc, signature, byte_range);
 		}
 
+		validate_byte_ranges(ctx, doc, byte_range, byte_range_len);
 		bytes = fz_open_range_filter(ctx, doc->file, byte_range, byte_range_len);
 	}
 	fz_always(ctx)
@@ -1134,13 +1230,76 @@ fz_stream *pdf_signature_widget_hash_bytes(fz_context *ctx, pdf_document *doc, p
 	return bytes;
 }
 
-int pdf_signature_widget_contents(fz_context *ctx, pdf_document *doc, pdf_widget *widget, char **contents)
+int pdf_signature_incremental_change_since_signing(fz_context *ctx, pdf_document *doc, pdf_obj *signature)
 {
-	pdf_annot *annot = (pdf_annot *)widget;
-	pdf_obj *c = pdf_dict_getl(ctx, annot->obj, PDF_NAME(V), PDF_NAME(Contents), NULL);
-	if (contents)
-		*contents = pdf_to_str_buf(ctx, c);
-	return pdf_to_str_len(ctx, c);
+	fz_range *byte_range = NULL;
+	int byte_range_len;
+	int changed = 0;
+
+	fz_var(byte_range);
+	fz_try(ctx)
+	{
+		byte_range_len = pdf_signature_byte_range(ctx, doc, signature, NULL);
+		if (byte_range_len)
+		{
+			fz_range *last_range;
+			int64_t end_of_range;
+
+			byte_range = fz_calloc(ctx, byte_range_len, sizeof(*byte_range));
+			pdf_signature_byte_range(ctx, doc, signature, byte_range);
+
+			last_range = &byte_range[byte_range_len -1];
+			end_of_range = last_range->offset + last_range->length;
+
+			/* We can see how long the document was when signed by inspecting the byte
+			 * ranges of the signature.  The document, when read in, may have already
+			 * had changes tagged on to it, past its extent when signed, or we may have
+			 * made changes since reading it, which will be held in a new incremental
+			 * xref section. */
+			if (doc->file_size > end_of_range || doc->num_incremental_sections > 0)
+				changed = 1;
+		}
+	}
+	fz_always(ctx)
+	{
+		fz_free(ctx, byte_range);
+	}
+	fz_catch(ctx)
+	{
+		fz_rethrow(ctx);
+	}
+
+	return changed;
+}
+
+int pdf_signature_is_signed(fz_context *ctx, pdf_document *doc, pdf_obj *field)
+{
+	if (pdf_dict_get_inheritable(ctx, field, PDF_NAME(FT)) != PDF_NAME(Sig))
+		return 0;
+	return pdf_dict_get_inheritable(ctx, field, PDF_NAME(V)) != NULL;
+}
+
+/* NOTE: contents is allocated and must be freed by the caller! */
+int pdf_signature_contents(fz_context *ctx, pdf_document *doc, pdf_obj *signature, char **contents)
+{
+	pdf_obj *v_ref = pdf_dict_get(ctx, signature, PDF_NAME(V));
+	pdf_obj *v_obj = pdf_load_unencrypted_object(ctx, doc, pdf_to_num(ctx, v_ref));
+	int len;
+	fz_try(ctx)
+	{
+		pdf_obj *c = pdf_dict_get(ctx, v_obj, PDF_NAME(Contents));
+		len = pdf_to_str_len(ctx, c);
+		if (contents)
+		{
+			*contents = fz_malloc(ctx, len);
+			memcpy(*contents, pdf_to_str_buf(ctx, c), len);
+		}
+	}
+	fz_always(ctx)
+		pdf_drop_obj(ctx, v_obj);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+	return len;
 }
 
 void pdf_signature_set_value(fz_context *ctx, pdf_document *doc, pdf_obj *field, pdf_pkcs7_signer *signer)
@@ -1174,6 +1333,7 @@ void pdf_signature_set_value(fz_context *ctx, pdf_document *doc, pdf_obj *field,
 		contents = pdf_new_string(ctx, buf, max_digest_size);
 		pdf_dict_put_drop(ctx, v, PDF_NAME(Contents), contents);
 
+		pdf_dict_put(ctx, v, PDF_NAME(Type), PDF_NAME(Sig));
 		pdf_dict_put(ctx, v, PDF_NAME(Filter), PDF_NAME(Adobe_PPKLite));
 		pdf_dict_put(ctx, v, PDF_NAME(SubFilter), PDF_NAME(adbe_pkcs7_detached));
 

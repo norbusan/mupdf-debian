@@ -12,23 +12,6 @@
 
 enum { T, R, B, L };
 
-static void measure_image(fz_context *ctx, fz_html_flow *node, float max_w, float max_h)
-{
-	float xs = 1, ys = 1, s = 1;
-	/* NOTE: We ignore the image DPI here, since most images in EPUB files have bogus values. */
-	float image_w = node->content.image->w * 72 / 96;
-	float image_h = node->content.image->h * 72 / 96;
-	node->x = 0;
-	node->y = 0;
-	if (max_w > 0 && image_w > max_w)
-		xs = max_w / image_w;
-	if (max_h > 0 && image_h > max_h)
-		ys = max_h / image_h;
-	s = fz_min(xs, ys);
-	node->w = image_w * s;
-	node->h = image_h * s;
-}
-
 typedef struct string_walker
 {
 	fz_context *ctx;
@@ -40,6 +23,7 @@ typedef struct string_walker
 	fz_font *base_font;
 	int script;
 	int language;
+	int small_caps;
 	fz_font *font;
 	fz_font *next_font;
 	hb_glyph_position_t *glyph_pos;
@@ -93,7 +77,7 @@ static int quick_ligature(fz_context *ctx, string_walker *walker, unsigned int i
 	return walker->glyph_info[i].codepoint;
 }
 
-static void init_string_walker(fz_context *ctx, string_walker *walker, hb_buffer_t *hb_buf, int rtl, fz_font *font, int script, int language, const char *text)
+static void init_string_walker(fz_context *ctx, string_walker *walker, hb_buffer_t *hb_buf, int rtl, fz_font *font, int script, int language, int small_caps, const char *text)
 {
 	walker->ctx = ctx;
 	walker->hb_buf = hb_buf;
@@ -106,6 +90,7 @@ static void init_string_walker(fz_context *ctx, string_walker *walker, hb_buffer
 	walker->language = language;
 	walker->font = NULL;
 	walker->next_font = NULL;
+	walker->small_caps = small_caps;
 }
 
 static void
@@ -115,6 +100,10 @@ destroy_hb_shaper_data(fz_context *ctx, void *handle)
 	hb_font_destroy(handle);
 	fz_hb_unlock(ctx);
 }
+
+static const hb_feature_t small_caps_feature[1] = {
+	{ HB_TAG('s','m','c','p'), 1, 0, -1 }
+};
 
 static int walk_string(string_walker *walker)
 {
@@ -189,7 +178,10 @@ static int walk_string(string_walker *walker)
 			hb_buffer_guess_segment_properties(walker->hb_buf);
 			Memento_stopLeaking();
 
-			hb_shape(hb->shaper_handle, walker->hb_buf, NULL, 0);
+			if (walker->small_caps)
+				hb_shape(hb->shaper_handle, walker->hb_buf, small_caps_feature, nelem(small_caps_feature));
+			else
+				hb_shape(hb->shaper_handle, walker->hb_buf, NULL, 0);
 		}
 
 		walker->glyph_pos = hb_buffer_get_glyph_positions(walker->hb_buf, &walker->glyph_count);
@@ -209,8 +201,12 @@ static int walk_string(string_walker *walker)
 		unsigned int i;
 		for (i = 0; i < walker->glyph_count; ++i)
 		{
-			int unicode = quick_ligature(ctx, walker, i);
-			int glyph = fz_encode_character(ctx, walker->font, unicode);
+			int glyph, unicode;
+			unicode = quick_ligature(ctx, walker, i);
+			if (walker->small_caps)
+				glyph = fz_encode_character_sc(ctx, walker->font, unicode);
+			else
+				glyph = fz_encode_character(ctx, walker->font, unicode);
 			walker->glyph_info[i].codepoint = glyph;
 			walker->glyph_pos[i].x_offset = 0;
 			walker->glyph_pos[i].y_offset = 0;
@@ -248,7 +244,7 @@ static void measure_string(fz_context *ctx, fz_html_flow *node, hb_buffer_t *hb_
 	node->h = fz_from_css_number_scale(node->box->style.line_height, em);
 
 	s = get_node_text(ctx, node);
-	init_string_walker(ctx, &walker, hb_buf, node->bidi_level & 1, node->box->style.font, node->script, node->markup_lang, s);
+	init_string_walker(ctx, &walker, hb_buf, node->bidi_level & 1, node->box->style.font, node->script, node->markup_lang, node->box->style.small_caps, s);
 	while (walk_string(&walker))
 	{
 		int x = 0;
@@ -313,7 +309,7 @@ static void layout_line(fz_context *ctx, float indent, float page_w, float line_
 		x += slop / 2;
 
 	/* We need a block to hold the node pointers while we reorder */
-	reorder = fz_malloc_array(ctx, n, sizeof(*reorder));
+	reorder = fz_malloc_array(ctx, n, fz_html_flow*);
 	min_level = start->bidi_level;
 	max_level = start->bidi_level;
 	for(i = 0, node = start; node != end; i++, node = node->next)
@@ -490,9 +486,30 @@ static void layout_flow(fz_context *ctx, fz_html_box *box, fz_html_box *top, flo
 		node->breaks_line = 0; /* reset line breaks from previous layout */
 		if (node->type == FLOW_IMAGE)
 		{
-			float w = 0, h = 0;
-			find_accumulated_margins(ctx, box, &w, &h);
-			measure_image(ctx, node, top->w - w, page_h - h);
+			float margin_w = 0, margin_h = 0;
+			float max_w, max_h;
+			float xs = 1, ys = 1, s;
+
+			find_accumulated_margins(ctx, box, &margin_w, &margin_h);
+			max_w = top->w - margin_w;
+			max_h = page_h - margin_h;
+
+			/* NOTE: We ignore the image DPI here, since most images in EPUB files have bogus values. */
+			node->w = node->content.image->w * 72 / 96;
+			node->h = node->content.image->h * 72 / 96;
+
+			node->w = fz_from_css_number(node->box->style.width, top->em, top->w - margin_w, node->w);
+			node->h = fz_from_css_number(node->box->style.height, top->em, page_h - margin_h, node->h);
+
+			/* Shrink image to fit on one page if needed */
+			if (max_w > 0 && node->w > max_w)
+				xs = max_w / node->w;
+			if (max_h > 0 && node->h > max_h)
+				ys = max_h / node->h;
+			s = fz_min(xs, ys);
+			node->w = node->w * s;
+			node->h = node->h * s;
+
 		}
 		else
 		{
@@ -898,7 +915,7 @@ static void draw_flow_box(fz_context *ctx, fz_html_box *box, float page_top, flo
 			{
 				if (text)
 				{
-					fz_fill_text(ctx, dev, text, ctm, fz_device_rgb(ctx), prev_color, 1, NULL);
+					fz_fill_text(ctx, dev, text, ctm, fz_device_rgb(ctx), prev_color, 1, fz_default_color_params);
 					fz_drop_text(ctx, text);
 					text = NULL;
 				}
@@ -924,7 +941,7 @@ static void draw_flow_box(fz_context *ctx, fz_html_box *box, float page_top, flo
 			trm.f = y - page_top;
 
 			s = get_node_text(ctx, node);
-			init_string_walker(ctx, &walker, hb_buf, node->bidi_level & 1, style->font, node->script, node->markup_lang, s);
+			init_string_walker(ctx, &walker, hb_buf, node->bidi_level & 1, style->font, node->script, node->markup_lang, style->small_caps, s);
 			while (walk_string(&walker))
 			{
 				float node_scale = node->box->em / walker.scale;
@@ -985,7 +1002,7 @@ static void draw_flow_box(fz_context *ctx, fz_html_box *box, float page_top, flo
 		{
 			if (text)
 			{
-				fz_fill_text(ctx, dev, text, ctm, fz_device_rgb(ctx), color, 1, NULL);
+				fz_fill_text(ctx, dev, text, ctm, fz_device_rgb(ctx), color, 1, fz_default_color_params);
 				fz_drop_text(ctx, text);
 				text = NULL;
 			}
@@ -993,14 +1010,14 @@ static void draw_flow_box(fz_context *ctx, fz_html_box *box, float page_top, flo
 			{
 				fz_matrix itm = fz_pre_translate(ctm, node->x, node->y - page_top);
 				itm = fz_pre_scale(itm, node->w, node->h);
-				fz_fill_image(ctx, dev, node->content.image, itm, 1, NULL);
+				fz_fill_image(ctx, dev, node->content.image, itm, 1, fz_default_color_params);
 			}
 		}
 	}
 
 	if (text)
 	{
-		fz_fill_text(ctx, dev, text, ctm, fz_device_rgb(ctx), color, 1, NULL);
+		fz_fill_text(ctx, dev, text, ctm, fz_device_rgb(ctx), color, 1, fz_default_color_params);
 		fz_drop_text(ctx, text);
 		text = NULL;
 	}
@@ -1024,7 +1041,7 @@ static void draw_rect(fz_context *ctx, fz_device *dev, fz_matrix ctm, float page
 		rgb[1] = color.g / 255.0f;
 		rgb[2] = color.b / 255.0f;
 
-		fz_fill_path(ctx, dev, path, 0, ctm, fz_device_rgb(ctx), rgb, color.a / 255.0f, NULL);
+		fz_fill_path(ctx, dev, path, 0, ctm, fz_device_rgb(ctx), rgb, color.a / 255.0f, fz_default_color_params);
 
 		fz_drop_path(ctx, path);
 	}
@@ -1091,9 +1108,9 @@ static void format_list_number(fz_context *ctx, int type, int x, char *buf, int 
 	switch (type)
 	{
 	case LST_NONE: fz_strlcpy(buf, "", size); break;
-	case LST_DISC: fz_strlcpy(buf, "\342\227\217  ", size); break; /* U+25CF BLACK CIRCLE */
-	case LST_CIRCLE: fz_strlcpy(buf, "\342\227\213  ", size); break; /* U+25CB WHITE CIRCLE */
-	case LST_SQUARE: fz_strlcpy(buf, "\342\226\240  ", size); break; /* U+25A0 BLACK SQUARE */
+	case LST_DISC: fz_snprintf(buf, size, "%C  ", 0x2022); break; /* U+2022 BULLET */
+	case LST_CIRCLE: fz_snprintf(buf, size, "%C  ", 0x25CB); break; /* U+25CB WHITE CIRCLE */
+	case LST_SQUARE: fz_snprintf(buf, size, "%C  ", 0x25A0); break; /* U+25A0 BLACK SQUARE */
 	default:
 	case LST_DECIMAL: fz_snprintf(buf, size, "%d. ", x); break;
 	case LST_DECIMAL_ZERO: fz_snprintf(buf, size, "%02d. ", x); break;
@@ -1182,7 +1199,7 @@ static void draw_list_mark(fz_context *ctx, fz_html_box *box, float page_top, fl
 		color[1] = box->style.color.g / 255.0f;
 		color[2] = box->style.color.b / 255.0f;
 
-		fz_fill_text(ctx, dev, text, ctm, fz_device_rgb(ctx), color, 1, NULL);
+		fz_fill_text(ctx, dev, text, ctm, fz_device_rgb(ctx), color, 1, fz_default_color_params);
 	}
 	fz_always(ctx)
 		fz_drop_text(ctx, text);

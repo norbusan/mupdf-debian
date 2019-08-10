@@ -42,7 +42,6 @@ enum {
 #if FZ_ENABLE_PDF
 	OUT_PDF,
 #endif
-	OUT_GPROOF
 };
 
 enum { CS_INVALID, CS_UNSET, CS_MONO, CS_GRAY, CS_GRAY_ALPHA, CS_RGB, CS_RGB_ALPHA, CS_CMYK, CS_CMYK_ALPHA, CS_ICC };
@@ -82,7 +81,6 @@ static const suffix_t suffix_table[] =
 	{ ".stext", OUT_STEXT, 0 },
 
 	{ ".trace", OUT_TRACE, 0 },
-	{ ".gproof", OUT_GPROOF, 0 },
 };
 
 typedef struct
@@ -136,7 +134,6 @@ static const format_cs_table_t format_cs_table[] =
 #if FZ_ENABLE_PDF
 	{ OUT_PDF, CS_RGB, { CS_RGB } },
 #endif
-	{ OUT_GPROOF, CS_RGB, { CS_RGB } },
 
 	{ OUT_TEXT, CS_RGB, { CS_RGB } },
 	{ OUT_HTML, CS_RGB, { CS_RGB } },
@@ -227,9 +224,9 @@ static int width = 0;
 static int height = 0;
 static int fit = 0;
 
-static float layout_w = 450;
-static float layout_h = 600;
-static float layout_em = 12;
+static float layout_w = FZ_DEFAULT_LAYOUT_W;
+static float layout_h = FZ_DEFAULT_LAYOUT_H;
+static float layout_em = FZ_DEFAULT_LAYOUT_EM;
 static char *layout_css = NULL;
 static int layout_use_doc_css = 1;
 static float min_line_width = 0.0f;
@@ -243,6 +240,7 @@ static int showmd5 = 0;
 static pdf_document *pdfout = NULL;
 #endif
 
+static int no_icc = 0;
 static int ignore_errors = 0;
 static int uselist = 1;
 static int alphabits_text = 8;
@@ -272,12 +270,6 @@ static int files = 0;
 static int num_workers = 0;
 static worker_t *workers;
 static fz_band_writer *bander = NULL;
-
-#if FZ_ENABLE_ICC
-static fz_cmm_engine *icc_engine = &fz_cmm_engine_lcms;
-#else
-static fz_cmm_engine *icc_engine = NULL;
-#endif
 
 static const char *layer_config = NULL;
 
@@ -585,15 +577,15 @@ static void dodrawpage(fz_context *ctx, fz_page *page, fz_display_list *list, in
 			dev = NULL;
 			if (output_format == OUT_STEXT)
 			{
-				fz_print_stext_page_as_xml(ctx, out, text);
+				fz_print_stext_page_as_xml(ctx, out, text, pagenum);
 			}
 			else if (output_format == OUT_HTML)
 			{
-				fz_print_stext_page_as_html(ctx, out, text);
+				fz_print_stext_page_as_html(ctx, out, text, pagenum);
 			}
 			else if (output_format == OUT_XHTML)
 			{
-				fz_print_stext_page_as_xhtml(ctx, out, text);
+				fz_print_stext_page_as_xhtml(ctx, out, text, pagenum);
 			}
 			else if (output_format == OUT_TEXT)
 			{
@@ -1354,7 +1346,7 @@ static void apply_layer_config(fz_context *ctx, fz_document *doc, const char *lc
 {
 #if FZ_ENABLE_PDF
 	pdf_document *pdoc = pdf_specifics(ctx, doc);
-	int config = -1;
+	int config;
 	int n, j;
 	pdf_layer_config info;
 
@@ -1385,36 +1377,36 @@ static void apply_layer_config(fz_context *ctx, fz_document *doc, const char *lc
 		return;
 	}
 
+	/* Read the config number */
+	if (*lc < '0' || *lc > '9')
+	{
+		fprintf(stderr, "cannot find number expected for -y\n");
+		return;
+	}
+	config = fz_atoi(lc);
+	pdf_select_layer_config(ctx, pdoc, config);
+
 	while (*lc)
 	{
-		int i;
+		int item;
 
-		if (*lc < '0' || *lc > '9')
-		{
-			fprintf(stderr, "cannot find number expected for -y\n");
-			return;
-		}
-		i = fz_atoi(lc);
-		pdf_select_layer_config(ctx, pdoc, i);
-
-		if (config < 0)
-			config = i;
-
+		/* Skip over the last number we read (in the fz_atoi) */
 		while (*lc >= '0' && *lc <= '9')
 			lc++;
 		while (iswhite(*lc))
 			lc++;
-		if (*lc == ',')
-		{
+		if (*lc != ',')
+			break;
+		lc++;
+		while (iswhite(*lc))
 			lc++;
-			while (iswhite(*lc))
-				lc++;
-		}
-		else if (*lc)
+		if (*lc < '0' || *lc > '9')
 		{
-			fprintf(stderr, "cannot find comma expected for -y\n");
+			fprintf(stderr, "Expected a number for UI item to toggle\n");
 			return;
 		}
+		item = fz_atoi(lc);
+		pdf_toggle_layer_config_ui(ctx, pdoc, item);
 	}
 
 	/* Now list the final state of the config */
@@ -1525,7 +1517,7 @@ int mudraw_main(int argc, char **argv)
 		case 'D': uselist = 0; break;
 		case 'l': min_line_width = fz_atof(fz_optarg); break;
 		case 'i': ignore_errors = 1; break;
-		case 'N': icc_engine = NULL; break;
+		case 'N': no_icc = 1; break;
 
 		case 'T':
 #ifndef DISABLE_MUTHREADS
@@ -1593,12 +1585,19 @@ int mudraw_main(int argc, char **argv)
 	fz_try(ctx)
 	{
 		if (proof_filename)
-			proof_cs = fz_new_icc_colorspace_from_file(ctx, FZ_COLORSPACE_NONE, proof_filename);
+		{
+			fz_buffer *proof_buffer = fz_read_file(ctx, proof_filename);
+			proof_cs = fz_new_icc_colorspace(ctx, FZ_COLORSPACE_NONE, 0, NULL, proof_buffer);
+			fz_drop_buffer(ctx, proof_buffer);
+		}
 
 		fz_set_text_aa_level(ctx, alphabits_text);
 		fz_set_graphics_aa_level(ctx, alphabits_graphics);
 		fz_set_graphics_min_line_width(ctx, min_line_width);
-		fz_set_cmm_engine(ctx, icc_engine);
+		if (no_icc)
+			fz_disable_icc(ctx);
+		else
+			fz_enable_icc(ctx);
 
 #ifndef DISABLE_MUTHREADS
 		if (bgprint.active)
@@ -1757,7 +1756,11 @@ int mudraw_main(int argc, char **argv)
 				break;
 			case CS_ICC:
 				fz_try(ctx)
-					colorspace = fz_new_icc_colorspace_from_file(ctx, FZ_COLORSPACE_NONE, icc_filename);
+				{
+					fz_buffer *icc_buffer = fz_read_file(ctx, icc_filename);
+					colorspace = fz_new_icc_colorspace(ctx, FZ_COLORSPACE_NONE, 0, NULL, icc_buffer);
+					fz_drop_buffer(ctx, icc_buffer);
+				}
 				fz_catch(ctx)
 				{
 					fprintf(stderr, "Invalid ICC destination color space\n");
@@ -1827,13 +1830,7 @@ int mudraw_main(int argc, char **argv)
 		}
 		else
 #endif
-			if (output_format == OUT_GPROOF)
-			{
-				/* GPROOF files are saved direct. Do not open "output". */
-				if (!output)
-					fz_throw(ctx, FZ_ERROR_GENERIC, "output filename required when saving GProof file");
-			}
-			else if (output_format == OUT_SVG)
+			if (output_format == OUT_SVG)
 			{
 				/* SVG files are always opened for each page. Do not open "output". */
 			}
@@ -1913,17 +1910,10 @@ int mudraw_main(int argc, char **argv)
 					if (layer_config)
 						apply_layer_config(ctx, doc, layer_config);
 
-					if (output_format == OUT_GPROOF)
-					{
-						fz_save_gproof(ctx, filename, doc, output, resolution, "", "");
-					}
-					else
-					{
-						if (fz_optind == argc || !fz_is_page_range(ctx, argv[fz_optind]))
-							drawrange(ctx, doc, "1-N");
-						if (fz_optind < argc && fz_is_page_range(ctx, argv[fz_optind]))
-							drawrange(ctx, doc, argv[fz_optind++]);
-					}
+					if (fz_optind == argc || !fz_is_page_range(ctx, argv[fz_optind]))
+						drawrange(ctx, doc, "1-N");
+					if (fz_optind < argc && fz_is_page_range(ctx, argv[fz_optind]))
+						drawrange(ctx, doc, argv[fz_optind++]);
 
 					bgprint_flush();
 				}
@@ -1963,16 +1953,11 @@ int mudraw_main(int argc, char **argv)
 		}
 		else
 #endif
-			if (output_format == OUT_GPROOF || output_format == OUT_SVG)
-			{
-				/* No output file to close */
-			}
-			else
-			{
-				fz_close_output(ctx, out);
-				fz_drop_output(ctx, out);
-				out = NULL;
-			}
+		{
+			fz_close_output(ctx, out);
+			fz_drop_output(ctx, out);
+			out = NULL;
+		}
 
 		if (showtime && timing.count > 0)
 		{

@@ -15,6 +15,7 @@ enum pdf_annot_type
 	PDF_ANNOT_UNDERLINE,
 	PDF_ANNOT_SQUIGGLY,
 	PDF_ANNOT_STRIKE_OUT,
+	PDF_ANNOT_REDACT,
 	PDF_ANNOT_STAMP,
 	PDF_ANNOT_CARET,
 	PDF_ANNOT_INK,
@@ -111,6 +112,7 @@ char *pdf_parse_link_action(fz_context *ctx, pdf_document *doc, pdf_obj *obj, in
 pdf_obj *pdf_lookup_dest(fz_context *ctx, pdf_document *doc, pdf_obj *needle);
 pdf_obj *pdf_lookup_name(fz_context *ctx, pdf_document *doc, pdf_obj *which, pdf_obj *needle);
 pdf_obj *pdf_load_name_tree(fz_context *ctx, pdf_document *doc, pdf_obj *which);
+pdf_obj *pdf_lookup_number(fz_context *ctx, pdf_obj *root, int needle);
 
 int pdf_resolve_link(fz_context *ctx, pdf_document *doc, const char *uri, float *xp, float *yp);
 fz_link *pdf_load_link_annots(fz_context *ctx, pdf_document *, pdf_obj *annots, int pagenum, fz_matrix page_ctm);
@@ -228,5 +230,7 @@ int pdf_toggle_widget(fz_context *ctx, pdf_widget *widget);
 fz_display_list *pdf_new_display_list_from_annot(fz_context *ctx, pdf_annot *annot);
 fz_pixmap *pdf_new_pixmap_from_annot(fz_context *ctx, pdf_annot *annot, fz_matrix ctm, fz_colorspace *cs, fz_separations *seps, int alpha);
 fz_stext_page *pdf_new_stext_page_from_annot(fz_context *ctx, pdf_annot *annot, const fz_stext_options *options);
+
+fz_layout_block *pdf_layout_text_widget(fz_context *ctx, pdf_annot *annot);
 
 #endif

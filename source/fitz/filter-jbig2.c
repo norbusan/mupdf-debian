@@ -314,14 +314,17 @@ next_jbig2d(fz_context *ctx, fz_stream *stm, size_t len)
 			n = fz_read(ctx, state->chain, tmp, sizeof tmp);
 			if (n == 0)
 				break;
-			jbig2_data_in(state->ctx, tmp, n);
+
+			if (jbig2_data_in(state->ctx, tmp, n) < 0)
+				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot decode jbig2 image");
 		}
 
-		jbig2_complete_page(state->ctx);
+		if (jbig2_complete_page(state->ctx) < 0)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot complete jbig2 image");
 
 		state->page = jbig2_page_out(state->ctx);
 		if (!state->page)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "cannot decode jbig2 image");
+			fz_throw(ctx, FZ_ERROR_GENERIC, "no jbig2 image decoded");
 	}
 
 	s = state->page->data;
@@ -347,6 +350,12 @@ error_callback(void *data, const char *msg, Jbig2Severity severity, int32_t seg_
 		fz_warn(ctx, "jbig2dec error: %s (segment %d)", msg, seg_idx);
 	else if (severity == JBIG2_SEVERITY_WARNING)
 		fz_warn(ctx, "jbig2dec warning: %s (segment %d)", msg, seg_idx);
+#ifndef NDEBUG
+	else if (severity == JBIG2_SEVERITY_INFO)
+		fz_warn(ctx, "jbig2dec info: %s (segment %d)", msg, seg_idx);
+	else if (severity == JBIG2_SEVERITY_DEBUG)
+		fz_warn(ctx, "jbig2dec debug: %s (segment %d)", msg, seg_idx);
+#endif
 }
 
 static void *fz_jbig2_alloc(Jbig2Allocator *allocator, size_t size)
@@ -371,7 +380,7 @@ static void *fz_jbig2_realloc(Jbig2Allocator *allocator, void *p, size_t size)
 	}
 	if (p == NULL)
 		return fz_malloc(ctx, size);
-	return fz_resize_array_no_throw(ctx, p, 1, size);
+	return fz_realloc_no_throw(ctx, p, size);
 }
 
 fz_jbig2_globals *
@@ -392,7 +401,8 @@ fz_load_jbig2_globals(fz_context *ctx, fz_buffer *buf)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot allocate jbig2 globals context");
 	}
 
-	jbig2_data_in(jctx, buf->data, buf->len);
+	if (jbig2_data_in(jctx, buf->data, buf->len) < 0)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot decode jbig2 globals");
 
 	FZ_INIT_STORABLE(globals, 1, fz_drop_jbig2_globals_imp);
 	globals->gctx = jbig2_make_global_ctx(jctx);

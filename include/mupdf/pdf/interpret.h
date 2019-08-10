@@ -165,7 +165,7 @@ struct pdf_csi_s
 
 /* Functions to set up pdf_process structures */
 
-pdf_processor *pdf_new_run_processor(fz_context *ctx, fz_device *dev, fz_matrix ctm, const char *usage, pdf_gstate *gstate, fz_default_colorspaces *default_cs);
+pdf_processor *pdf_new_run_processor(fz_context *ctx, fz_device *dev, fz_matrix ctm, const char *usage, pdf_gstate *gstate, fz_default_colorspaces *default_cs, fz_cookie *cookie);
 
 pdf_processor *pdf_new_buffer_processor(fz_context *ctx, fz_buffer *buffer, int ahxencode);
 
@@ -178,7 +178,7 @@ typedef int (pdf_text_filter_fn)(fz_context *ctx, void *opaque, int *ucsbuf, int
 typedef void (pdf_after_text_object_fn)(fz_context *ctx, void *opaque, pdf_document *doc, pdf_processor *chain, fz_matrix ctm);
 
 pdf_processor *
-pdf_new_filter_processor_with_text_filter(fz_context *ctx, pdf_document *doc, pdf_processor *chain, pdf_obj *old_rdb, pdf_obj *new_rdb, pdf_text_filter_fn *text_filter, pdf_after_text_object_fn *after, void *text_filter_opaque);
+pdf_new_filter_processor_with_text_filter(fz_context *ctx, pdf_document *doc, int structparents, pdf_processor *chain, pdf_obj *old_rdb, pdf_obj *new_rdb, pdf_text_filter_fn *text_filter, pdf_after_text_object_fn *after, void *text_filter_opaque);
 
 void pdf_process_contents(fz_context *ctx, pdf_processor *proc, pdf_document *doc, pdf_obj *obj, pdf_obj *res, fz_cookie *cookie);
 void pdf_process_annot(fz_context *ctx, pdf_processor *proc, pdf_document *doc, pdf_page *page, pdf_annot *annot, fz_cookie *cookie);

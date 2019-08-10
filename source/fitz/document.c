@@ -466,10 +466,13 @@ fz_load_page(fz_context *ctx, fz_document *doc, int number)
 		page->number = number;
 
 		/* Insert new page at the head of the list of open pages. */
-		if ((page->next = doc->open) != NULL)
-			doc->open->prev = &page->next;
-		doc->open = page;
-		page->prev = &doc->open;
+		if (!page->incomplete)
+		{
+			if ((page->next = doc->open) != NULL)
+				doc->open->prev = &page->next;
+			doc->open = page;
+			page->prev = &doc->open;
+		}
 		return page;
 	}
 
@@ -671,7 +674,7 @@ fz_page_presentation(fz_context *ctx, fz_page *page, fz_transition *transition, 
 /*
 	Get the separations details for a page.
 	This will be NULL, unless the format specifically supports
-	separations (such as gproof, or PDF files). May be NULL even
+	separations (such as PDF files). May be NULL even
 	so, if there are no separations on a page.
 
 	Returns a reference that must be dropped.

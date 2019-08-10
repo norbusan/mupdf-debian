@@ -269,7 +269,10 @@ tiff_expand_colormap(fz_context *ctx, struct tiff *tiff)
 				*dst++ = tiff->colormap[c + 0] >> 8;
 				*dst++ = tiff->colormap[c + maxval] >> 8;
 				*dst++ = tiff->colormap[c + maxval * 2] >> 8;
-				*dst++ = a << (8 - tiff->bitspersample);
+				if (tiff->bitspersample <= 8)
+					*dst++ = a << (8 - tiff->bitspersample);
+				else
+					*dst++ = a >> (tiff->bitspersample - 8);
 			}
 			else
 			{
@@ -888,7 +891,7 @@ tiff_read_tag(fz_context *ctx, struct tiff *tiff, unsigned offset)
 	case StripOffsets:
 		if (tiff->stripoffsets)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "at most one strip offsets tag allowed");
-		tiff->stripoffsets = fz_malloc_array(ctx, count, sizeof(unsigned));
+		tiff->stripoffsets = fz_malloc_array(ctx, count, unsigned);
 		tiff_read_tag_value(tiff->stripoffsets, tiff, type, value, count);
 		tiff->stripoffsetslen = count;
 		break;
@@ -896,7 +899,7 @@ tiff_read_tag(fz_context *ctx, struct tiff *tiff, unsigned offset)
 	case StripByteCounts:
 		if (tiff->stripbytecounts)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "at most one strip byte counts tag allowed");
-		tiff->stripbytecounts = fz_malloc_array(ctx, count, sizeof(unsigned));
+		tiff->stripbytecounts = fz_malloc_array(ctx, count, unsigned);
 		tiff_read_tag_value(tiff->stripbytecounts, tiff, type, value, count);
 		tiff->stripbytecountslen = count;
 		break;
@@ -904,7 +907,7 @@ tiff_read_tag(fz_context *ctx, struct tiff *tiff, unsigned offset)
 	case ColorMap:
 		if (tiff->colormap)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "at most one color map allowed");
-		tiff->colormap = fz_malloc_array(ctx, count, sizeof(unsigned));
+		tiff->colormap = fz_malloc_array(ctx, count, unsigned);
 		tiff_read_tag_value(tiff->colormap, tiff, type, value, count);
 		tiff->colormaplen = count;
 		break;
@@ -920,7 +923,7 @@ tiff_read_tag(fz_context *ctx, struct tiff *tiff, unsigned offset)
 	case TileOffsets:
 		if (tiff->tileoffsets)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "at most one tile offsets tag allowed");
-		tiff->tileoffsets = fz_malloc_array(ctx, count, sizeof(unsigned));
+		tiff->tileoffsets = fz_malloc_array(ctx, count, unsigned);
 		tiff_read_tag_value(tiff->tileoffsets, tiff, type, value, count);
 		tiff->tileoffsetslen = count;
 		break;
@@ -928,7 +931,7 @@ tiff_read_tag(fz_context *ctx, struct tiff *tiff, unsigned offset)
 	case TileByteCounts:
 		if (tiff->tilebytecounts)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "at most one tile byte counts tag allowed");
-		tiff->tilebytecounts = fz_malloc_array(ctx, count, sizeof(unsigned));
+		tiff->tilebytecounts = fz_malloc_array(ctx, count, unsigned);
 		tiff_read_tag_value(tiff->tilebytecounts, tiff, type, value, count);
 		tiff->tilebytecountslen = count;
 		break;
@@ -1007,7 +1010,7 @@ tiff_read_header(fz_context *ctx, struct tiff *tiff, const unsigned char *buf, s
 		fz_throw(ctx, FZ_ERROR_GENERIC, "not a TIFF file, wrong version marker");
 
 	/* get offset of IFD */
-	tiff->ifd_offsets = fz_malloc_array(ctx, 1, sizeof (unsigned));
+	tiff->ifd_offsets = fz_malloc_array(ctx, 1, unsigned);
 	tiff->ifd_offsets[0] = tiff_readlong(tiff);
 	tiff->ifds = 1;
 }
@@ -1034,7 +1037,7 @@ tiff_next_ifd(fz_context *ctx, struct tiff *tiff, unsigned offset)
 		if (tiff->ifd_offsets[i] == offset)
 			fz_throw(ctx, FZ_ERROR_GENERIC, "cycle in IFDs detected");
 
-	tiff->ifd_offsets = fz_resize_array(ctx, tiff->ifd_offsets, tiff->ifds + 1, sizeof (unsigned));
+	tiff->ifd_offsets = fz_realloc_array(ctx, tiff->ifd_offsets, tiff->ifds + 1, unsigned);
 	tiff->ifd_offsets[tiff->ifds] = offset;
 	tiff->ifds++;
 
@@ -1102,35 +1105,6 @@ tiff_ycc_to_rgb(fz_context *ctx, struct tiff *tiff)
 			row[x * offset + 1] = fz_clampi(ycc[0] - 0.34413f * ycc[1] - 0.71414f * ycc[2], 0, 255);
 			row[x * offset + 2] = fz_clampi(ycc[0] + 1.772f * ycc[1], 0, 255);
 		}
-	}
-}
-
-static int
-tiff_colorspace_type_from_photometric(int photometric)
-{
-	switch (photometric)
-	{
-	case 0: /* WhiteIsZero */
-	case 1: /* BlackIsZero */
-		return FZ_COLORSPACE_GRAY;
-	case 2: /* RGB */
-	case 3: /* RGBPal */
-		return FZ_COLORSPACE_RGB;
-	case 4: /* Transparency mask */
-		return FZ_COLORSPACE_NONE;
-	case 5: /* CMYK */
-		return FZ_COLORSPACE_CMYK;
-	case 6: /* YCbCr, it's probably a jpeg ... we let jpeg convert to rgb */
-		return FZ_COLORSPACE_RGB;
-	case 8: /* Direct L*a*b* encoding. a*, b* signed values */
-	case 9: /* ICC Style L*a*b* encoding */
-		return FZ_COLORSPACE_LAB;
-	case 32844: /* SGI CIE Log 2 L (16bpp Greyscale) */
-		return FZ_COLORSPACE_GRAY;
-	case 32845: /* SGI CIE Log 2 L, u, v (24bpp or 32bpp) */
-		return FZ_COLORSPACE_RGB;
-	default:
-		return FZ_COLORSPACE_NONE;
 	}
 }
 
@@ -1219,24 +1193,14 @@ tiff_decode_ifd(fz_context *ctx, struct tiff *tiff)
 		fz_try(ctx)
 		{
 			buff = fz_new_buffer_from_copied_data(ctx, tiff->profile, tiff->profilesize);
-			icc = fz_new_icc_colorspace(ctx, fz_colorspace_type(ctx, tiff->colorspace), buff, tiff->colorspace);
-			if (fz_colorspace_type(ctx, icc) == tiff_colorspace_type_from_photometric(tiff->photometric))
-			{
-				fz_drop_colorspace(ctx, tiff->colorspace);
-				tiff->colorspace = icc;
-			}
-			else
-			{
-				fz_warn(ctx, "ignoring ICC profile that does not match photometric");
-				fz_drop_colorspace(ctx, icc);
-			}
+			icc = fz_new_icc_colorspace(ctx, fz_colorspace_type(ctx, tiff->colorspace), 0, NULL, buff);
+			fz_drop_colorspace(ctx, tiff->colorspace);
+			tiff->colorspace = icc;
 		}
 		fz_always(ctx)
 			fz_drop_buffer(ctx, buff);
 		fz_catch(ctx)
-		{
-			fz_warn(ctx, "ignoring broken ICC profile");
-		}
+			fz_warn(ctx, "ignoring embedded ICC profile");
 	}
 #endif
 
@@ -1280,7 +1244,7 @@ tiff_decode_ifd(fz_context *ctx, struct tiff *tiff)
 		if (!tiff->tilelength && !tiff->tilewidth && !tiff->stripbytecounts)
 		{
 			tiff->stripbytecountslen = (tiff->imagelength + tiff->rowsperstrip - 1) / tiff->rowsperstrip;
-			tiff->stripbytecounts = fz_malloc_array(ctx, tiff->stripbytecountslen, sizeof(unsigned));
+			tiff->stripbytecounts = fz_malloc_array(ctx, tiff->stripbytecountslen, unsigned);
 			for (i = 0; i < tiff->stripbytecountslen; i++)
 				tiff->stripbytecounts[i] = tiff->rowsperstrip * tiff->stride;
 		}
@@ -1289,7 +1253,7 @@ tiff_decode_ifd(fz_context *ctx, struct tiff *tiff)
 			unsigned tilesdown = (tiff->imagelength + tiff->tilelength - 1) / tiff->tilelength;
 			unsigned tilesacross = (tiff->imagewidth + tiff->tilewidth - 1) / tiff->tilewidth;
 			tiff->tilebytecountslen = tilesacross * tilesdown;
-			tiff->tilebytecounts = fz_malloc_array(ctx, tiff->tilebytecountslen, sizeof(unsigned));
+			tiff->tilebytecounts = fz_malloc_array(ctx, tiff->tilebytecountslen, unsigned);
 			for (i = 0; i < tiff->tilebytecountslen; i++)
 				tiff->tilebytecounts[i] = tiff->tilelength * tiff->tilestride;
 		}
@@ -1322,7 +1286,9 @@ tiff_decode_samples(fz_context *ctx, struct tiff *tiff)
 {
 	unsigned i;
 
-	tiff->samples = fz_malloc_array(ctx, tiff->imagelength, tiff->stride);
+	if (tiff->imagelength > UINT_MAX / tiff->stride)
+		fz_throw(ctx, FZ_ERROR_MEMORY, "image too large");
+	tiff->samples = fz_malloc(ctx, tiff->imagelength * tiff->stride);
 	memset(tiff->samples, 0x55, tiff->imagelength * tiff->stride);
 
 	if (tiff->tilelength && tiff->tilewidth && tiff->tileoffsets && tiff->tilebytecounts)

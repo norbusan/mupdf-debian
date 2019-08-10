@@ -43,7 +43,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg/src/lib/openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN32;_DEBUG;OPJ_STATIC"
+				PreprocessorDefinitions="WIN32;_DEBUG;OPJ_STATIC;HAVE_LCMS2MT=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -106,7 +106,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN64;_DEBUG;OPJ_STATIC"
+				PreprocessorDefinitions="WIN64;_DEBUG;OPJ_STATIC;HAVE_LCMS2MT=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -171,7 +171,7 @@
 				EnableIntrinsicFunctions="true"
 				WholeProgramOptimization="false"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN32;NDEBUG;OPJ_STATIC"
+				PreprocessorDefinitions="WIN32;NDEBUG;OPJ_STATIC;HAVE_LCMS2MT=1"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -235,7 +235,7 @@
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN64;NDEBUG;OPJ_STATIC"
+				PreprocessorDefinitions="WIN64;NDEBUG;OPJ_STATIC;HAVE_LCMS2MT=1"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -297,7 +297,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN32;_DEBUG;MEMENTO=1;OPJ_STATIC"
+				PreprocessorDefinitions="WIN32;_DEBUG;MEMENTO=1;OPJ_STATIC;HAVE_LCMS2MT=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -361,7 +361,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN64;_DEBUG;MEMENTO=1;OPJ_STATIC"
+				PreprocessorDefinitions="WIN64;_DEBUG;MEMENTO=1;OPJ_STATIC;HAVE_LCMS2MT=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -424,7 +424,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\openssl\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN32;_DEBUG;HAVE_LIBCRYPTO;OPJ_STATIC"
+				PreprocessorDefinitions="WIN32;_DEBUG;HAVE_LIBCRYPTO;OPJ_STATIC;HAVE_LCMS2MT=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -488,7 +488,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\openssl\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\openssl\include;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN64;_DEBUG;HAVE_LIBCRYPTO;OPJ_STATIC"
+				PreprocessorDefinitions="WIN64;_DEBUG;HAVE_LIBCRYPTO;OPJ_STATIC;HAVE_LCMS2MT=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -552,7 +552,7 @@
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\openssl\include;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN32;NDEBUG;HAVE_LIBCRYPTO;OPJ_STATIC"
+				PreprocessorDefinitions="WIN32;NDEBUG;HAVE_LIBCRYPTO;OPJ_STATIC;HAVE_LCMS2MT=1"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -616,7 +616,7 @@
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\openssl\include;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN64;NDEBUG;HAVE_LIBCRYPTO;OPJ_STATIC"
+				PreprocessorDefinitions="WIN64;NDEBUG;HAVE_LIBCRYPTO;OPJ_STATIC;HAVE_LCMS2MT=1"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -678,7 +678,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg/src/lib/openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN32;_DEBUG;OPJ_STATIC"
+				PreprocessorDefinitions="WIN32;_DEBUG;OPJ_STATIC;HAVE_LCMS2MT=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="3"
@@ -742,7 +742,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN64;_DEBUG;OPJ_STATIC"
+				PreprocessorDefinitions="WIN64;_DEBUG;OPJ_STATIC;HAVE_LCMS2MT=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="3"
@@ -807,7 +807,7 @@
 				EnableIntrinsicFunctions="true"
 				WholeProgramOptimization="false"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN32;NDEBUG;OPJ_STATIC"
+				PreprocessorDefinitions="WIN32;NDEBUG;OPJ_STATIC;HAVE_LCMS2MT=1"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -871,7 +871,7 @@
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN64;NDEBUG;OPJ_STATIC"
+				PreprocessorDefinitions="WIN64;NDEBUG;OPJ_STATIC;HAVE_LCMS2MT=1"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -1315,7 +1315,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN32;_DEBUG;HAVE_LIBCRYPTO;MEMENTO=1;OPJ_STATIC"
+				PreprocessorDefinitions="WIN32;_DEBUG;HAVE_LIBCRYPTO;MEMENTO=1;OPJ_STATIC;HAVE_LCMS2MT=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -1379,263 +1379,10 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN64;_DEBUG;HAVE_LIBCRYPTO;MEMENTO=1;OPJ_STATIC"
+				PreprocessorDefinitions="WIN64;_DEBUG;HAVE_LIBCRYPTO;MEMENTO=1;OPJ_STATIC;HAVE_LCMS2MT=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
-				WarningLevel="3"
-				DebugInformationFormat="3"
-			/>
-			<Tool
-				Name="VCManagedResourceCompilerTool"
-			/>
-			<Tool
-				Name="VCResourceCompilerTool"
-			/>
-			<Tool
-				Name="VCPreLinkEventTool"
-			/>
-			<Tool
-				Name="VCLibrarianTool"
-				LinkLibraryDependencies="true"
-			/>
-			<Tool
-				Name="VCALinkTool"
-			/>
-			<Tool
-				Name="VCXDCMakeTool"
-			/>
-			<Tool
-				Name="VCBscMakeTool"
-			/>
-			<Tool
-				Name="VCFxCopTool"
-			/>
-			<Tool
-				Name="VCPostBuildEventTool"
-			/>
-		</Configuration>
-		<Configuration
-			Name="DebugGSView|Win32"
-			OutputDirectory="$(ConfigurationName)"
-			IntermediateDirectory="$(ConfigurationName)"
-			ConfigurationType="4"
-			CharacterSet="2"
-			>
-			<Tool
-				Name="VCPreBuildEventTool"
-			/>
-			<Tool
-				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="VCXMLDataGeneratorTool"
-			/>
-			<Tool
-				Name="VCWebServiceProxyGeneratorTool"
-			/>
-			<Tool
-				Name="VCMIDLTool"
-			/>
-			<Tool
-				Name="VCCLCompilerTool"
-				Optimization="0"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg/src/lib/openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN32;_DEBUG;OPJ_STATIC;GSVIEW_WIN;FZ_ENABLE_GPRF=1"
-				MinimalRebuild="true"
-				BasicRuntimeChecks="3"
-				RuntimeLibrary="1"
-				WarningLevel="3"
-				DebugInformationFormat="4"
-			/>
-			<Tool
-				Name="VCManagedResourceCompilerTool"
-			/>
-			<Tool
-				Name="VCResourceCompilerTool"
-			/>
-			<Tool
-				Name="VCPreLinkEventTool"
-			/>
-			<Tool
-				Name="VCLibrarianTool"
-				LinkLibraryDependencies="true"
-			/>
-			<Tool
-				Name="VCALinkTool"
-			/>
-			<Tool
-				Name="VCXDCMakeTool"
-			/>
-			<Tool
-				Name="VCBscMakeTool"
-			/>
-			<Tool
-				Name="VCFxCopTool"
-			/>
-			<Tool
-				Name="VCPostBuildEventTool"
-			/>
-		</Configuration>
-		<Configuration
-			Name="DebugGSView|x64"
-			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
-			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
-			ConfigurationType="4"
-			CharacterSet="2"
-			>
-			<Tool
-				Name="VCPreBuildEventTool"
-			/>
-			<Tool
-				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="VCXMLDataGeneratorTool"
-			/>
-			<Tool
-				Name="VCWebServiceProxyGeneratorTool"
-			/>
-			<Tool
-				Name="VCMIDLTool"
-				TargetEnvironment="3"
-			/>
-			<Tool
-				Name="VCCLCompilerTool"
-				Optimization="0"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN64;_DEBUG;OPJ_STATIC;GSVIEW_WIN;FZ_ENABLE_GPRF=1"
-				MinimalRebuild="true"
-				BasicRuntimeChecks="3"
-				RuntimeLibrary="1"
-				WarningLevel="3"
-				DebugInformationFormat="3"
-			/>
-			<Tool
-				Name="VCManagedResourceCompilerTool"
-			/>
-			<Tool
-				Name="VCResourceCompilerTool"
-			/>
-			<Tool
-				Name="VCPreLinkEventTool"
-			/>
-			<Tool
-				Name="VCLibrarianTool"
-				LinkLibraryDependencies="true"
-			/>
-			<Tool
-				Name="VCALinkTool"
-			/>
-			<Tool
-				Name="VCXDCMakeTool"
-			/>
-			<Tool
-				Name="VCBscMakeTool"
-			/>
-			<Tool
-				Name="VCFxCopTool"
-			/>
-			<Tool
-				Name="VCPostBuildEventTool"
-			/>
-		</Configuration>
-		<Configuration
-			Name="ReleaseGSView|Win32"
-			OutputDirectory="$(ConfigurationName)"
-			IntermediateDirectory="$(ConfigurationName)"
-			ConfigurationType="4"
-			CharacterSet="2"
-			WholeProgramOptimization="1"
-			>
-			<Tool
-				Name="VCPreBuildEventTool"
-			/>
-			<Tool
-				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="VCXMLDataGeneratorTool"
-			/>
-			<Tool
-				Name="VCWebServiceProxyGeneratorTool"
-			/>
-			<Tool
-				Name="VCMIDLTool"
-			/>
-			<Tool
-				Name="VCCLCompilerTool"
-				Optimization="2"
-				EnableIntrinsicFunctions="true"
-				WholeProgramOptimization="false"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN32;NDEBUG;OPJ_STATIC;GSVIEW_WIN;FZ_ENABLE_GPRF=1"
-				RuntimeLibrary="0"
-				EnableFunctionLevelLinking="true"
-				WarningLevel="3"
-				DebugInformationFormat="3"
-			/>
-			<Tool
-				Name="VCManagedResourceCompilerTool"
-			/>
-			<Tool
-				Name="VCResourceCompilerTool"
-			/>
-			<Tool
-				Name="VCPreLinkEventTool"
-			/>
-			<Tool
-				Name="VCLibrarianTool"
-				LinkLibraryDependencies="true"
-			/>
-			<Tool
-				Name="VCALinkTool"
-			/>
-			<Tool
-				Name="VCXDCMakeTool"
-			/>
-			<Tool
-				Name="VCBscMakeTool"
-			/>
-			<Tool
-				Name="VCFxCopTool"
-			/>
-			<Tool
-				Name="VCPostBuildEventTool"
-			/>
-		</Configuration>
-		<Configuration
-			Name="ReleaseGSView|x64"
-			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
-			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
-			ConfigurationType="4"
-			CharacterSet="2"
-			WholeProgramOptimization="1"
-			>
-			<Tool
-				Name="VCPreBuildEventTool"
-			/>
-			<Tool
-				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="VCXMLDataGeneratorTool"
-			/>
-			<Tool
-				Name="VCWebServiceProxyGeneratorTool"
-			/>
-			<Tool
-				Name="VCMIDLTool"
-				TargetEnvironment="3"
-			/>
-			<Tool
-				Name="VCCLCompilerTool"
-				Optimization="2"
-				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="..\..\scripts\freetype;..\..\scripts\libjpeg;..\..\include;..\..\thirdparty\jbig2dec;..\..\thirdparty\libjpeg;..\..\thirdparty\openjpeg\src\lib\openjp2;..\..\thirdparty\zlib;..\..\thirdparty\freetype\include;..\..\thirdparty\mujs;..\..\thirdparty\harfbuzz\src;..\..\thirdparty\lcms2\include"
-				PreprocessorDefinitions="WIN64;NDEBUG;OPJ_STATIC;GSVIEW_WIN;FZ_ENABLE_GPRF=1"
-				RuntimeLibrary="0"
-				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
 				DebugInformationFormat="3"
 			/>
@@ -1781,6 +1528,10 @@
 			</File>
 			<File
 				RelativePath="..\..\source\fitz\buffer.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\source\fitz\color-fast.c"
 				>
 			</File>
 			<File
@@ -1949,10 +1700,6 @@
 			</File>
 			<File
 				RelativePath="..\..\source\fitz\fitz-imp.h"
-				>
-			</File>
-			<File
-				RelativePath="..\..\source\fitz\font-imp.h"
 				>
 			</File>
 			<File
@@ -2169,10 +1916,6 @@
 			</File>
 			<File
 				RelativePath="..\..\source\fitz\svg-device.c"
-				>
-			</File>
-			<File
-				RelativePath="..\..\source\fitz\tempfile.c"
 				>
 			</File>
 			<File
@@ -2559,11 +2302,7 @@
 					>
 				</File>
 				<File
-					RelativePath="..\..\include\mupdf\fitz\color-management.h"
-					>
-				</File>
-				<File
-					RelativePath="..\..\include\mupdf\fitz\colorspace.h"
+					RelativePath="..\..\include\mupdf\fitz\color.h"
 					>
 				</File>
 				<File
@@ -2801,18 +2540,6 @@
 			</File>
 			<File
 				RelativePath="..\..\source\html\html-parse.c"
-				>
-			</File>
-		</Filter>
-		<Filter
-			Name="gprf"
-			>
-			<File
-				RelativePath="..\..\source\gprf\gprf-doc.c"
-				>
-			</File>
-			<File
-				RelativePath="..\..\source\gprf\gprf-skeleton.c"
 				>
 			</File>
 		</Filter>

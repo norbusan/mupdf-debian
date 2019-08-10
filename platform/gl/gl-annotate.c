@@ -14,6 +14,8 @@ static int is_draw_mode = 0;
 
 static char save_filename[PATH_MAX];
 static pdf_write_options save_opts;
+static struct input opwinput;
+static struct input upwinput;
 
 static int pdf_filter(const char *fn)
 {
@@ -25,30 +27,78 @@ static int pdf_filter(const char *fn)
 
 static void init_save_pdf_options(void)
 {
-	memset(&save_opts, 0, sizeof save_opts);
+	save_opts = pdf_default_write_options;
+	save_opts.do_compress = 1;
+	save_opts.do_compress_images = 1;
+	save_opts.do_compress_fonts = 1;
 }
+
+static const char *cryptalgo_names[] = {
+	"Keep",
+	"None",
+	"RC4, 40 bit",
+	"RC4, 128 bit",
+	"AES, 128 bit",
+	"AES, 256 bit",
+};
 
 static void save_pdf_options(void)
 {
+	const char *cryptalgo = cryptalgo_names[save_opts.do_encrypt];
+	int choice;
+
 	ui_layout(T, X, NW, 2, 2);
 	ui_label("PDF write options:");
 	ui_layout(T, X, NW, 4, 2);
+
 	ui_checkbox("Incremental", &save_opts.do_incremental);
+	ui_spacer();
 	ui_checkbox("Pretty-print", &save_opts.do_pretty);
 	ui_checkbox("Ascii", &save_opts.do_ascii);
+	ui_checkbox("Decompress", &save_opts.do_decompress);
 	ui_checkbox("Compress", &save_opts.do_compress);
 	ui_checkbox("Compress images", &save_opts.do_compress_images);
 	ui_checkbox("Compress fonts", &save_opts.do_compress_fonts);
-	ui_checkbox("Decompress", &save_opts.do_decompress);
-	ui_checkbox("Decrypt", &save_opts.do_decrypt);
-	ui_checkbox("Garbage collect", &save_opts.do_garbage);
-	ui_checkbox("Linearize", &save_opts.do_linear);
-	ui_checkbox("Clean syntax", &save_opts.do_clean);
-	ui_checkbox("Sanitize syntax", &save_opts.do_sanitize);
+	if (save_opts.do_incremental)
+	{
+		save_opts.do_garbage = 0;
+		save_opts.do_linear = 0;
+		save_opts.do_clean = 0;
+		save_opts.do_sanitize = 0;
+		save_opts.do_encrypt = PDF_ENCRYPT_KEEP;
+	}
+	else
+	{
+		ui_spacer();
+		ui_checkbox("Linearize", &save_opts.do_linear);
+		ui_checkbox("Garbage collect", &save_opts.do_garbage);
+		ui_checkbox("Clean syntax", &save_opts.do_clean);
+		ui_checkbox("Sanitize syntax", &save_opts.do_sanitize);
+
+		ui_spacer();
+		ui_label("Encryption:");
+		choice = ui_select("Encryption", cryptalgo, cryptalgo_names, nelem(cryptalgo_names));
+		if (choice != -1)
+			save_opts.do_encrypt = choice;
+	}
+
+	if (save_opts.do_encrypt >= PDF_ENCRYPT_RC4_40)
+	{
+		ui_spacer();
+		ui_label("User password:");
+		if (ui_input(&upwinput, 32, 1) >= UI_INPUT_EDIT)
+			fz_strlcpy(save_opts.upwd_utf8, upwinput.text, nelem(save_opts.upwd_utf8));
+		ui_label("Owner password:");
+		if (ui_input(&opwinput, 32, 1) >= UI_INPUT_EDIT)
+			fz_strlcpy(save_opts.opwd_utf8, opwinput.text, nelem(save_opts.opwd_utf8));
+	}
 }
 
 static void save_pdf_dialog(void)
 {
+	ui_input_init(&opwinput, "");
+	ui_input_init(&upwinput, "");
+
 	if (ui_save_file(save_filename, save_pdf_options))
 	{
 		ui.dialog = NULL;
@@ -67,6 +117,16 @@ static void save_pdf_dialog(void)
 				ui_show_warning_dialog("%s", fz_caught_message(ctx));
 			}
 		}
+	}
+}
+
+void do_save_pdf_file(void)
+{
+	if (pdf)
+	{
+		init_save_pdf_options();
+		ui_init_save_file(filename, pdf_filter);
+		ui.dialog = save_pdf_dialog;
 	}
 }
 
@@ -114,6 +174,7 @@ static void new_annot(int type)
 	case PDF_ANNOT_UNDERLINE:
 	case PDF_ANNOT_STRIKE_OUT:
 	case PDF_ANNOT_SQUIGGLY:
+	case PDF_ANNOT_REDACT:
 		is_draw_mode = 1;
 		break;
 	}
@@ -199,7 +260,7 @@ static unsigned int hex_from_color(int n, float color[4])
 		b = color[2] * 255;
 		return 0xff000000 | (r<<16) | (g<<8) | b;
 	case 4:
-		fz_convert_color(ctx, NULL, NULL, fz_device_rgb(ctx), rgb, fz_device_cmyk(ctx), color);
+		fz_convert_color(ctx, fz_device_cmyk(ctx), color, fz_device_rgb(ctx), rgb, NULL, fz_default_color_params);
 		r = rgb[0] * 255;
 		g = rgb[1] * 255;
 		b = rgb[2] * 255;
@@ -363,14 +424,16 @@ static int should_edit_icolor(enum pdf_annot_type subtype)
 void do_annotate_panel(void)
 {
 	static struct list annot_list;
+	enum pdf_annot_type subtype;
 	pdf_annot *annot;
 	int n;
 
+	int has_redact = 0;
 	int was_dirty = pdf->dirty;
 
 	ui_layout(T, X, NW, 2, 2);
 
-	if (ui_popup("CreateAnnotPopup", "Create...", 1, 14))
+	if (ui_popup("CreateAnnotPopup", "Create...", 1, 15))
 	{
 		if (ui_popup_item("Text")) new_annot(PDF_ANNOT_TEXT);
 		if (ui_popup_item("FreeText")) new_annot(PDF_ANNOT_FREE_TEXT);
@@ -386,6 +449,7 @@ void do_annotate_panel(void)
 		if (ui_popup_item("Underline")) new_annot(PDF_ANNOT_UNDERLINE);
 		if (ui_popup_item("StrikeOut")) new_annot(PDF_ANNOT_STRIKE_OUT);
 		if (ui_popup_item("Squiggly")) new_annot(PDF_ANNOT_SQUIGGLY);
+		if (ui_popup_item("Redact")) new_annot(PDF_ANNOT_REDACT);
 		ui_popup_end();
 	}
 
@@ -398,23 +462,21 @@ void do_annotate_panel(void)
 	{
 		char buf[256];
 		int num = pdf_to_num(ctx, annot->obj);
-		enum pdf_annot_type subtype = pdf_annot_type(ctx, annot);
+		subtype = pdf_annot_type(ctx, annot);
 		fz_snprintf(buf, sizeof buf, "%d: %s", num, pdf_string_from_annot_type(ctx, subtype));
 		if (ui_list_item(&annot_list, annot->obj, buf, selected_annot == annot))
 			selected_annot = annot;
+		if (subtype == PDF_ANNOT_REDACT)
+			has_redact = 1;
 	}
 	ui_list_end(&annot_list);
 
-	if (selected_annot)
+	if (selected_annot && (subtype = pdf_annot_type(ctx, selected_annot)) != PDF_ANNOT_WIDGET)
 	{
-		enum pdf_annot_type subtype = pdf_annot_type(ctx, selected_annot);
 		fz_rect rect;
 		fz_irect irect;
 		int n, choice;
 		pdf_obj *obj;
-
-		if (subtype == PDF_ANNOT_WIDGET)
-			return;
 
 		if (ui_button("Delete"))
 		{
@@ -630,11 +692,19 @@ void do_annotate_panel(void)
 	}
 
 	ui_layout(B, X, NW, 2, 2);
+
 	if (ui_button("Save PDF..."))
+		do_save_pdf_file();
+
+	if (has_redact)
 	{
-		init_save_pdf_options();
-		ui_init_save_file(filename, pdf_filter);
-		ui.dialog = save_pdf_dialog;
+		if (ui_button("Redact"))
+		{
+			selected_annot = NULL;
+			pdf_redact_page(ctx, pdf, page, NULL);
+			load_page();
+			render_page();
+		}
 	}
 
 	if (was_dirty != pdf->dirty)
@@ -647,7 +717,7 @@ static void do_edit_icon(fz_irect canvas_area, fz_irect area, fz_rect *rect)
 	static float w, h;
 	static int moving = 0;
 
-	if (ui_mouse_inside(&canvas_area) && ui_mouse_inside(&area))
+	if (ui_mouse_inside(canvas_area) && ui_mouse_inside(area))
 	{
 		ui.hot = selected_annot;
 		if (!ui.active && ui.down)
@@ -708,7 +778,7 @@ static void do_edit_rect(fz_irect canvas_area, fz_irect area, fz_rect *rect)
 	static int state = ER_NONE;
 
 	area = fz_expand_irect(area, 5);
-	if (ui_mouse_inside(&canvas_area) && ui_mouse_inside(&area))
+	if (ui_mouse_inside(canvas_area) && ui_mouse_inside(area))
 	{
 		ui.hot = selected_annot;
 		if (!ui.active && ui.down)
@@ -763,7 +833,7 @@ static void do_edit_line(fz_irect canvas_area, fz_irect area, fz_rect *rect)
 	float lw;
 
 	area = fz_expand_irect(area, 5);
-	if (ui_mouse_inside(&canvas_area) && ui_mouse_inside(&area))
+	if (ui_mouse_inside(canvas_area) && ui_mouse_inside(area))
 	{
 		ui.hot = selected_annot;
 		if (!ui.active && ui.down)
@@ -777,8 +847,8 @@ static void do_edit_line(fz_irect canvas_area, fz_irect area, fz_rect *rect)
 			a_grab = fz_expand_irect(a_grab, 10);
 			b_grab = fz_expand_irect(b_grab, 10);
 			state = EL_NONE;
-			if (ui_mouse_inside(&a_grab)) state |= EL_A;
-			if (ui_mouse_inside(&b_grab)) state |= EL_B;
+			if (ui_mouse_inside(a_grab)) state |= EL_A;
+			if (ui_mouse_inside(b_grab)) state |= EL_B;
 			if (!state) state = EL_MOVE;
 		}
 	}
@@ -826,7 +896,7 @@ static void do_edit_polygon(fz_irect canvas_area, int close)
 	static int drawing = 0;
 	fz_point a, p;
 
-	if (ui_mouse_inside(&canvas_area) && ui_mouse_inside(&view_page_area))
+	if (ui_mouse_inside(canvas_area) && ui_mouse_inside(view_page_area))
 	{
 		ui.hot = selected_annot;
 		if (!ui.active || ui.active == selected_annot)
@@ -886,7 +956,7 @@ static void do_edit_ink(fz_irect canvas_area)
 	static int n, last_x, last_y;
 	int i;
 
-	if (ui_mouse_inside(&canvas_area) && ui_mouse_inside(&view_page_area))
+	if (ui_mouse_inside(canvas_area) && ui_mouse_inside(view_page_area))
 	{
 		ui.hot = selected_annot;
 		if (!ui.active || ui.active == selected_annot)
@@ -950,7 +1020,7 @@ static void do_edit_quad_points(void)
 	fz_quad hits[1000];
 	int i, n;
 
-	if (ui_mouse_inside(&view_page_area))
+	if (ui_mouse_inside(view_page_area))
 	{
 		ui.hot = selected_annot;
 		if (!ui.active || ui.active == selected_annot)
@@ -1025,7 +1095,7 @@ void do_annotate_canvas(fz_irect canvas_area)
 		bounds = fz_transform_rect(bounds, view_page_ctm);
 		area = fz_irect_from_rect(bounds);
 
-		if (ui_mouse_inside(&canvas_area) && ui_mouse_inside(&area))
+		if (ui_mouse_inside(canvas_area) && ui_mouse_inside(area))
 		{
 			ui.hot = annot;
 			if (!ui.active && ui.down)
@@ -1094,6 +1164,7 @@ void do_annotate_canvas(fz_irect canvas_area)
 			case PDF_ANNOT_UNDERLINE:
 			case PDF_ANNOT_STRIKE_OUT:
 			case PDF_ANNOT_SQUIGGLY:
+			case PDF_ANNOT_REDACT:
 				if (is_draw_mode)
 					do_edit_quad_points();
 				break;
@@ -1122,7 +1193,7 @@ void do_annotate_canvas(fz_irect canvas_area)
 		}
 	}
 
-	if (ui_mouse_inside(&canvas_area) && ui.down)
+	if (ui_mouse_inside(canvas_area) && ui.down)
 	{
 		if (!ui.active && ui.hot == nothing)
 			selected_annot = NULL;
