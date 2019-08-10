@@ -9,7 +9,7 @@ pkg-config and thus fails to find a pile of .pc files.
  1 file changed, 28 insertions(+), 24 deletions(-)
 
 diff --git a/Makerules b/Makerules
-index 14c5c8c..ca2e96c 100644
+index c343ec5..2171c5b 100644
 --- a/Makerules
 +++ b/Makerules
 @@ -6,6 +6,10 @@ OS := $(OS:MSYS%=MINGW)
@@ -70,8 +70,8 @@ index 14c5c8c..ca2e96c 100644
 +	SYS_ZLIB_LIBS := $(shell $(PKG_CONFIG) --libs zlib)
    endif
  
-   HAVE_GLUT := yes
-@@ -122,16 +126,16 @@ else ifeq ($(OS),Linux)
+   HAVE_SYS_CURL := $(shell pkg-config --exists libcurl && echo yes)
+@@ -128,16 +132,16 @@ else ifeq ($(OS),Linux)
  	SYS_GLUT_LIBS := -lglut -lGL
    endif
  

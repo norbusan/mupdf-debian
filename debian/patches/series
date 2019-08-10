@@ -4,8 +4,4 @@
 0004-MuPDF-crossbuild-use-target-arch-pkg-config.patch
 0005-MuPDF-crossbuild-use-host-cc-for-utils.patch
 0006-Allow-disabling-objcopy.patch
-0007-typographical-and-formatting-fixes-to-the-manual.patch
-0008-Bug-701118-Handle-appending-large-display-list-nodes.patch
-0009-Bug-701118-Limit-size-of-begin-layer-nodes-in-displa.patch
-0010-Bug-700301-Fix-potential-infinite-loop-in-svg-output.patch
-0011-mupdf-x11-does-not-need-to-link-to-libcrypto.patch
+0007-mupdf-x11-does-not-need-to-link-to-libcrypto.patch

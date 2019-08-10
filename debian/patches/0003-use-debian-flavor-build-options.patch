@@ -9,7 +9,7 @@ Do not strip binaries by default and use Debian LDFLAGS
  2 files changed, 6 insertions(+), 1 deletion(-)
 
 diff --git a/Makerules b/Makerules
-index 298b573..14c5c8c 100644
+index f688c5b..c343ec5 100644
 --- a/Makerules
 +++ b/Makerules
 @@ -22,7 +22,10 @@ SANITIZE_FLAGS += -fsanitize=leak
