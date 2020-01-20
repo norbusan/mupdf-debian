@@ -4,7 +4,6 @@ Upstream-Contact: http://mupdf.com/
 Source: http://mupdf.com/download/
 Files-Excluded: thirdparty/curl
                 thirdparty/freetype
-                thirdparty/glfw
                 thirdparty/harfbuzz
                 thirdparty/jbig2dec
                 thirdparty/libjpeg
