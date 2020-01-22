@@ -1,3 +1,4 @@
+#! /usr/bin/dh-exec
 debian/tmp/usr/include
 debian/tmp/usr/lib
-debian/mupdf.pc usr/lib/pkgconfig
+debian/mupdf.pc usr/lib/${DEB_HOST_MULTIARCH}/pkgconfig
