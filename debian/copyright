@@ -187,7 +187,7 @@ License: Apache-2.0
  can be found in the file
  `/usr/share/common-licenses/Apache-2.0'.
 
-Files: resources/fonts/han/*.otf
+Files: resources/fonts/han/*.ttc
 Copyright: 2014, 2015 Adobe Systems Incorporated
 License: OFL-1.1
 
