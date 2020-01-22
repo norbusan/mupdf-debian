@@ -190,15 +190,15 @@ Files: resources/fonts/han/*.ttc
 Copyright: 2014, 2015 Adobe Systems Incorporated
 License: OFL-1.1
 
-Files: resources/fonts/noto/*.ttf
+Files: resources/fonts/noto/*
 Copyright: 2016 Google Inc.
 License: OFL-1.1
 
-Files: resources/fonts/sil/*.cff
+Files: resources/fonts/sil/*
 Copyright: 1997-2014, SIL International (http://scripts.sil.org/)
 License: OFL-1.1
 
-Files: resources/fonts/urw/*.cff
+Files: resources/fonts/urw/*
 Copyright: (URW)++ Design & Development
 License: OFL-1.1
 
