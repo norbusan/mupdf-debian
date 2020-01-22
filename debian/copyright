@@ -139,7 +139,6 @@ License: public-domain
  any purpose on any machine by anyone.
 
 Files: source/fitz/ftoa.c
-       source/fitz/strtod.c
 Copyright: 2002 Lucent Technologies
 License: MIT/Lucent
  The authors of this software are Rob Pike and Ken Thompson.
