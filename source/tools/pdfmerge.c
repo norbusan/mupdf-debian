@@ -30,17 +30,26 @@ static pdf_document *doc_src = NULL;
 static void page_merge(int page_from, int page_to, pdf_graft_map *graft_map)
 {
 	pdf_obj *page_ref;
-	pdf_obj *page_dict;
+	pdf_obj *page_dict = NULL;
 	pdf_obj *obj;
 	pdf_obj *ref = NULL;
 	int i;
 
 	/* Copy as few key/value pairs as we can. Do not include items that reference other pages. */
-	static pdf_obj * const copy_list[] = { PDF_NAME(Contents), PDF_NAME(Resources),
-		PDF_NAME(MediaBox), PDF_NAME(CropBox), PDF_NAME(BleedBox), PDF_NAME(TrimBox), PDF_NAME(ArtBox),
-		PDF_NAME(Rotate), PDF_NAME(UserUnit) };
+	static pdf_obj * const copy_list[] = {
+		PDF_NAME(Contents),
+		PDF_NAME(Resources),
+		PDF_NAME(MediaBox),
+		PDF_NAME(CropBox),
+		PDF_NAME(BleedBox),
+		PDF_NAME(TrimBox),
+		PDF_NAME(ArtBox),
+		PDF_NAME(Rotate),
+		PDF_NAME(UserUnit)
+	};
 
 	fz_var(ref);
+	fz_var(page_dict);
 
 	fz_try(ctx)
 	{
@@ -60,13 +69,14 @@ static void page_merge(int page_from, int page_to, pdf_graft_map *graft_map)
 		}
 
 		/* Add the page object to the destination document. */
-		ref = pdf_add_object_drop(ctx, doc_des, page_dict);
+		ref = pdf_add_object(ctx, doc_des, page_dict);
 
 		/* Insert it into the page tree. */
 		pdf_insert_page(ctx, doc_des, page_to - 1, ref);
 	}
 	fz_always(ctx)
 	{
+		pdf_drop_obj(ctx, page_dict);
 		pdf_drop_obj(ctx, ref);
 	}
 	fz_catch(ctx)
@@ -107,7 +117,7 @@ static void merge_range(const char *range)
 
 int pdfmerge_main(int argc, char **argv)
 {
-	pdf_write_options opts = { 0 };
+	pdf_write_options opts = pdf_default_write_options;
 	char *output = "out.pdf";
 	char *flags = "";
 	char *input;
@@ -142,6 +152,8 @@ int pdfmerge_main(int argc, char **argv)
 	fz_catch(ctx)
 	{
 		fprintf(stderr, "error: Cannot create destination document.\n");
+		fz_flush_warnings(ctx);
+		fz_drop_context(ctx);
 		exit(1);
 	}
 
@@ -149,37 +161,30 @@ int pdfmerge_main(int argc, char **argv)
 	while (fz_optind < argc)
 	{
 		input = argv[fz_optind++];
+		doc_src = pdf_open_document(ctx, input);
+
 		fz_try(ctx)
 		{
-			pdf_drop_document(ctx, doc_src);
-			doc_src = pdf_open_document(ctx, input);
 			if (fz_optind == argc || !fz_is_page_range(ctx, argv[fz_optind]))
 				merge_range("1-N");
 			else
 				merge_range(argv[fz_optind++]);
 		}
+		fz_always(ctx)
+			pdf_drop_document(ctx, doc_src);
 		fz_catch(ctx)
-		{
 			fprintf(stderr, "error: Cannot merge document '%s'.\n", input);
-			exit(1);
-		}
 	}
 
-	fz_try(ctx)
+	if (fz_optind == argc)
 	{
-		pdf_save_document(ctx, doc_des, output, &opts);
-	}
-	fz_always(ctx)
-	{
-		pdf_drop_document(ctx, doc_des);
-		pdf_drop_document(ctx, doc_src);
-	}
-	fz_catch(ctx)
-	{
-		fprintf(stderr, "error: Cannot save output file: '%s'.\n", output);
-		exit(1);
+		fz_try(ctx)
+			pdf_save_document(ctx, doc_des, output, &opts);
+		fz_catch(ctx)
+			fprintf(stderr, "error: Cannot save output file: '%s'.\n", output);
 	}
 
+	pdf_drop_document(ctx, doc_des);
 	fz_flush_warnings(ctx);
 	fz_drop_context(ctx);
 	return 0;

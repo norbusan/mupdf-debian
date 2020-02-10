@@ -92,7 +92,6 @@ static int transition_dirty = 0;
 static int dirtysearch = 0;
 static char *password = "";
 static XColor xbgcolor;
-static XColor xshcolor;
 static int reqw = 0;
 static int reqh = 0;
 static char copylatin1[1024 * 16] = "";
@@ -199,6 +198,11 @@ static void winopen(void)
 	XWMHints *wmhints;
 	XClassHint *classhint;
 
+#ifdef HAVE_CURL
+	if (!XInitThreads())
+		fz_throw(gapp.ctx, FZ_ERROR_GENERIC, "cannot initialize X11 for multi-threading");
+#endif
+
 	xdpy = XOpenDisplay(NULL);
 	if (!xdpy)
 		fz_throw(gapp.ctx, FZ_ERROR_GENERIC, "cannot open display");
@@ -226,12 +230,7 @@ static void winopen(void)
 	xbgcolor.green = 0x7000;
 	xbgcolor.blue = 0x7000;
 
-	xshcolor.red = 0x4000;
-	xshcolor.green = 0x4000;
-	xshcolor.blue = 0x4000;
-
 	XAllocColor(xdpy, DefaultColormap(xdpy, xscr), &xbgcolor);
-	XAllocColor(xdpy, DefaultColormap(xdpy, xscr), &xshcolor);
 
 	xwin = XCreateWindow(xdpy, DefaultRootWindow(xdpy),
 		10, 10, 200, 100, 0,
@@ -527,15 +526,14 @@ static void winblit(pdfapp_t *app)
 		int x1 = gapp.panx + image_w;
 		int y1 = gapp.pany + image_h;
 
-		XSetForeground(xdpy, xgc, xbgcolor.pixel);
+		if (app->invert)
+			XSetForeground(xdpy, xgc, BlackPixel(xdpy, DefaultScreen(xdpy)));
+		else
+			XSetForeground(xdpy, xgc, xbgcolor.pixel);
 		fillrect(0, 0, x0, gapp.winh);
 		fillrect(x1, 0, gapp.winw - x1, gapp.winh);
 		fillrect(0, 0, gapp.winw, y0);
 		fillrect(0, y1, gapp.winw, gapp.winh - y1);
-
-		XSetForeground(xdpy, xgc, xshcolor.pixel);
-		fillrect(x0+2, y1, image_w, 2);
-		fillrect(x1, y0+2, 2, image_h);
 
 		if (gapp.iscopying || justcopied)
 		{
@@ -842,9 +840,9 @@ static void signal_handler(int signal)
 		reloading = 1;
 }
 
-static void usage(void)
+static void usage(const char *argv0)
 {
-	fprintf(stderr, "usage: mupdf [options] file.pdf [page]\n");
+	fprintf(stderr, "usage: %s [options] file.pdf [page]\n", argv0);
 	fprintf(stderr, "\t-p -\tpassword\n");
 	fprintf(stderr, "\t-r -\tresolution\n");
 	fprintf(stderr, "\t-A -\tset anti-aliasing quality in bits (0=off, 8=best)\n");
@@ -875,7 +873,7 @@ int main(int argc, char **argv)
 	struct timeval now;
 	struct timeval *timeout;
 	struct timeval tmo_advance_delay;
-	int bps = 0;
+	int kbps = 0;
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
 	if (!ctx)
@@ -893,9 +891,7 @@ int main(int argc, char **argv)
 		case 'C':
 			c = strtol(fz_optarg, NULL, 16);
 			gapp.tint = 1;
-			gapp.tint_r = (c >> 16) & 255;
-			gapp.tint_g = (c >> 8) & 255;
-			gapp.tint_b = (c) & 255;
+			gapp.tint_white = c;
 			break;
 		case 'p': password = fz_optarg; break;
 		case 'r': resolution = atoi(fz_optarg); break;
@@ -906,13 +902,13 @@ int main(int argc, char **argv)
 		case 'S': gapp.layout_em = fz_atof(fz_optarg); break;
 		case 'U': gapp.layout_css = fz_optarg; break;
 		case 'X': gapp.layout_use_doc_css = 0; break;
-		case 'b': bps = (fz_optarg && *fz_optarg) ? fz_atoi(fz_optarg) : 4096; break;
-		default: usage();
+		case 'b': kbps = fz_atoi(fz_optarg); break;
+		default: usage(argv[0]);
 		}
 	}
 
 	if (argc - fz_optind == 0)
-		usage();
+		usage(argv[0]);
 
 	filename = argv[fz_optind++];
 
@@ -931,6 +927,7 @@ int main(int argc, char **argv)
 	gapp.transitions_enabled = 1;
 	gapp.scrw = DisplayWidth(xdpy, xscr);
 	gapp.scrh = DisplayHeight(xdpy, xscr);
+	gapp.default_resolution = resolution;
 	gapp.resolution = resolution;
 	gapp.pageno = pageno;
 
@@ -938,8 +935,8 @@ int main(int argc, char **argv)
 	tmo_at.tv_usec = 0;
 	timeout = NULL;
 
-	if (bps)
-		pdfapp_open_progressive(&gapp, filename, 0, bps);
+	if (kbps)
+		pdfapp_open_progressive(&gapp, filename, 0, kbps);
 	else
 		pdfapp_open(&gapp, filename, 0);
 
@@ -982,24 +979,30 @@ int main(int argc, char **argv)
 						break;
 
 					case XK_Up:
+					case XK_KP_Up:
 						len = 1; buf[0] = 'k';
 						break;
 					case XK_Down:
+					case XK_KP_Down:
 						len = 1; buf[0] = 'j';
 						break;
 
 					case XK_Left:
-						len = 1; buf[0] = 'b';
+					case XK_KP_Left:
+						len = 1; buf[0] = 'h';
 						break;
 					case XK_Right:
-						len = 1; buf[0] = ' ';
+					case XK_KP_Right:
+						len = 1; buf[0] = 'l';
 						break;
 
 					case XK_Page_Up:
+					case XK_KP_Page_Up:
 					case XF86XK_Back:
 						len = 1; buf[0] = ',';
 						break;
 					case XK_Page_Down:
+					case XK_KP_Page_Down:
 					case XF86XK_Forward:
 						len = 1; buf[0] = '.';
 						break;

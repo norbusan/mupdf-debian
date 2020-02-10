@@ -5,12 +5,63 @@
 #include <float.h>
 #include <string.h>
 
+/* Simple layout structure */
+
+fz_layout_block *fz_new_layout(fz_context *ctx)
+{
+	fz_pool *pool = fz_new_pool(ctx);
+	fz_layout_block *block;
+	fz_try(ctx)
+	{
+		block = fz_pool_alloc(ctx, pool, sizeof (fz_layout_block));
+		block->pool = pool;
+		block->head = NULL;
+		block->tailp = &block->head;
+	}
+	fz_catch(ctx)
+	{
+		fz_drop_pool(ctx, pool);
+		fz_rethrow(ctx);
+	}
+	return block;
+}
+
+void fz_drop_layout(fz_context *ctx, fz_layout_block *block)
+{
+	if (block)
+		fz_drop_pool(ctx, block->pool);
+}
+
+void fz_add_layout_line(fz_context *ctx, fz_layout_block *block, float x, float y, float h, const char *p)
+{
+	fz_layout_line *line = fz_pool_alloc(ctx, block->pool, sizeof (fz_layout_line));
+	line->x = x;
+	line->y = y;
+	line->h = h;
+	line->p = p;
+	line->text = NULL;
+	line->next = NULL;
+	*block->tailp = line;
+	block->tailp = &line->next;
+	block->text_tailp = &line->text;
+}
+
+void fz_add_layout_char(fz_context *ctx, fz_layout_block *block, float x, float w, const char *p)
+{
+	fz_layout_char *ch = fz_pool_alloc(ctx, block->pool, sizeof (fz_layout_char));
+	ch->x = x;
+	ch->w = w;
+	ch->p = p;
+	ch->next = NULL;
+	*block->text_tailp = ch;
+	block->text_tailp = &ch->next;
+}
+
 /* Extract text into blocks and lines. */
 
-#define LINE_DIST 0.9f
+#define PARAGRAPH_DIST 1.5f
 #define SPACE_DIST 0.15f
 #define SPACE_MAX_DIST 0.8f
-#define PARAGRAPH_DIST 0.5f
 
 typedef struct fz_stext_device_s fz_stext_device;
 
@@ -24,15 +75,26 @@ struct fz_stext_device_s
 	int curdir;
 	int lastchar;
 	int flags;
+	int color;
+	const fz_text *lasttext;
 };
 
 const char *fz_stext_options_usage =
 	"Text output options:\n"
+	"\tinhibit-spaces: don't add spaces between gaps in the text\n"
+	"\tpreserve-images: keep images in output\n"
 	"\tpreserve-ligatures: do not expand ligatures into constituent characters\n"
 	"\tpreserve-whitespace: do not convert all whitespace into space characters\n"
-	"\tpreserve-images: keep images in output\n"
 	"\n";
 
+/*
+	Create an empty text page.
+
+	The text page is filled out by the text device to contain the blocks
+	and lines of text on the page.
+
+	mediabox: optional mediabox information.
+*/
 fz_stext_page *
 fz_new_stext_page(fz_context *ctx, fz_rect mediabox)
 {
@@ -121,7 +183,7 @@ add_line_to_block(fz_context *ctx, fz_stext_page *page, fz_stext_block *block, c
 }
 
 static fz_stext_char *
-add_char_to_line(fz_context *ctx, fz_stext_page *page, fz_stext_line *line, fz_matrix trm, fz_font *font, float size, int c, fz_point *p, fz_point *q)
+add_char_to_line(fz_context *ctx, fz_stext_page *page, fz_stext_line *line, fz_matrix trm, fz_font *font, float size, int c, fz_point *p, fz_point *q, int color)
 {
 	fz_stext_char *ch = fz_pool_alloc(ctx, page->pool, sizeof *line->first_char);
 	fz_point a, d;
@@ -135,6 +197,7 @@ add_char_to_line(fz_context *ctx, fz_stext_page *page, fz_stext_line *line, fz_m
 	}
 
 	ch->c = c;
+	ch->color = color;
 	ch->origin = *p;
 	ch->size = size;
 	ch->font = font; /* TODO: keep and drop */
@@ -278,7 +341,7 @@ fz_add_stext_char_imp(fz_context *ctx, fz_stext_device *dev, fz_font *font, int 
 	if (cur_line && glyph < 0)
 	{
 		/* Don't advance pen or break lines for no-glyph characters in a cluster */
-		add_char_to_line(ctx, page, cur_line, trm, font, size, c, &dev->pen, &dev->pen);
+		add_char_to_line(ctx, page, cur_line, trm, font, size, c, &dev->pen, &dev->pen, dev->color);
 		dev->lastchar = c;
 		return;
 	}
@@ -317,20 +380,25 @@ fz_add_stext_char_imp(fz_context *ctx, fz_stext_device *dev, fz_font *font, int 
 			{
 				if (fabsf(spacing) < size * SPACE_DIST)
 				{
-					/* Motion is in line, and small. */
+					/* Motion is in line and small enough to ignore. */
 					new_line = 0;
 				}
-				else if (spacing >= size * SPACE_DIST && spacing < size * SPACE_MAX_DIST)
+				else if (fabsf(spacing) > size * SPACE_MAX_DIST)
 				{
-					/* Motion is in line, but large enough to warrant us adding a space. */
-					if (dev->lastchar != ' ' && wmode == 0)
-						add_space = 1;
+					/* Motion is in line and large enough to warrant splitting to a new line */
+					new_line = 1;
+				}
+				else if (spacing < 0)
+				{
+					/* Motion is backward in line! Ignore this odd spacing. */
 					new_line = 0;
 				}
 				else
 				{
-					/* Motion is in line, but large enough to warrant splitting to a new line */
-					new_line = 1;
+					/* Motion is forward in line and large enough to warrant us adding a space. */
+					if (dev->lastchar != ' ' && wmode == 0)
+						add_space = 1;
+					new_line = 0;
 				}
 			}
 
@@ -346,7 +414,7 @@ fz_add_stext_char_imp(fz_context *ctx, fz_stext_device *dev, fz_font *font, int 
 		}
 
 		/* Enough for a new line, but not enough for a new paragraph */
-		else if (fabsf(base_offset) < size * 1.3f)
+		else if (fabsf(base_offset) <= size * PARAGRAPH_DIST)
 		{
 			/* Check indent to spot text-indent style paragraphs */
 			if (wmode == 0 && cur_line && dev->new_obj)
@@ -378,10 +446,10 @@ fz_add_stext_char_imp(fz_context *ctx, fz_stext_device *dev, fz_font *font, int 
 	}
 
 	/* Add synthetic space */
-	if (add_space)
-		add_char_to_line(ctx, page, cur_line, trm, font, size, ' ', &dev->pen, &p);
+	if (add_space && !(dev->flags & FZ_STEXT_INHIBIT_SPACES))
+		add_char_to_line(ctx, page, cur_line, trm, font, size, ' ', &dev->pen, &p, dev->color);
 
-	add_char_to_line(ctx, page, cur_line, trm, font, size, c, &p, &q);
+	add_char_to_line(ctx, page, cur_line, trm, font, size, c, &p, &q, dev->color);
 	dev->lastchar = c;
 	dev->pen = q;
 
@@ -493,26 +561,46 @@ fz_stext_extract(fz_context *ctx, fz_stext_device *dev, fz_text_span *span, fz_m
 	}
 }
 
+static int hexrgb_from_color(fz_context *ctx, fz_colorspace *colorspace, const float *color)
+{
+	float rgb[3];
+	fz_convert_color(ctx, colorspace, color, fz_device_rgb(ctx), rgb, NULL, fz_default_color_params);
+	return
+		(fz_clampi(rgb[0] * 255, 0, 255) << 16) |
+		(fz_clampi(rgb[1] * 255, 0, 255) << 8) |
+		(fz_clampi(rgb[2] * 255, 0, 255));
+}
+
 static void
 fz_stext_fill_text(fz_context *ctx, fz_device *dev, const fz_text *text, fz_matrix ctm,
-	fz_colorspace *colorspace, const float *color, float alpha, const fz_color_params *color_params)
+	fz_colorspace *colorspace, const float *color, float alpha, fz_color_params color_params)
 {
 	fz_stext_device *tdev = (fz_stext_device*)dev;
 	fz_text_span *span;
+	if (text == tdev->lasttext)
+		return;
+	tdev->color = hexrgb_from_color(ctx, colorspace, color);
 	tdev->new_obj = 1;
 	for (span = text->head; span; span = span->next)
 		fz_stext_extract(ctx, tdev, span, ctm);
+	fz_drop_text(ctx, tdev->lasttext);
+	tdev->lasttext = fz_keep_text(ctx, text);
 }
 
 static void
 fz_stext_stroke_text(fz_context *ctx, fz_device *dev, const fz_text *text, const fz_stroke_state *stroke, fz_matrix ctm,
-	fz_colorspace *colorspace, const float *color, float alpha, const fz_color_params *color_params)
+	fz_colorspace *colorspace, const float *color, float alpha, fz_color_params color_params)
 {
 	fz_stext_device *tdev = (fz_stext_device*)dev;
 	fz_text_span *span;
+	if (text == tdev->lasttext)
+		return;
+	tdev->color = hexrgb_from_color(ctx, colorspace, color);
 	tdev->new_obj = 1;
 	for (span = text->head; span; span = span->next)
 		fz_stext_extract(ctx, tdev, span, ctm);
+	fz_drop_text(ctx, tdev->lasttext);
+	tdev->lasttext = fz_keep_text(ctx, text);
 }
 
 static void
@@ -520,9 +608,14 @@ fz_stext_clip_text(fz_context *ctx, fz_device *dev, const fz_text *text, fz_matr
 {
 	fz_stext_device *tdev = (fz_stext_device*)dev;
 	fz_text_span *span;
+	if (text == tdev->lasttext)
+		return;
+	tdev->color = 0;
 	tdev->new_obj = 1;
 	for (span = text->head; span; span = span->next)
 		fz_stext_extract(ctx, tdev, span, ctm);
+	fz_drop_text(ctx, tdev->lasttext);
+	tdev->lasttext = fz_keep_text(ctx, text);
 }
 
 static void
@@ -530,9 +623,14 @@ fz_stext_clip_stroke_text(fz_context *ctx, fz_device *dev, const fz_text *text, 
 {
 	fz_stext_device *tdev = (fz_stext_device*)dev;
 	fz_text_span *span;
+	if (text == tdev->lasttext)
+		return;
+	tdev->color = 0;
 	tdev->new_obj = 1;
 	for (span = text->head; span; span = span->next)
 		fz_stext_extract(ctx, tdev, span, ctm);
+	fz_drop_text(ctx, tdev->lasttext);
+	tdev->lasttext = fz_keep_text(ctx, text);
 }
 
 static void
@@ -540,15 +638,20 @@ fz_stext_ignore_text(fz_context *ctx, fz_device *dev, const fz_text *text, fz_ma
 {
 	fz_stext_device *tdev = (fz_stext_device*)dev;
 	fz_text_span *span;
+	if (text == tdev->lasttext)
+		return;
+	tdev->color = 0;
 	tdev->new_obj = 1;
 	for (span = text->head; span; span = span->next)
 		fz_stext_extract(ctx, tdev, span, ctm);
+	fz_drop_text(ctx, tdev->lasttext);
+	tdev->lasttext = fz_keep_text(ctx, text);
 }
 
 /* Images and shadings */
 
 static void
-fz_stext_fill_image(fz_context *ctx, fz_device *dev, fz_image *img, fz_matrix ctm, float alpha, const fz_color_params *color_params)
+fz_stext_fill_image(fz_context *ctx, fz_device *dev, fz_image *img, fz_matrix ctm, float alpha, fz_color_params color_params)
 {
 	fz_stext_device *tdev = (fz_stext_device*)dev;
 
@@ -561,13 +664,13 @@ fz_stext_fill_image(fz_context *ctx, fz_device *dev, fz_image *img, fz_matrix ct
 
 static void
 fz_stext_fill_image_mask(fz_context *ctx, fz_device *dev, fz_image *img, fz_matrix ctm,
-		fz_colorspace *cspace, const float *color, float alpha, const fz_color_params *color_params)
+		fz_colorspace *cspace, const float *color, float alpha, fz_color_params color_params)
 {
 	fz_stext_fill_image(ctx, dev, img, ctm, alpha, color_params);
 }
 
 static fz_image *
-fz_new_image_from_shade(fz_context *ctx, fz_shade *shade, fz_matrix *in_out_ctm, const fz_color_params *color_params, fz_rect scissor)
+fz_new_image_from_shade(fz_context *ctx, fz_shade *shade, fz_matrix *in_out_ctm, fz_color_params color_params, fz_rect scissor)
 {
 	fz_matrix ctm = *in_out_ctm;
 	fz_pixmap *pix;
@@ -604,7 +707,7 @@ fz_new_image_from_shade(fz_context *ctx, fz_shade *shade, fz_matrix *in_out_ctm,
 }
 
 static void
-fz_stext_fill_shade(fz_context *ctx, fz_device *dev, fz_shade *shade, fz_matrix ctm, float alpha, const fz_color_params *color_params)
+fz_stext_fill_shade(fz_context *ctx, fz_device *dev, fz_shade *shade, fz_matrix ctm, float alpha, fz_color_params color_params)
 {
 	fz_matrix local_ctm = ctm;
 	fz_rect scissor = fz_device_current_scissor(ctx, dev);
@@ -633,7 +736,13 @@ fz_stext_close_device(fz_context *ctx, fz_device *dev)
 		for (line = block->u.t.first_line; line; line = line->next)
 		{
 			for (ch = line->first_char; ch; ch = ch->next)
-				line->bbox = fz_union_rect(line->bbox, fz_rect_from_quad(ch->quad));
+			{
+				fz_rect ch_box = fz_rect_from_quad(ch->quad);
+				if (ch == line->first_char)
+					line->bbox = ch_box;
+				else
+					line->bbox = fz_union_rect(line->bbox, ch_box);
+			}
 			block->bbox = fz_union_rect(block->bbox, line->bbox);
 		}
 	}
@@ -645,8 +754,13 @@ fz_stext_close_device(fz_context *ctx, fz_device *dev)
 static void
 fz_stext_drop_device(fz_context *ctx, fz_device *dev)
 {
+	fz_stext_device *tdev = (fz_stext_device*)dev;
+	fz_drop_text(ctx, tdev->lasttext);
 }
 
+/*
+	Parse stext device options from a comma separated key-value string.
+*/
 fz_stext_options *
 fz_parse_stext_options(fz_context *ctx, fz_stext_options *opts, const char *string)
 {
@@ -660,10 +774,27 @@ fz_parse_stext_options(fz_context *ctx, fz_stext_options *opts, const char *stri
 		opts->flags |= FZ_STEXT_PRESERVE_WHITESPACE;
 	if (fz_has_option(ctx, string, "preserve-images", &val) && fz_option_eq(val, "yes"))
 		opts->flags |= FZ_STEXT_PRESERVE_IMAGES;
+	if (fz_has_option(ctx, string, "inhibit-spaces", &val) && fz_option_eq(val, "yes"))
+		opts->flags |= FZ_STEXT_INHIBIT_SPACES;
 
 	return opts;
 }
 
+/*
+	Create a device to extract the text on a page.
+
+	Gather the text on a page into blocks and lines.
+
+	The reading order is taken from the order the text is drawn in the
+	source file, so may not be accurate.
+
+	page: The text page to which content should be added. This will
+	usually be a newly created (empty) text page, but it can be one
+	containing data already (for example when merging multiple pages,
+	or watermarking).
+
+	options: Options to configure the stext device.
+*/
 fz_device *
 fz_new_stext_device(fz_context *ctx, fz_stext_page *page, const fz_stext_options *opts)
 {
@@ -680,18 +811,20 @@ fz_new_stext_device(fz_context *ctx, fz_stext_page *page, const fz_stext_options
 
 	if (opts && (opts->flags & FZ_STEXT_PRESERVE_IMAGES))
 	{
-		dev->super.hints |= FZ_MAINTAIN_CONTAINER_STACK;
 		dev->super.fill_shade = fz_stext_fill_shade;
 		dev->super.fill_image = fz_stext_fill_image;
 		dev->super.fill_image_mask = fz_stext_fill_image_mask;
 	}
 
+	if (opts)
+		dev->flags = opts->flags;
 	dev->page = page;
 	dev->pen.x = 0;
 	dev->pen.y = 0;
 	dev->trm = fz_identity;
 	dev->lastchar = ' ';
 	dev->curdir = 1;
+	dev->lasttext = NULL;
 
 	return (fz_device*)dev;
 }

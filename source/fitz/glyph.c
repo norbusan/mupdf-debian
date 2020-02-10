@@ -4,12 +4,25 @@
 
 #define RLE_THRESHOLD 256
 
+/*
+	Take a reference to a glyph.
+
+	pix: The glyph to increment the reference for.
+
+	Returns pix.
+*/
 fz_glyph *
 fz_keep_glyph(fz_context *ctx, fz_glyph *glyph)
 {
 	return fz_keep_storable(ctx, &glyph->storable);
 }
 
+/*
+	Drop a reference and free a glyph.
+
+	Decrement the reference count for the glyph. When no
+	references remain the glyph will be freed.
+*/
 void
 fz_drop_glyph(fz_context *ctx, fz_glyph *glyph)
 {
@@ -46,12 +59,18 @@ fz_glyph_bbox_no_ctx(fz_glyph *glyph)
 	return bbox;
 }
 
+/*
+	Return the width of the glyph in pixels.
+*/
 int
 fz_glyph_width(fz_context *ctx, fz_glyph *glyph)
 {
 	return glyph->w;
 }
 
+/*
+	Return the height of the glyph in pixels.
+*/
 int
 fz_glyph_height(fz_context *ctx, fz_glyph *glyph)
 {
@@ -124,6 +143,12 @@ fz_dump_glyph(fz_glyph *glyph)
 }
 #endif
 
+/*
+	Create a new glyph from a pixmap
+
+	Returns a pointer to the new glyph. Throws exception on failure to
+	allocate.
+*/
 fz_glyph *
 fz_new_glyph_from_pixmap(fz_context *ctx, fz_pixmap *pix)
 {
@@ -162,6 +187,20 @@ fz_new_glyph_from_pixmap(fz_context *ctx, fz_pixmap *pix)
 	return glyph;
 }
 
+/*
+	Create a new glyph from 8bpp data
+
+	x, y: X and Y position for the glyph
+
+	w, h: Width and Height for the glyph
+
+	sp: Source Pointer to data
+
+	span: Increment from line to line of data
+
+	Returns a pointer to the new glyph. Throws exception on failure to
+	allocate.
+*/
 fz_glyph *
 fz_new_glyph_from_8bpp_data(fz_context *ctx, int x, int y, int w, int h, unsigned char *sp, int span)
 {
@@ -280,7 +319,7 @@ fz_new_glyph_from_8bpp_data(fz_context *ctx, int x, int y, int w, int h, unsigne
 		}
 		if (fill != size)
 		{
-			glyph = fz_resize_array(ctx, glyph, 1, sizeof(fz_glyph) + fill);
+			glyph = fz_realloc(ctx, glyph, sizeof(fz_glyph) + fill);
 			size = fill;
 		}
 		glyph->size = size;
@@ -290,7 +329,7 @@ fz_new_glyph_from_8bpp_data(fz_context *ctx, int x, int y, int w, int h, unsigne
 		 * and reenter the try context, and this routine is speed
 		 * critical. */
 try_pixmap:
-		glyph = fz_resize_array(ctx, glyph, 1, sizeof(fz_glyph));
+		glyph = fz_realloc(ctx, glyph, sizeof(fz_glyph));
 		FZ_INIT_STORABLE(glyph, 1, fz_drop_glyph_imp);
 		pix = fz_new_pixmap_from_8bpp_data(ctx, x, y, w, h, orig_sp, span);
 		glyph->x = pix->x;
@@ -310,6 +349,20 @@ try_pixmap:
 	return glyph;
 }
 
+/*
+	Create a new glyph from 1bpp data
+
+	x, y: X and Y position for the glyph
+
+	w, h: Width and Height for the glyph
+
+	sp: Source Pointer to data
+
+	span: Increment from line to line of data
+
+	Returns a pointer to the new glyph. Throws exception on failure to
+	allocate.
+*/
 fz_glyph *
 fz_new_glyph_from_1bpp_data(fz_context *ctx, int x, int y, int w, int h, unsigned char *sp, int span)
 {
@@ -412,7 +465,7 @@ fz_new_glyph_from_1bpp_data(fz_context *ctx, int x, int y, int w, int h, unsigne
 		}
 		if (fill != size)
 		{
-			glyph = fz_resize_array(ctx, glyph, 1, sizeof(fz_glyph) + fill);
+			glyph = fz_realloc(ctx, glyph, sizeof(fz_glyph) + fill);
 			size = fill;
 		}
 		glyph->size = size;
@@ -422,7 +475,7 @@ fz_new_glyph_from_1bpp_data(fz_context *ctx, int x, int y, int w, int h, unsigne
 		 * and reenter the try context, and this routine is speed
 		 * critical. */
 try_pixmap:
-		glyph = fz_resize_array(ctx, glyph, 1, sizeof(fz_glyph));
+		glyph = fz_realloc(ctx, glyph, sizeof(fz_glyph));
 		FZ_INIT_STORABLE(glyph, 1, fz_drop_glyph_imp);
 		pix = fz_new_pixmap_from_1bpp_data(ctx, x, y, w, h, orig_sp, span);
 		glyph->x = pix->x;

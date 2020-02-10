@@ -8,6 +8,9 @@ typedef struct {
 	fz_pwg_options pwg;
 } pwg_band_writer;
 
+/*
+	Output the file header to a pwg stream, ready for pages to follow it.
+*/
 void
 fz_write_pwg_file_header(fz_context *ctx, fz_output *out)
 {
@@ -95,6 +98,9 @@ pwg_page_header(fz_context *ctx, fz_output *out, const fz_pwg_options *pwg,
 	fz_write_data(ctx, out, pwg ? pwg->page_size_name : zero, 64);
 }
 
+/*
+	Output a page to a pwg stream to follow a header, or other pages.
+*/
 void
 fz_write_pixmap_as_pwg_page(fz_context *ctx, fz_output *out, const fz_pixmap *pixmap, const fz_pwg_options *pwg)
 {
@@ -111,6 +117,9 @@ fz_write_pixmap_as_pwg_page(fz_context *ctx, fz_output *out, const fz_pixmap *pi
 		fz_rethrow(ctx);
 }
 
+/*
+	Output a bitmap page to a pwg stream to follow a header, or other pages.
+*/
 void
 fz_write_bitmap_as_pwg_page(fz_context *ctx, fz_output *out, const fz_bitmap *bitmap, const fz_pwg_options *pwg)
 {
@@ -141,6 +150,16 @@ fz_write_bitmap_as_pwg(fz_context *ctx, fz_output *out, const fz_bitmap *bitmap,
 	fz_write_bitmap_as_pwg_page(ctx, out, bitmap, pwg);
 }
 
+/*
+	Save a pixmap as a pwg
+
+	filename: The filename to save as (including extension).
+
+	append: If non-zero, then append a new page to existing file.
+
+	pwg: NULL, or a pointer to an options structure (initialised to zero
+	before being filled in, for future expansion).
+*/
 void
 fz_save_pixmap_as_pwg(fz_context *ctx, fz_pixmap *pixmap, char *filename, int append, const fz_pwg_options *pwg)
 {
@@ -158,6 +177,16 @@ fz_save_pixmap_as_pwg(fz_context *ctx, fz_pixmap *pixmap, char *filename, int ap
 		fz_rethrow(ctx);
 }
 
+/*
+	Save a bitmap as a pwg
+
+	filename: The filename to save as (including extension).
+
+	append: If non-zero, then append a new page to existing file.
+
+	pwg: NULL, or a pointer to an options structure (initialised to zero
+	before being filled in, for future expansion).
+*/
 void
 fz_save_bitmap_as_pwg(fz_context *ctx, fz_bitmap *bitmap, char *filename, int append, const fz_pwg_options *pwg)
 {
@@ -176,7 +205,7 @@ fz_save_bitmap_as_pwg(fz_context *ctx, fz_bitmap *bitmap, char *filename, int ap
 }
 
 static void
-pwg_write_mono_header(fz_context *ctx, fz_band_writer *writer_, const fz_colorspace *cs)
+pwg_write_mono_header(fz_context *ctx, fz_band_writer *writer_, fz_colorspace *cs)
 {
 	pwg_band_writer *writer = (pwg_band_writer *)writer_;
 
@@ -259,6 +288,10 @@ pwg_write_mono_band(fz_context *ctx, fz_band_writer *writer_, int stride, int ba
 	}
 }
 
+/*
+	Generate a new band writer for
+	PWG format images.
+*/
 fz_band_writer *fz_new_mono_pwg_band_writer(fz_context *ctx, fz_output *out, const fz_pwg_options *pwg)
 {
 	pwg_band_writer *writer = fz_new_band_writer(ctx, pwg_band_writer, out);
@@ -274,7 +307,7 @@ fz_band_writer *fz_new_mono_pwg_band_writer(fz_context *ctx, fz_output *out, con
 }
 
 static void
-pwg_write_header(fz_context *ctx, fz_band_writer *writer_, const fz_colorspace *cs)
+pwg_write_header(fz_context *ctx, fz_band_writer *writer_, fz_colorspace *cs)
 {
 	pwg_band_writer *writer = (pwg_band_writer *)writer_;
 	int n = writer->super.n;
@@ -368,6 +401,10 @@ pwg_write_band(fz_context *ctx, fz_band_writer *writer_, int stride, int band_st
 	}
 }
 
+/*
+	Generate a new band writer for
+	contone PWG format images.
+*/
 fz_band_writer *fz_new_pwg_band_writer(fz_context *ctx, fz_output *out, const fz_pwg_options *pwg)
 {
 	pwg_band_writer *writer = fz_new_band_writer(ctx, pwg_band_writer, out);
@@ -386,13 +423,118 @@ fz_band_writer *fz_new_pwg_band_writer(fz_context *ctx, fz_output *out, const fz
 
 const char *fz_pwg_write_options_usage =
 	"PWG output options:\n"
-	"\tcolorspace=mono: render 1-bit black and white bitmap\n"
+	"\tmedia_class=<string>: set the media_class field\n"
+	"\tmedia_color=<string>: set the media_color field\n"
+	"\tmedia_type=<string>: set the media_type field\n"
+	"\toutput_type=<string>: set the output_type field\n"
+	"\trendering_intent=<string>: set the rendering_intent field\n"
+	"\tpage_size_name=<string>: set the page_size_name field\n"
+	"\tadvance_distance=<int>: set the advance_distance field\n"
+	"\tadvance_media=<int>: set the advance_media field\n"
+	"\tcollate=<int>: set the collate field\n"
+	"\tcut_media=<int>: set the cut_media field\n"
+	"\tduplex=<int>: set the duplex field\n"
+	"\tinsert_sheet=<int>: set the insert_sheet field\n"
+	"\tjog=<int>: set the jog field\n"
+	"\tleading_edge=<int>: set the leading_edge field\n"
+	"\tmanual_feed=<int>: set the manual_feed field\n"
+	"\tmedia_position=<int>: set the media_position field\n"
+	"\tmedia_weight=<int>: set the media_weight field\n"
+	"\tmirror_print=<int>: set the mirror_print field\n"
+	"\tnegative_print=<int>: set the negative_print field\n"
+	"\tnum_copies=<int>: set the num_copies field\n"
+	"\torientation=<int>: set the orientation field\n"
+	"\toutput_face_up=<int>: set the output_face_up field\n"
+	"\tpage_size_x=<int>: set the page_size_x field\n"
+	"\tpage_size_y=<int>: set the page_size_y field\n"
+	"\tseparations=<int>: set the separations field\n"
+	"\ttray_switch=<int>: set the tray_switch field\n"
+	"\ttumble=<int>: set the tumble field\n"
+	"\tmedia_type_num=<int>: set the media_type_num field\n"
+	"\tcompression=<int>: set the compression field\n"
+	"\trow_count=<int>: set the row_count field\n"
+	"\trow_feed=<int>: set the row_feed field\n"
+	"\trow_step=<int>: set the row_step field\n"
 	"\n";
+
+static void
+warn_if_long(fz_context *ctx, const char *str, int ret)
+{
+	if (ret > 0)
+		fz_warn(ctx, "Option %s is too long, truncated.", str);
+}
 
 fz_pwg_options *
 fz_parse_pwg_options(fz_context *ctx, fz_pwg_options *opts, const char *args)
 {
+	const char *val;
+
 	memset(opts, 0, sizeof *opts);
+
+	if (fz_has_option(ctx, args, "media_class", &val))
+		warn_if_long(ctx, "media_class", fz_copy_option(ctx, val, opts->media_class, 64));
+	if (fz_has_option(ctx, args, "media_color", &val))
+		warn_if_long(ctx, "media_color", fz_copy_option(ctx, val, opts->media_color, 64));
+	if (fz_has_option(ctx, args, "media_type", &val))
+		warn_if_long(ctx, "media_type", fz_copy_option(ctx, val, opts->media_type, 64));
+	if (fz_has_option(ctx, args, "output_type", &val))
+		warn_if_long(ctx, "output_type", fz_copy_option(ctx, val, opts->output_type, 64));
+	if (fz_has_option(ctx, args, "rendering_intent", &val))
+		warn_if_long(ctx, "rendering_intent", fz_copy_option(ctx, val, opts->rendering_intent, 64));
+	if (fz_has_option(ctx, args, "page_size_name", &val))
+		warn_if_long(ctx, "page_size_name", fz_copy_option(ctx, val, opts->page_size_name, 64));
+	if (fz_has_option(ctx, args, "advance_distance", &val))
+		opts->advance_distance = fz_atoi(val);
+	if (fz_has_option(ctx, args, "advance_media", &val))
+		opts->advance_media = fz_atoi(val);
+	if (fz_has_option(ctx, args, "collate", &val))
+		opts->collate = fz_atoi(val);
+	if (fz_has_option(ctx, args, "cut_media", &val))
+		opts->cut_media = fz_atoi(val);
+	if (fz_has_option(ctx, args, "duplex", &val))
+		opts->duplex = fz_atoi(val);
+	if (fz_has_option(ctx, args, "insert_sheet", &val))
+		opts->insert_sheet = fz_atoi(val);
+	if (fz_has_option(ctx, args, "jog", &val))
+		opts->jog = fz_atoi(val);
+	if (fz_has_option(ctx, args, "leading_edge", &val))
+		opts->leading_edge = fz_atoi(val);
+	if (fz_has_option(ctx, args, "manual_feed", &val))
+		opts->manual_feed = fz_atoi(val);
+	if (fz_has_option(ctx, args, "media_position", &val))
+		opts->media_position = fz_atoi(val);
+	if (fz_has_option(ctx, args, "media_weight", &val))
+		opts->media_weight = fz_atoi(val);
+	if (fz_has_option(ctx, args, "mirror_print", &val))
+		opts->mirror_print = fz_atoi(val);
+	if (fz_has_option(ctx, args, "negative_print", &val))
+		opts->negative_print = fz_atoi(val);
+	if (fz_has_option(ctx, args, "num_copies", &val))
+		opts->num_copies = fz_atoi(val);
+	if (fz_has_option(ctx, args, "orientation", &val))
+		opts->orientation = fz_atoi(val);
+	if (fz_has_option(ctx, args, "output_face_up", &val))
+		opts->output_face_up = fz_atoi(val);
+	if (fz_has_option(ctx, args, "page_size_x", &val))
+		opts->PageSize[0] = fz_atoi(val);
+	if (fz_has_option(ctx, args, "page_size_y", &val))
+		opts->PageSize[1] = fz_atoi(val);
+	if (fz_has_option(ctx, args, "separations", &val))
+		opts->separations = fz_atoi(val);
+	if (fz_has_option(ctx, args, "tray_switch", &val))
+		opts->tray_switch = fz_atoi(val);
+	if (fz_has_option(ctx, args, "tumble", &val))
+		opts->tumble = fz_atoi(val);
+	if (fz_has_option(ctx, args, "media_type_num", &val))
+		opts->media_type_num = fz_atoi(val);
+	if (fz_has_option(ctx, args, "compression", &val))
+		opts->compression = fz_atoi(val);
+	if (fz_has_option(ctx, args, "row_count", &val))
+		opts->row_count = fz_atoi(val);
+	if (fz_has_option(ctx, args, "row_feed", &val))
+		opts->row_feed = fz_atoi(val);
+	if (fz_has_option(ctx, args, "row_step", &val))
+		opts->row_step = fz_atoi(val);
 
 	return opts;
 }
@@ -420,31 +562,34 @@ static void
 pwg_end_page(fz_context *ctx, fz_document_writer *wri_, fz_device *dev)
 {
 	fz_pwg_writer *wri = (fz_pwg_writer*)wri_;
+	fz_bitmap *bitmap = NULL;
+
+	fz_var(bitmap);
 
 	fz_try(ctx)
+	{
 		fz_close_device(ctx, dev);
-	fz_always(ctx)
-		fz_drop_device(ctx, dev);
-	fz_catch(ctx)
-		fz_rethrow(ctx);
-
-	if (wri->mono)
-	{
-		fz_bitmap *bitmap = fz_new_bitmap_from_pixmap(ctx, wri->pixmap, NULL);
-		fz_try(ctx)
+		if (wri->mono)
+		{
+			bitmap = fz_new_bitmap_from_pixmap(ctx, wri->pixmap, NULL);
 			fz_write_bitmap_as_pwg_page(ctx, wri->out, bitmap, &wri->pwg);
-		fz_always(ctx)
-			fz_drop_bitmap(ctx, bitmap);
-		fz_catch(ctx)
-			fz_rethrow(ctx);
+		}
+		else
+		{
+			fz_write_pixmap_as_pwg_page(ctx, wri->out, wri->pixmap, &wri->pwg);
+		}
 	}
-	else
+	fz_always(ctx)
 	{
-		fz_write_pixmap_as_pwg_page(ctx, wri->out, wri->pixmap, &wri->pwg);
+		fz_drop_device(ctx, dev);
+		fz_drop_bitmap(ctx, bitmap);
+		fz_drop_pixmap(ctx, wri->pixmap);
+		wri->pixmap = NULL;
 	}
-
-	fz_drop_pixmap(ctx, wri->pixmap);
-	wri->pixmap = NULL;
+	fz_catch(ctx)
+	{
+		fz_rethrow(ctx);
+	}
 }
 
 static void

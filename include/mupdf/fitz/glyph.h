@@ -5,7 +5,6 @@
 #include "mupdf/fitz/context.h"
 #include "mupdf/fitz/geometry.h"
 #include "mupdf/fitz/store.h"
-#include "mupdf/fitz/colorspace.h"
 
 /*
 	Glyphs represent a run length encoded set of pixels for a 2
@@ -13,76 +12,20 @@
 */
 typedef struct fz_glyph_s fz_glyph;
 
-/*
-	fz_glyph_bbox: Return the bounding box for a glyph.
-*/
 fz_irect fz_glyph_bbox(fz_context *ctx, fz_glyph *glyph);
 
-/*
-	fz_glyph_width: Return the width of the glyph in pixels.
-*/
 int fz_glyph_width(fz_context *ctx, fz_glyph *glyph);
 
-/*
-	fz_glyph_height: Return the height of the glyph in pixels.
-*/
 int fz_glyph_height(fz_context *ctx, fz_glyph *glyph);
 
-/*
-	fz_new_glyph_from_pixmap: Create a new glyph from a pixmap
-
-	Returns a pointer to the new glyph. Throws exception on failure to
-	allocate.
-*/
 fz_glyph *fz_new_glyph_from_pixmap(fz_context *ctx, fz_pixmap *pix);
 
-/*
-	fz_new_glyph_from_8bpp_data: Create a new glyph from 8bpp data
-
-	x, y: X and Y position for the glyph
-
-	w, h: Width and Height for the glyph
-
-	sp: Source Pointer to data
-
-	span: Increment from line to line of data
-
-	Returns a pointer to the new glyph. Throws exception on failure to
-	allocate.
-*/
 fz_glyph *fz_new_glyph_from_8bpp_data(fz_context *ctx, int x, int y, int w, int h, unsigned char *sp, int span);
 
-/*
-	fz_new_glyph_from_1bpp_data: Create a new glyph from 1bpp data
-
-	x, y: X and Y position for the glyph
-
-	w, h: Width and Height for the glyph
-
-	sp: Source Pointer to data
-
-	span: Increment from line to line of data
-
-	Returns a pointer to the new glyph. Throws exception on failure to
-	allocate.
-*/
 fz_glyph *fz_new_glyph_from_1bpp_data(fz_context *ctx, int x, int y, int w, int h, unsigned char *sp, int span);
 
-/*
-	fz_keep_glyph: Take a reference to a glyph.
-
-	pix: The glyph to increment the reference for.
-
-	Returns pix.
-*/
 fz_glyph *fz_keep_glyph(fz_context *ctx, fz_glyph *pix);
 
-/*
-	fz_drop_glyph: Drop a reference and free a glyph.
-
-	Decrement the reference count for the glyph. When no
-	references remain the glyph will be freed.
-*/
 void fz_drop_glyph(fz_context *ctx, fz_glyph *pix);
 
 /*
@@ -129,5 +72,18 @@ fz_glyph_size(fz_context *ctx, fz_glyph *glyph)
 		return 0;
 	return sizeof(fz_glyph) + glyph->size + fz_pixmap_size(ctx, glyph->pixmap);
 }
+
+fz_path *fz_outline_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix ctm);
+fz_path *fz_outline_ft_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix trm);
+fz_glyph *fz_render_ft_glyph(fz_context *ctx, fz_font *font, int cid, fz_matrix trm, int aa);
+fz_pixmap *fz_render_ft_glyph_pixmap(fz_context *ctx, fz_font *font, int cid, fz_matrix trm, int aa);
+fz_glyph *fz_render_t3_glyph(fz_context *ctx, fz_font *font, int cid, fz_matrix trm, fz_colorspace *model, const fz_irect *scissor, int aa);
+fz_pixmap *fz_render_t3_glyph_pixmap(fz_context *ctx, fz_font *font, int cid, fz_matrix trm, fz_colorspace *model, const fz_irect *scissor, int aa);
+fz_glyph *fz_render_ft_stroked_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix trm, fz_matrix ctm, const fz_stroke_state *state, int aa);
+fz_pixmap *fz_render_ft_stroked_glyph_pixmap(fz_context *ctx, fz_font *font, int gid, fz_matrix trm, fz_matrix ctm, const fz_stroke_state *state, int aa);
+fz_glyph *fz_render_glyph(fz_context *ctx, fz_font*, int gid, fz_matrix *, fz_colorspace *model, const fz_irect *scissor, int alpha, int aa);
+fz_glyph *fz_render_stroked_glyph(fz_context *ctx, fz_font*, int, fz_matrix *, fz_matrix, const fz_stroke_state *stroke, const fz_irect *scissor, int aa);
+fz_pixmap *fz_render_stroked_glyph_pixmap(fz_context *ctx, fz_font*, int, fz_matrix *, fz_matrix, const fz_stroke_state *stroke, const fz_irect *scissor, int aa);
+
 
 #endif

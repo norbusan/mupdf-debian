@@ -1,7 +1,6 @@
 #include "mupdf/fitz.h"
 #include "mupdf/ucdn.h"
 #include "fitz-imp.h"
-#include "font-imp.h"
 #include "draw-imp.h"
 
 #include <ft2build.h>
@@ -27,6 +26,46 @@
 
 /* 20 degrees */
 #define SHEAR 0.36397f
+
+int ft_char_index(void *face, int cid)
+{
+	int gid = FT_Get_Char_Index(face, cid);
+	if (gid == 0)
+		gid = FT_Get_Char_Index(face, 0xf000 + cid);
+
+	/* some chinese fonts only ship the similarly looking 0x2026 */
+	if (gid == 0 && cid == 0x22ef)
+		gid = FT_Get_Char_Index(face, 0x2026);
+
+	return gid;
+}
+
+int ft_name_index(void *face, const char *name)
+{
+	int code = FT_Get_Name_Index(face, (char*)name);
+	if (code == 0)
+	{
+		int unicode = fz_unicode_from_glyph_name(name);
+		if (unicode)
+		{
+			const char **dupnames = fz_duplicate_glyph_names_from_unicode(unicode);
+			while (*dupnames)
+			{
+				code = FT_Get_Name_Index(face, (char*)*dupnames);
+				if (code)
+					break;
+				dupnames++;
+			}
+			if (code == 0)
+			{
+				char buf[10];
+				sprintf(buf, "uni%04X", unicode);
+				code = FT_Get_Name_Index(face, buf);
+			}
+		}
+	}
+	return code;
+}
 
 static void fz_drop_freetype(fz_context *ctx);
 
@@ -68,7 +107,13 @@ fz_new_font(fz_context *ctx, const char *name, int use_glyph_bbox, int glyph_cou
 
 	if (use_glyph_bbox && glyph_count <= MAX_BBOX_TABLE_SIZE)
 	{
-		font->bbox_table = fz_malloc_array(ctx, glyph_count, sizeof(fz_rect));
+		fz_try(ctx)
+			font->bbox_table = fz_malloc_array(ctx, glyph_count, fz_rect);
+		fz_catch(ctx)
+		{
+			fz_free(ctx, font);
+			fz_rethrow(ctx);
+		}
 		for (i = 0; i < glyph_count; i++)
 			font->bbox_table[i] = fz_infinite_rect;
 	}
@@ -83,6 +128,13 @@ fz_new_font(fz_context *ctx, const char *name, int use_glyph_bbox, int glyph_cou
 	return font;
 }
 
+/*
+	Add a reference to an existing fz_font.
+
+	font: The font to add a reference to.
+
+	Returns the same font.
+*/
 fz_font *
 fz_keep_font(fz_context *ctx, fz_font *font)
 {
@@ -109,6 +161,22 @@ free_resources(fz_context *ctx, fz_font *font)
 	font->t3procs = NULL;
 }
 
+/*
+	Internal function to remove the
+	references to a document held by a Type3 font. This is
+	called during document destruction to ensure that Type3
+	fonts clean up properly.
+
+	Without this call being made, Type3 fonts can be left
+	holding pdf_obj references for the sake of interpretation
+	operations that will never come. These references
+	cannot be freed after the document, hence this function
+	forces them to be freed earlier in the process.
+
+	font: The font to decouple.
+
+	t3doc: The document to which the font may refer.
+*/
 void fz_decouple_type3_font(fz_context *ctx, fz_font *font, void *t3doc)
 {
 	if (!font || !t3doc || font->t3doc == NULL)
@@ -121,6 +189,12 @@ void fz_decouple_type3_font(fz_context *ctx, fz_font *font, void *t3doc)
 	free_resources(ctx, font);
 }
 
+/*
+	Drop a reference to a fz_font, destroying the
+	font when the last reference is dropped.
+
+	font: The font to drop a reference to.
+*/
 void
 fz_drop_font(fz_context *ctx, fz_font *font)
 {
@@ -147,7 +221,7 @@ fz_drop_font(fz_context *ctx, fz_font *font)
 		fterr = FT_Done_Face((FT_Face)font->ft_face);
 		fz_unlock(ctx, FZ_LOCK_FREETYPE);
 		if (fterr)
-			fz_warn(ctx, "freetype finalizing face: %s", ft_error_string(fterr));
+			fz_warn(ctx, "FT_Done_Face(%s): %s", font->name, ft_error_string(fterr));
 		fz_drop_freetype(ctx);
 	}
 
@@ -165,6 +239,13 @@ fz_drop_font(fz_context *ctx, fz_font *font)
 	fz_free(ctx, font);
 }
 
+/*
+	Set the font bbox.
+
+	font: The font to set the bbox for.
+
+	xmin, ymin, xmax, ymax: The bounding box.
+*/
 void
 fz_set_font_bbox(fz_context *ctx, fz_font *font, float xmin, float ymin, float xmax, float ymax)
 {
@@ -199,6 +280,8 @@ float fz_font_ascender(fz_context *ctx, fz_font *font)
 	else
 	{
 		FT_Face face = font->ft_face;
+		if (face->ascender == 0)
+			return 0.8f;
 		return (float)face->ascender / face->units_per_EM;
 	}
 }
@@ -210,6 +293,8 @@ float fz_font_descender(fz_context *ctx, fz_font *font)
 	else
 	{
 		FT_Face face = font->ft_face;
+		if (face->descender == 0)
+			return -0.2f;
 		return (float)face->descender / face->units_per_EM;
 	}
 }
@@ -232,7 +317,7 @@ struct fz_font_context_s
 	fz_font *base14[14];
 	fz_font *cjk[4];
 	struct { fz_font *serif, *sans; } fallback[256];
-	fz_font *symbol1, *symbol2;
+	fz_font *symbol1, *symbol2, *math, *music;
 	fz_font *emoji;
 };
 
@@ -270,9 +355,8 @@ static void *ft_realloc(FT_Memory memory, long cur_size, long new_size, void *bl
 	}
 	if (block == NULL)
 		return ft_alloc(memory, new_size);
-	return fz_resize_array_no_throw(ctx, block, 1, new_size);
+	return fz_realloc_no_throw(ctx, block, new_size);
 }
-
 
 void fz_new_font_context(fz_context *ctx)
 {
@@ -315,12 +399,20 @@ void fz_drop_font_context(fz_context *ctx)
 		}
 		fz_drop_font(ctx, ctx->font->symbol1);
 		fz_drop_font(ctx, ctx->font->symbol2);
+		fz_drop_font(ctx, ctx->font->math);
+		fz_drop_font(ctx, ctx->font->music);
 		fz_drop_font(ctx, ctx->font->emoji);
 		fz_free(ctx, ctx->font);
 		ctx->font = NULL;
 	}
 }
 
+/*
+	Install functions to allow
+	MuPDF to request fonts from the system.
+
+	Only one set of hooks can be in use at a time.
+*/
 void fz_install_load_system_font_funcs(fz_context *ctx,
 		fz_load_system_font_fn *f,
 		fz_load_system_cjk_font_fn *f_cjk,
@@ -331,6 +423,23 @@ void fz_install_load_system_font_funcs(fz_context *ctx,
 	ctx->font->load_fallback_font = f_back;
 }
 
+/* fz_load_*_font returns NULL if no font could be loaded (also on error) */
+/*
+	Attempt to load a given font from the
+	system.
+
+	name: The name of the desired font.
+
+	bold: 1 if bold desired, 0 otherwise.
+
+	italic: 1 if italic desired, 0 otherwise.
+
+	needs_exact_metrics: 1 if an exact metrical match is required,
+	0 otherwise.
+
+	Returns a new font handle, or NULL if no matching font was found
+	(or on error).
+*/
 fz_font *fz_load_system_font(fz_context *ctx, const char *name, int bold, int italic, int needs_exact_metrics)
 {
 	fz_font *font = NULL;
@@ -346,6 +455,19 @@ fz_font *fz_load_system_font(fz_context *ctx, const char *name, int bold, int it
 	return font;
 }
 
+/*
+	Attempt to load a given font from
+	the system.
+
+	name: The name of the desired font.
+
+	ordering: The ordering to load the font from (e.g. FZ_ADOBE_KOREA)
+
+	serif: 1 if serif desired, 0 otherwise.
+
+	Returns a new font handle, or NULL if no matching font was found
+	(or on error).
+*/
 fz_font *fz_load_system_cjk_font(fz_context *ctx, const char *name, int ros, int serif)
 {
 	fz_font *font = NULL;
@@ -376,6 +498,24 @@ fz_font *fz_load_system_fallback_font(fz_context *ctx, int script, int language,
 	return font;
 }
 
+/*
+	Try to load a fallback font for the
+	given combination of font attributes. Whether a font is
+	present or not will depend on the configuration in which
+	MuPDF is built.
+
+	script: The script desired (e.g. UCDN_SCRIPT_KATAKANA).
+
+	language: The language desired (e.g. FZ_LANG_ja).
+
+	serif: 1 if serif desired, 0 otherwise.
+
+	bold: 1 if bold desired, 0 otherwise.
+
+	italic: 1 if italic desired, 0 otherwise.
+
+	Returns a new font handle, or NULL if not available.
+*/
 fz_font *fz_load_fallback_font(fz_context *ctx, int script, int language, int serif, int bold, int italic)
 {
 	fz_font **fontp;
@@ -425,6 +565,32 @@ fz_font *fz_load_fallback_font(fz_context *ctx, int script, int language, int se
 	return *fontp;
 }
 
+static fz_font *fz_load_fallback_math_font(fz_context *ctx)
+{
+	const unsigned char *data;
+	int size;
+	if (!ctx->font->math)
+	{
+		data = fz_lookup_noto_math_font(ctx, &size);
+		if (data)
+			ctx->font->math = fz_new_font_from_memory(ctx, NULL, data, size, 0, 0);
+	}
+	return ctx->font->math;
+}
+
+static fz_font *fz_load_fallback_music_font(fz_context *ctx)
+{
+	const unsigned char *data;
+	int size;
+	if (!ctx->font->music)
+	{
+		data = fz_lookup_noto_music_font(ctx, &size);
+		if (data)
+			ctx->font->music = fz_new_font_from_memory(ctx, NULL, data, size, 0, 0);
+	}
+	return ctx->font->music;
+}
+
 static fz_font *fz_load_fallback_symbol1_font(fz_context *ctx)
 {
 	const unsigned char *data;
@@ -469,6 +635,15 @@ static const struct ft_error ft_errors[] =
 #include FT_ERRORS_H
 };
 
+/*
+	map an FT error number to a
+	static string.
+
+	err: The error number to lookup.
+
+	Returns a pointer to a static textual representation
+	of a freetype error.
+*/
 const char *ft_error_string(int err)
 {
 	const struct ft_error *e;
@@ -510,7 +685,7 @@ fz_keep_freetype(fz_context *ctx)
 	{
 		fterr = FT_Done_Library(fct->ftlib);
 		if (fterr)
-			fz_warn(ctx, "freetype finalizing: %s", ft_error_string(fterr));
+			fz_warn(ctx, "FT_Done_Library(): %s", ft_error_string(fterr));
 		fz_unlock(ctx, FZ_LOCK_FREETYPE);
 		fz_throw(ctx, FZ_ERROR_GENERIC, "freetype version too old: %d.%d.%d", maj, min, pat);
 	}
@@ -530,12 +705,26 @@ fz_drop_freetype(fz_context *ctx)
 	{
 		fterr = FT_Done_Library(fct->ftlib);
 		if (fterr)
-			fz_warn(ctx, "freetype finalizing: %s", ft_error_string(fterr));
+			fz_warn(ctx, "FT_Done_Library(): %s", ft_error_string(fterr));
 		fct->ftlib = NULL;
 	}
 	fz_unlock(ctx, FZ_LOCK_FREETYPE);
 }
 
+/*
+	Create a new font from a font
+	file in a fz_buffer.
+
+	name: Name of font (leave NULL to use name from font).
+
+	buffer: Buffer to load from.
+
+	index: Which font from the file to load (0 for default).
+
+	use_glyph_box: 1 if we should use the glyph bbox, 0 otherwise.
+
+	Returns new font handle, or throws exception on error.
+*/
 fz_font *
 fz_new_font_from_buffer(fz_context *ctx, const char *name, fz_buffer *buffer, int index, int use_glyph_bbox)
 {
@@ -554,7 +743,7 @@ fz_new_font_from_buffer(fz_context *ctx, const char *name, fz_buffer *buffer, in
 	if (fterr)
 	{
 		fz_drop_freetype(ctx);
-		fz_throw(ctx, FZ_ERROR_GENERIC, "freetype: cannot load font: %s", ft_error_string(fterr));
+		fz_throw(ctx, FZ_ERROR_GENERIC, "FT_New_Memory_Face(%s): %s", name, ft_error_string(fterr));
 	}
 
 	if (!name)
@@ -580,7 +769,19 @@ fz_new_font_from_buffer(fz_context *ctx, const char *name, fz_buffer *buffer, in
 		}
 	}
 
-	font = fz_new_font(ctx, name, use_glyph_bbox, face->num_glyphs);
+	fz_try(ctx)
+		font = fz_new_font(ctx, name, use_glyph_bbox, face->num_glyphs);
+	fz_catch(ctx)
+	{
+		fz_lock(ctx, FZ_LOCK_FREETYPE);
+		fterr = FT_Done_Face(face);
+		fz_unlock(ctx, FZ_LOCK_FREETYPE);
+		if (fterr)
+			fz_warn(ctx, "FT_Done_Face(%s): %s", name, ft_error_string(fterr));
+		fz_drop_freetype(ctx);
+		fz_rethrow(ctx);
+	}
+
 	font->ft_face = face;
 	fz_set_font_bbox(ctx, font,
 		(float) face->bbox.xMin / face->units_per_EM,
@@ -627,6 +828,22 @@ fz_new_font_from_buffer(fz_context *ctx, const char *name, fz_buffer *buffer, in
 	return font;
 }
 
+/*
+	Create a new font from a font
+	file in memory.
+
+	name: Name of font (leave NULL to use name from font).
+
+	data: Pointer to the font file data.
+
+	len: Length of the font file data.
+
+	index: Which font from the file to load (0 for default).
+
+	use_glyph_box: 1 if we should use the glyph bbox, 0 otherwise.
+
+	Returns new font handle, or throws exception on error.
+*/
 fz_font *
 fz_new_font_from_memory(fz_context *ctx, const char *name, const unsigned char *data, int len, int index, int use_glyph_bbox)
 {
@@ -641,6 +858,20 @@ fz_new_font_from_memory(fz_context *ctx, const char *name, const unsigned char *
 	return font;
 }
 
+/*
+	Create a new font from a font
+	file.
+
+	name: Name of font (leave NULL to use name from font).
+
+	path: File path to load from.
+
+	index: Which font from the file to load (0 for default).
+
+	use_glyph_box: 1 if we should use the glyph bbox, 0 otherwise.
+
+	Returns new font handle, or throws exception on error.
+*/
 fz_font *
 fz_new_font_from_file(fz_context *ctx, const char *name, const char *path, int index, int use_glyph_bbox)
 {
@@ -675,6 +906,7 @@ find_base14_index(const char *name)
 	return -1;
 }
 
+/* Create a new font from one of the built-in fonts. */
 fz_font *
 fz_new_base14_font(fz_context *ctx, const char *name)
 {
@@ -740,8 +972,8 @@ fz_adjust_ft_glyph_width(fz_context *ctx, fz_font *font, int gid, fz_matrix *trm
 		fz_lock(ctx, FZ_LOCK_FREETYPE);
 		fterr = FT_Get_Advance(font->ft_face, gid, FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_IGNORE_TRANSFORM, &adv);
 		fz_unlock(ctx, FZ_LOCK_FREETYPE);
-		if (fterr)
-			fz_warn(ctx, "freetype getting character advance: %s", ft_error_string(fterr));
+		if (fterr && fterr != FT_Err_Invalid_Argument)
+			fz_warn(ctx, "FT_Get_Advance(%s,%d): %s", font->name, gid, ft_error_string(fterr));
 
 		realw = adv * 1000.0f / ((FT_Face)font->ft_face)->units_per_EM;
 		if (gid < font->width_count)
@@ -791,26 +1023,7 @@ do_ft_render_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix trm, int a
 	if (font->flags.fake_italic)
 		trm = fz_pre_shear(trm, SHEAR, 0);
 
-	/*
-	Freetype mutilates complex glyphs if they are loaded
-	with FT_Set_Char_Size 1.0. it rounds the coordinates
-	before applying transformation. to get more precision in
-	freetype, we shift part of the scale in the matrix
-	into FT_Set_Char_Size instead
-	*/
-
-	m.xx = trm.a * 64; /* should be 65536 */
-	m.yx = trm.b * 64;
-	m.xy = trm.c * 64;
-	m.yy = trm.d * 64;
-	v.x = trm.e * 64;
-	v.y = trm.f * 64;
-
 	fz_lock(ctx, FZ_LOCK_FREETYPE);
-	fterr = FT_Set_Char_Size(face, 65536, 65536, 72, 72); /* should be 64, 64 */
-	if (fterr)
-		fz_warn(ctx, "freetype setting character size: %s", ft_error_string(fterr));
-	FT_Set_Transform(face, &m, &v);
 
 	if (aa == 0)
 	{
@@ -825,21 +1038,46 @@ do_ft_render_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix trm, int a
 
 		fterr = FT_Set_Char_Size(face, 64 * scale, 64 * scale, 72, 72);
 		if (fterr)
-			fz_warn(ctx, "freetype setting character size: %s", ft_error_string(fterr));
+			fz_warn(ctx, "FT_Set_Char_Size(%s,%d,72): %s", font->name, (int)(64*scale), ft_error_string(fterr));
 		FT_Set_Transform(face, &m, &v);
 		fterr = FT_Load_Glyph(face, gid, FT_LOAD_NO_BITMAP | FT_LOAD_TARGET_MONO);
-		if (fterr) {
-			fz_warn(ctx, "freetype load hinted glyph (gid %d): %s", gid, ft_error_string(fterr));
+		if (fterr)
+		{
+			fz_warn(ctx, "FT_Load_Glyph(%s,%d,FT_LOAD_TARGET_MONO): %s", font->name, gid, ft_error_string(fterr));
 			goto retry_unhinted;
 		}
 	}
 	else
 	{
 retry_unhinted:
+		/*
+		 * Freetype mutilates complex glyphs if they are loaded with
+		 * FT_Set_Char_Size 1.0. It rounds the coordinates before applying
+		 * transformation. To get more precision in freetype, we shift part of
+		 * the scale in the matrix into FT_Set_Char_Size instead.
+		 */
+
+		/* Check for overflow; FreeType matrices use 16.16 fixed-point numbers */
+		if (trm.a < -512 || trm.a > 512) return NULL;
+		if (trm.b < -512 || trm.b > 512) return NULL;
+		if (trm.c < -512 || trm.c > 512) return NULL;
+		if (trm.d < -512 || trm.d > 512) return NULL;
+
+		m.xx = trm.a * 64; /* should be 65536 */
+		m.yx = trm.b * 64;
+		m.xy = trm.c * 64;
+		m.yy = trm.d * 64;
+		v.x = trm.e * 64;
+		v.y = trm.f * 64;
+
+		fterr = FT_Set_Char_Size(face, 65536, 65536, 72, 72); /* should be 64, 64 */
+		if (fterr)
+			fz_warn(ctx, "FT_Set_Char_Size(%s,65536,72): %s", font->name, ft_error_string(fterr));
+		FT_Set_Transform(face, &m, &v);
 		fterr = FT_Load_Glyph(face, gid, FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING);
 		if (fterr)
 		{
-			fz_warn(ctx, "freetype load glyph (gid %d): %s", gid, ft_error_string(fterr));
+			fz_warn(ctx, "FT_Load_Glyph(%s,%d,FT_LOAD_NO_HINTING): %s", font->name, gid, ft_error_string(fterr));
 			return NULL;
 		}
 	}
@@ -853,7 +1091,10 @@ retry_unhinted:
 	fterr = FT_Render_Glyph(face->glyph, aa > 0 ? FT_RENDER_MODE_NORMAL : FT_RENDER_MODE_MONO);
 	if (fterr)
 	{
-		fz_warn(ctx, "freetype render glyph (gid %d): %s", gid, ft_error_string(fterr));
+		if (aa > 0)
+			fz_warn(ctx, "FT_Render_Glyph(%s,%d,FT_RENDER_MODE_NORMAL): %s", font->name, gid, ft_error_string(fterr));
+		else
+			fz_warn(ctx, "FT_Render_Glyph(%s,%d,FT_RENDER_MODE_MONO): %s", font->name, gid, ft_error_string(fterr));
 		return NULL;
 	}
 	return face->glyph;
@@ -947,7 +1188,7 @@ do_render_ft_stroked_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix tr
 	fterr = FT_Set_Char_Size(face, 65536, 65536, 72, 72); /* should be 64, 64 */
 	if (fterr)
 	{
-		fz_warn(ctx, "FT_Set_Char_Size: %s", ft_error_string(fterr));
+		fz_warn(ctx, "FT_Set_Char_Size(%s,65536,72): %s", font->name, ft_error_string(fterr));
 		return NULL;
 	}
 
@@ -956,14 +1197,14 @@ do_render_ft_stroked_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix tr
 	fterr = FT_Load_Glyph(face, gid, FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING);
 	if (fterr)
 	{
-		fz_warn(ctx, "FT_Load_Glyph(gid %d): %s", gid, ft_error_string(fterr));
+		fz_warn(ctx, "FT_Load_Glyph(%s,%d,FT_LOAD_NO_HINTING): %s", font->name, gid, ft_error_string(fterr));
 		return NULL;
 	}
 
 	fterr = FT_Stroker_New(ctx->font->ftlib, &stroker);
 	if (fterr)
 	{
-		fz_warn(ctx, "FT_Stroker_New: %s", ft_error_string(fterr));
+		fz_warn(ctx, "FT_Stroker_New(): %s", ft_error_string(fterr));
 		return NULL;
 	}
 
@@ -984,7 +1225,7 @@ do_render_ft_stroked_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix tr
 	fterr = FT_Get_Glyph(face->glyph, &glyph);
 	if (fterr)
 	{
-		fz_warn(ctx, "FT_Get_Glyph: %s", ft_error_string(fterr));
+		fz_warn(ctx, "FT_Get_Glyph(): %s", ft_error_string(fterr));
 		FT_Stroker_Done(stroker);
 		return NULL;
 	}
@@ -992,7 +1233,7 @@ do_render_ft_stroked_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix tr
 	fterr = FT_Glyph_Stroke(&glyph, stroker, 1);
 	if (fterr)
 	{
-		fz_warn(ctx, "FT_Glyph_Stroke: %s", ft_error_string(fterr));
+		fz_warn(ctx, "FT_Glyph_Stroke(): %s", ft_error_string(fterr));
 		FT_Done_Glyph(glyph);
 		FT_Stroker_Done(stroker);
 		return NULL;
@@ -1003,7 +1244,7 @@ do_render_ft_stroked_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix tr
 	fterr = FT_Glyph_To_Bitmap(&glyph, aa > 0 ? FT_RENDER_MODE_NORMAL : FT_RENDER_MODE_MONO, 0, 1);
 	if (fterr)
 	{
-		fz_warn(ctx, "FT_Glyph_To_Bitmap: %s", ft_error_string(fterr));
+		fz_warn(ctx, "FT_Glyph_To_Bitmap(): %s", ft_error_string(fterr));
 		FT_Done_Glyph(glyph);
 		return NULL;
 	}
@@ -1106,13 +1347,13 @@ fz_bound_ft_glyph(fz_context *ctx, fz_font *font, int gid)
 	 * scale ourselves below. */
 	fterr = FT_Set_Char_Size(face, scale, scale, 72, 72);
 	if (fterr)
-		fz_warn(ctx, "freetype setting character size: %s", ft_error_string(fterr));
+		fz_warn(ctx, "FT_Set_Char_Size(%s,%d,72): %s", font->name, scale, ft_error_string(fterr));
 	FT_Set_Transform(face, &m, &v);
 
 	fterr = FT_Load_Glyph(face, gid, FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING);
 	if (fterr)
 	{
-		fz_warn(ctx, "freetype load glyph (gid %d): %s", gid, ft_error_string(fterr));
+		fz_warn(ctx, "FT_Load_Glyph(%s,%d,FT_LOAD_NO_HINTING): %s", font->name, gid, ft_error_string(fterr));
 		fz_unlock(ctx, FZ_LOCK_FREETYPE);
 		bounds->x0 = bounds->x1 = trm.e;
 		bounds->y0 = bounds->y1 = trm.f;
@@ -1227,7 +1468,7 @@ fz_outline_ft_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix trm)
 	fterr = FT_Load_Glyph(face, gid, FT_LOAD_NO_SCALE | FT_LOAD_IGNORE_TRANSFORM);
 	if (fterr)
 	{
-		fz_warn(ctx, "freetype load glyph (gid %d): %s", gid, ft_error_string(fterr));
+		fz_warn(ctx, "FT_Load_Glyph(%s,%d,FT_LOAD_NO_SCALE|FT_LOAD_IGNORE_TRANSFORM): %s", font->name, gid, ft_error_string(fterr));
 		fz_unlock(ctx, FZ_LOCK_FREETYPE);
 		return NULL;
 	}
@@ -1266,6 +1507,16 @@ fz_outline_ft_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix trm)
  * Type 3 fonts...
  */
 
+/*
+	Create a new (empty) type3 font.
+
+	name: Name of font (or NULL).
+
+	matrix: Font matrix.
+
+	Returns a new font handle, or throws exception on
+	allocation failure.
+*/
 fz_font *
 fz_new_type3_font(fz_context *ctx, const char *name, fz_matrix matrix)
 {
@@ -1348,6 +1599,12 @@ fz_prepare_t3_glyph(fz_context *ctx, fz_font *font, int gid)
 			FZ_DEVFLAG_LINEJOIN_UNDEFINED |
 			FZ_DEVFLAG_MITERLIMIT_UNDEFINED |
 			FZ_DEVFLAG_LINEWIDTH_UNDEFINED;
+
+	/* Avoid cycles in glyph content streams referring to the glyph itself.
+	 * Remember to restore the content stream below, regardless of exceptions
+	 * or a sucessful run of the glyph. */
+	font->t3procs[gid] = NULL;
+
 	fz_try(ctx)
 	{
 		font->t3run(ctx, font->t3doc, font->t3resources, contents, dev, fz_identity, NULL, NULL);
@@ -1356,7 +1613,10 @@ fz_prepare_t3_glyph(fz_context *ctx, fz_font *font, int gid)
 		d1_rect = dev->d1_rect;
 	}
 	fz_always(ctx)
+	{
 		fz_drop_device(ctx, dev);
+		font->t3procs[gid] = contents;
+	}
 	fz_catch(ctx)
 		fz_rethrow(ctx);
 	if (fz_display_list_is_empty(ctx, font->t3lists[gid]))
@@ -1389,6 +1649,18 @@ fz_prepare_t3_glyph(fz_context *ctx, fz_font *font, int gid)
 	}
 }
 
+/*
+	Run a glyph from a Type3 font to
+	a given device.
+
+	font: The font to find the glyph in.
+
+	gid: The glyph to run.
+
+	trm: The transform to apply.
+
+	dev: The device to render onto.
+*/
 void
 fz_run_t3_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix trm, fz_device *dev)
 {
@@ -1516,28 +1788,65 @@ fz_render_t3_glyph_direct(fz_context *ctx, fz_device *dev, fz_font *font, int gi
 		fz_warn(ctx, "type3 glyph doesn't specify masked or colored");
 	}
 
-	ctm = fz_concat(font->t3matrix, trm);
-	font->t3run(ctx, font->t3doc, font->t3resources, contents, dev, ctm, gstate, def_cs);
+	/* Avoid cycles in glyph content streams referring to the glyph itself.
+	 * Remember to restore the content stream below, regardless of exceptions
+	 * or a sucessful run of the glyph. */
+	font->t3procs[gid] = NULL;
+
+	fz_try(ctx)
+	{
+		ctm = fz_concat(font->t3matrix, trm);
+		font->t3run(ctx, font->t3doc, font->t3resources, contents, dev, ctm, gstate, def_cs);
+	}
+	fz_always(ctx)
+		font->t3procs[gid] = contents;
+	fz_catch(ctx)
+		fz_rethrow(ctx);
 }
 
+/*
+	Return a bbox for a given glyph in a font.
+
+	font: The font to look for the glyph in.
+
+	gid: The glyph to bound.
+
+	trm: The matrix to apply to the glyph before bounding.
+
+	r: Pointer to a fz_rect to use for storage.
+
+	Returns r, after filling it in with the bounds of the given glyph.
+*/
 fz_rect
 fz_bound_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix trm)
 {
 	fz_rect rect;
 	if (font->bbox_table && gid < font->glyph_count)
 	{
-		if (fz_is_infinite_rect(font->bbox_table[gid]))
+		/* If the bbox is infinite or empty, distrust it */
+		if (fz_is_infinite_rect(font->bbox_table[gid]) || fz_is_empty_rect(font->bbox_table[gid]))
 		{
+			/* Get the real size from the glyph */
 			if (font->ft_face)
 				fz_bound_ft_glyph(ctx, font, gid);
 			else if (font->t3lists)
 				fz_bound_t3_glyph(ctx, font, gid);
 			else
-				font->bbox_table[gid] = fz_empty_rect;
+				/* If we can't get a real size, fall back to the font
+				 * bbox. */
+				font->bbox_table[gid] = font->bbox;
+			/* If the real size came back as empty, then store it as
+			 * a very small rectangle to avoid us calling this same
+			 * check every time. */
+			if (fz_is_empty_rect(font->bbox_table[gid]))
+			{
+				font->bbox_table[gid].x0 = 0;
+				font->bbox_table[gid].y0 = 0;
+				font->bbox_table[gid].x1 = 0.0000001;
+				font->bbox_table[gid].y1 = 0.0000001;
+			}
 		}
 		rect = font->bbox_table[gid];
-		if (fz_is_empty_rect(rect))
-			rect = font->bbox;
 	}
 	else
 	{
@@ -1555,6 +1864,18 @@ fz_outline_glyph(fz_context *ctx, fz_font *font, int gid, fz_matrix ctm)
 	return fz_outline_ft_glyph(ctx, font, gid, ctm);
 }
 
+/*
+	Determine if a given glyph in a font
+	is cacheable. Certain glyphs in a type 3 font cannot safely
+	be cached, as their appearance depends on the enclosing
+	graphic state.
+
+	font: The font to look for the glyph in.
+
+	gif: The glyph to query.
+
+	Returns non-zero if cacheable, 0 if not.
+*/
 int fz_glyph_cacheable(fz_context *ctx, fz_font *font, int gid)
 {
 	if (!font->t3procs || !font->t3flags || gid < 0 || gid >= font->glyph_count)
@@ -1569,12 +1890,15 @@ fz_advance_ft_glyph(fz_context *ctx, fz_font *font, int gid, int wmode)
 	FT_Fixed adv = 0;
 	int mask;
 
-	/* Substitute font widths. */
-	if (font->width_table)
+	/* PDF and substitute font widths. */
+	if (font->flags.ft_stretch)
 	{
-		if (gid < font->width_count)
-			return font->width_table[gid] / 1000.0f;
-		return font->width_default / 1000.0f;
+		if (font->width_table)
+		{
+			if (gid < font->width_count)
+				return font->width_table[gid] / 1000.0f;
+			return font->width_default / 1000.0f;
+		}
 	}
 
 	mask = FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_IGNORE_TRANSFORM;
@@ -1583,8 +1907,16 @@ fz_advance_ft_glyph(fz_context *ctx, fz_font *font, int gid, int wmode)
 	fz_lock(ctx, FZ_LOCK_FREETYPE);
 	fterr = FT_Get_Advance(font->ft_face, gid, mask, &adv);
 	fz_unlock(ctx, FZ_LOCK_FREETYPE);
-	if (fterr)
-		fz_warn(ctx, "freetype getting character advance: %s", ft_error_string(fterr));
+	if (fterr && fterr != FT_Err_Invalid_Argument)
+	{
+		fz_warn(ctx, "FT_Get_Advance(%s,%d): %s", font->name, gid, ft_error_string(fterr));
+		if (font->width_table)
+		{
+			if (gid < font->width_count)
+				return font->width_table[gid] / 1000.0f;
+			return font->width_default / 1000.0f;
+		}
+	}
 	return (float) adv / ((FT_Face)font->ft_face)->units_per_EM;
 }
 
@@ -1596,6 +1928,22 @@ fz_advance_t3_glyph(fz_context *ctx, fz_font *font, int gid)
 	return font->t3widths[gid];
 }
 
+/*
+	Find the name of a glyph
+
+	font: The font to look for the glyph in.
+
+	glyph: The glyph id to look for.
+
+	buf: Pointer to a buffer for the name to be inserted into.
+
+	size: The size of the buffer.
+
+	If a font contains a name table, then the name of the glyph
+	will be returned in the supplied buffer. Otherwise a name
+	is synthesised. The name will be truncated to fit in
+	the buffer.
+*/
 void
 fz_get_glyph_name(fz_context *ctx, fz_font *font, int glyph, char *buf, int size)
 {
@@ -1606,7 +1954,7 @@ fz_get_glyph_name(fz_context *ctx, fz_font *font, int glyph, char *buf, int size
 		{
 			int fterr = FT_Get_Glyph_Name(face, glyph, buf, size);
 			if (fterr)
-				fz_warn(ctx, "freetype get glyph name (gid %d): %s", glyph, ft_error_string(fterr));
+				fz_warn(ctx, "FT_Get_Glyph_Name(%s,%d): %s", font->name, glyph, ft_error_string(fterr));
 		}
 		else
 			fz_snprintf(buf, size, "%d", glyph);
@@ -1617,6 +1965,17 @@ fz_get_glyph_name(fz_context *ctx, fz_font *font, int glyph, char *buf, int size
 	}
 }
 
+/*
+	Return the advance for a given glyph.
+
+	font: The font to look for the glyph in.
+
+	glyph: The glyph to find the advance for.
+
+	wmode: 1 for vertical mode, 0 for horizontal.
+
+	Returns the advance for the glyph.
+*/
 float
 fz_advance_glyph(fz_context *ctx, fz_font *font, int gid, int wmode)
 {
@@ -1629,7 +1988,7 @@ fz_advance_glyph(fz_context *ctx, fz_font *font, int gid, int wmode)
 			if (!font->advance_cache)
 			{
 				int i;
-				font->advance_cache = fz_malloc_array(ctx, font->glyph_count, sizeof(float));
+				font->advance_cache = fz_malloc_array(ctx, font->glyph_count, float);
 				for (i = 0; i < font->glyph_count; ++i)
 					font->advance_cache[i] = fz_advance_ft_glyph(ctx, font, i, 0);
 			}
@@ -1643,6 +2002,17 @@ fz_advance_glyph(fz_context *ctx, fz_font *font, int gid, int wmode)
 	return 0;
 }
 
+/*
+	Find the glyph id for a given unicode
+	character within a font.
+
+	font: The font to look for the unicode character in.
+
+	unicode: The unicode character to encode.
+
+	Returns the glyph id for the given unicode value, or 0 if
+	unknown.
+*/
 int
 fz_encode_character(fz_context *ctx, fz_font *font, int ucs)
 {
@@ -1655,7 +2025,7 @@ fz_encode_character(fz_context *ctx, fz_font *font, int ucs)
 			if (!font->encoding_cache[pg])
 			{
 				int i;
-				font->encoding_cache[pg] = fz_malloc_array(ctx, 256, sizeof(uint16_t));
+				font->encoding_cache[pg] = fz_malloc_array(ctx, 256, uint16_t);
 				for (i = 0; i < 256; ++i)
 					font->encoding_cache[pg][i] = FT_Get_Char_Index(font->ft_face, (pg << 8) + i);
 			}
@@ -1666,6 +2036,75 @@ fz_encode_character(fz_context *ctx, fz_font *font, int ucs)
 	return ucs;
 }
 
+/* Encode character, preferring small-caps variant if available. */
+int
+fz_encode_character_sc(fz_context *ctx, fz_font *font, int unicode)
+{
+	if (font->ft_face)
+	{
+		int cat = ucdn_get_general_category(unicode);
+		if (cat == UCDN_GENERAL_CATEGORY_LL || cat == UCDN_GENERAL_CATEGORY_LT)
+		{
+			int glyph;
+			const char *name;
+			char buf[20];
+
+			name = fz_glyph_name_from_unicode_sc(unicode);
+			if (name)
+			{
+				glyph = FT_Get_Name_Index(font->ft_face, (char*)name);
+				if (glyph > 0)
+					return glyph;
+			}
+
+			sprintf(buf, "uni%04X.sc", unicode);
+			glyph = FT_Get_Name_Index(font->ft_face, buf);
+			if (glyph > 0)
+				return glyph;
+		}
+	}
+	return fz_encode_character(ctx, font, unicode);
+}
+
+int
+fz_encode_character_by_glyph_name(fz_context *ctx, fz_font *font, const char *glyphname)
+{
+	int glyph = 0;
+	if (font->ft_face)
+	{
+		glyph = ft_name_index(font->ft_face, glyphname);
+		if (glyph == 0)
+			glyph = ft_char_index(font->ft_face, fz_unicode_from_glyph_name(glyphname));
+	}
+	// TODO: type3 fonts (not needed for now)
+	return glyph;
+}
+
+/*
+	Find the glyph id for
+	a given unicode character within a font, falling back to
+	an alternative if not found.
+
+	font: The font to look for the unicode character in.
+
+	unicode: The unicode character to encode.
+
+	script: The script in use.
+
+	language: The language in use.
+
+	out_font: The font handle in which the given glyph represents
+	the requested unicode character. The caller does not own the
+	reference it is passed, so should call fz_keep_font if it is
+	not simply to be used immediately.
+
+	Returns the glyph id for the given unicode value in the supplied
+	font (and sets *out_font to font) if it is present. Otherwise
+	an alternative fallback font (based on script/language) is
+	searched for. If the glyph is found therein, *out_font is set
+	to this reference, and the glyph reference is returned. If it
+	cannot be found anywhere, the function returns 0.
+*/
 /* FIXME: This should take language too eventually, to allow for fonts where we can select different
  * languages using opentype features. */
 int
@@ -1733,6 +2172,22 @@ fz_encode_character_with_fallback(fz_context *ctx, fz_font *user_font, int unico
 	}
 #endif
 
+	font = fz_load_fallback_math_font(ctx);
+	if (font)
+	{
+		gid = fz_encode_character(ctx, font, unicode);
+		if (gid > 0)
+			return *out_font = font, gid;
+	}
+
+	font = fz_load_fallback_music_font(ctx);
+	if (font)
+	{
+		gid = fz_encode_character(ctx, font, unicode);
+		if (gid > 0)
+			return *out_font = font, gid;
+	}
+
 	font = fz_load_fallback_symbol1_font(ctx);
 	if (font)
 	{
@@ -1752,6 +2207,15 @@ fz_encode_character_with_fallback(fz_context *ctx, fz_font *user_font, int unico
 	font = fz_load_fallback_emoji_font(ctx);
 	if (font)
 	{
+		gid = fz_encode_character(ctx, font, unicode);
+		if (gid > 0)
+			return *out_font = font, gid;
+	}
+
+	font = fz_new_base14_font(ctx, "Symbol");
+	if (font)
+	{
+		fz_drop_font(ctx, font); /* it's cached in the font context, return a borrowed pointer */
 		gid = fz_encode_character(ctx, font, unicode);
 		if (gid > 0)
 			return *out_font = font, gid;
@@ -1780,31 +2244,84 @@ int fz_font_is_monospaced(fz_context *ctx, fz_font *font)
 	return font ? font->flags.is_mono : 0;
 }
 
+/*
+	Retrieve a pointer to the name of the font.
+
+	font: The font to query.
+
+	Returns a pointer to an internal copy of the font name.
+	Will never be NULL, but may be the empty string.
+*/
 const char *fz_font_name(fz_context *ctx, fz_font *font)
 {
 	return font ? font->name : "";
 }
 
+/*
+	Retrieve the Type3 procs
+	for a font.
+
+	font: The font to query
+
+	Returns the t3_procs pointer. Will be NULL for a
+	non type-3 font.
+*/
 fz_buffer **fz_font_t3_procs(fz_context *ctx, fz_font *font)
 {
 	return font ? font->t3procs : NULL;
 }
 
+/*
+	Retrieve a pointer to the font bbox.
+
+	font: The font to query.
+
+	Returns a pointer to the font bbox (or NULL if the
+	font is NULL).
+*/
 fz_rect fz_font_bbox(fz_context *ctx, fz_font *font)
 {
 	return font->bbox;
 }
 
+/*
+	Retrieve the FT_Face handle
+	for the font.
+
+	font: The font to query
+
+	Returns the FT_Face handle for the font, or NULL
+	if not a freetype handled font. (Cast to void *
+	to avoid nasty header exposure).
+*/
 void *fz_font_ft_face(fz_context *ctx, fz_font *font)
 {
 	return font ? font->ft_face : NULL;
 }
 
+/*
+	Retrieve a pointer to the font flags
+	for a given font. These can then be updated as required.
+
+	font: The font to query
+
+	Returns a pointer to the flags structure (or NULL, if
+	the font is NULL).
+*/
 fz_font_flags_t *fz_font_flags(fz_font *font)
 {
 	return font ? &font->flags : NULL;
 }
 
+/*
+	Retrieve a pointer to the shaper data
+	structure for the given font.
+
+	font: The font to query.
+
+	Returns a pointer to the shaper data structure (or NULL if
+	font is NULL).
+*/
 fz_shaper_data_t *fz_font_shaper_data(fz_context *ctx, fz_font *font)
 {
 	return font ? &font->shaper_data : NULL;

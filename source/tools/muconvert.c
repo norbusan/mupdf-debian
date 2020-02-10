@@ -10,9 +10,9 @@
 /* input options */
 static const char *password = "";
 static int alphabits = 8;
-static float layout_w = 450;
-static float layout_h = 600;
-static float layout_em = 12;
+static float layout_w = FZ_DEFAULT_LAYOUT_W;
+static float layout_h = FZ_DEFAULT_LAYOUT_H;
+static float layout_em = FZ_DEFAULT_LAYOUT_EM;
 static char *layout_css = NULL;
 static int layout_use_doc_css = 1;
 
@@ -42,7 +42,7 @@ static void usage(void)
 		"\n"
 		"\t-o -\toutput file name (%%d for page number)\n"
 		"\t-F -\toutput format (default inferred from output file name)\n"
-		"\t\t\traster: cbz, png, pnm, pgm, ppm, pam, tga, pbm, pkm.\n"
+		"\t\t\traster: cbz, png, pnm, pgm, ppm, pam, pbm, pkm.\n"
 		"\t\t\tprint-raster: pcl, pclm, ps, pwg.\n"
 		"\t\t\tvector: pdf, svg.\n"
 		"\t\t\ttext: html, xhtml, text, stext.\n"
@@ -78,11 +78,10 @@ static void runpage(int number)
 		mediabox = fz_bound_page(ctx, page);
 		dev = fz_begin_page(ctx, out, mediabox);
 		fz_run_page(ctx, page, dev, fz_identity, NULL);
+		fz_end_page(ctx, out);
 	}
 	fz_always(ctx)
 	{
-		if (dev)
-			fz_end_page(ctx, out);
 		fz_drop_page(ctx, page);
 	}
 	fz_catch(ctx)

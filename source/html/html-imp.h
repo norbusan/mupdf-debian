@@ -25,6 +25,7 @@ struct fz_html_font_face_s
 	char *family;
 	int is_bold;
 	int is_italic;
+	int is_small_caps;
 	fz_font *font;
 	char *src;
 	fz_html_font_face *next;
@@ -171,6 +172,7 @@ struct fz_css_style_s
 	unsigned int border_style_1 : 1;
 	unsigned int border_style_2 : 1;
 	unsigned int border_style_3 : 1;
+	unsigned int small_caps : 1;
 	fz_css_number line_height;
 	fz_css_color background_color;
 	fz_css_color border_color[4];
@@ -195,6 +197,7 @@ struct fz_html_s
 	float page_w, page_h;
 	float page_margin[4];
 	fz_html_box *root;
+	char *title;
 };
 
 struct fz_html_box_s
@@ -202,7 +205,8 @@ struct fz_html_box_s
 	unsigned int type : 3;
 	unsigned int is_first_flow : 1; /* for text-indent */
 	unsigned int markup_dir : 2;
-	unsigned int list_item : 26;
+	unsigned int heading : 3; /* h1..h6 */
+	unsigned int list_item : 23;
 	float x, y, w, b; /* content */
 	float padding[4];
 	float margin[4];
@@ -272,8 +276,8 @@ float fz_from_css_number_scale(fz_css_number number, float scale);
 
 fz_html_font_set *fz_new_html_font_set(fz_context *ctx);
 void fz_add_html_font_face(fz_context *ctx, fz_html_font_set *set,
-	const char *family, int is_bold, int is_italic, const char *src, fz_font *font);
-fz_font *fz_load_html_font(fz_context *ctx, fz_html_font_set *set, const char *family, int is_bold, int is_italic);
+	const char *family, int is_bold, int is_italic, int is_small_caps, const char *src, fz_font *font);
+fz_font *fz_load_html_font(fz_context *ctx, fz_html_font_set *set, const char *family, int is_bold, int is_italic, int is_small_caps);
 void fz_drop_html_font_set(fz_context *ctx, fz_html_font_set *htx);
 
 void fz_add_css_font_faces(fz_context *ctx, fz_html_font_set *set, fz_archive *zip, const char *base_uri, fz_css *css);
@@ -281,11 +285,13 @@ void fz_add_css_font_faces(fz_context *ctx, fz_html_font_set *set, fz_archive *z
 fz_html *fz_parse_html(fz_context *ctx, fz_html_font_set *htx, fz_archive *zip, const char *base_uri, fz_buffer *buf, const char *user_css);
 void fz_layout_html(fz_context *ctx, fz_html *html, float w, float h, float em);
 void fz_draw_html(fz_context *ctx, fz_device *dev, fz_matrix ctm, fz_html *html, int page);
+fz_outline *fz_load_html_outline(fz_context *ctx, fz_html *node);
 
 float fz_find_html_target(fz_context *ctx, fz_html *html, const char *id);
 fz_link *fz_load_html_links(fz_context *ctx, fz_html *html, int page, const char *base_uri, void *doc);
 void fz_drop_html(fz_context *ctx, fz_html *html);
 fz_bookmark fz_make_html_bookmark(fz_context *ctx, fz_html *html, int page);
 int fz_lookup_html_bookmark(fz_context *ctx, fz_html *html, fz_bookmark mark);
+void fz_debug_html(fz_context *ctx, fz_html_box *box);
 
 #endif

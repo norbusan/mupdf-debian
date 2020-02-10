@@ -48,9 +48,17 @@ xps_add_fixed_document(fz_context *ctx, xps_document *doc, char *name)
 			return;
 
 	fixdoc = fz_malloc_struct(ctx, xps_fixdoc);
-	fixdoc->name = fz_strdup(ctx, name);
-	fixdoc->outline = NULL;
-	fixdoc->next = NULL;
+	fz_try(ctx)
+	{
+		fixdoc->name = fz_strdup(ctx, name);
+		fixdoc->outline = NULL;
+		fixdoc->next = NULL;
+	}
+	fz_catch(ctx)
+	{
+		fz_free(ctx, fixdoc);
+		fz_rethrow(ctx);
+	}
 
 	if (!doc->first_fixdoc)
 	{
@@ -75,11 +83,22 @@ xps_add_fixed_page(fz_context *ctx, xps_document *doc, char *name, int width, in
 			return;
 
 	page = fz_malloc_struct(ctx, xps_fixpage);
-	page->name = fz_strdup(ctx, name);
-	page->number = doc->page_count++;
-	page->width = width;
-	page->height = height;
-	page->next = NULL;
+	page->name = NULL;
+
+	fz_try(ctx)
+	{
+		page->name = fz_strdup(ctx, name);
+		page->number = doc->page_count++;
+		page->width = width;
+		page->height = height;
+		page->next = NULL;
+	}
+	fz_catch(ctx)
+	{
+		fz_free(ctx, page->name);
+		fz_free(ctx, page);
+		fz_rethrow(ctx);
+	}
 
 	if (!doc->first_page)
 	{
@@ -98,9 +117,19 @@ xps_add_link_target(fz_context *ctx, xps_document *doc, char *name)
 {
 	xps_fixpage *page = doc->last_page;
 	xps_target *target = fz_malloc_struct(ctx, xps_target);
-	target->name = fz_strdup(ctx, name);
-	target->page = page->number;
-	target->next = doc->target;
+
+	fz_try(ctx)
+	{
+		target->name = fz_strdup(ctx, name);
+		target->page = page->number;
+		target->next = doc->target;
+	}
+	fz_catch(ctx)
+	{
+		fz_free(ctx, target);
+		fz_rethrow(ctx);
+	}
+
 	doc->target = target;
 }
 
@@ -187,7 +216,10 @@ xps_parse_metadata_imp(fz_context *ctx, xps_document *doc, fz_xml *item, xps_fix
 				char tgtbuf[1024];
 				xps_resolve_url(ctx, doc, tgtbuf, doc->base_uri, target, sizeof tgtbuf);
 				if (!strcmp(type, REL_START_PART) || !strcmp(type, REL_START_PART_OXPS))
+				{
+					fz_free(ctx, doc->start_part);
 					doc->start_part = fz_strdup(ctx, tgtbuf);
+				}
 				if ((!strcmp(type, REL_DOC_STRUCTURE) || !strcmp(type, REL_DOC_STRUCTURE_OXPS)) && fixdoc)
 					fixdoc->outline = fz_strdup(ctx, tgtbuf);
 				if (!fz_xml_att(item, "Id"))
@@ -259,11 +291,18 @@ xps_parse_metadata(fz_context *ctx, xps_document *doc, xps_part *part, xps_fixdo
 	doc->part_uri = part->name;
 
 	xml = fz_parse_xml(ctx, part->data, 0);
-	xps_parse_metadata_imp(ctx, doc, fz_xml_root(xml), fixdoc);
-	fz_drop_xml(ctx, xml);
-
-	doc->base_uri = NULL;
-	doc->part_uri = NULL;
+	fz_try(ctx)
+	{
+		xps_parse_metadata_imp(ctx, doc, fz_xml_root(xml), fixdoc);
+	}
+	fz_always(ctx)
+	{
+		fz_drop_xml(ctx, xml);
+		doc->base_uri = NULL;
+		doc->part_uri = NULL;
+	}
+	fz_catch(ctx)
+		fz_rethrow(ctx);
 }
 
 static void

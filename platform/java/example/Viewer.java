@@ -32,7 +32,7 @@ public class Viewer extends Frame implements WindowListener, ActionListener, Ite
 	protected TextField searchField;
 	protected Button searchPrevButton, searchNextButton;
 	protected int searchHitPage = -1;
-	protected Rect searchHits[];
+	protected Quad searchHits[];
 
 	protected List outlineList;
 	protected Vector<Outline> flatOutline;
@@ -87,6 +87,38 @@ public class Viewer extends Frame implements WindowListener, ActionListener, Ite
 		box.pack();
 		box.setVisible(true);
 		box.dispose();
+	}
+
+	protected static String passwordDialog(Frame owner) {
+		final Dialog box = new Dialog(owner, "Password", true);
+		final TextField textField = new TextField(20);
+		textField.setEchoChar('*');
+		Panel buttonPane = new Panel(new FlowLayout());
+		Button cancelButton = new Button("Cancel");
+		Button okayButton = new Button("Okay");
+		cancelButton.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent event) {
+				textField.setText("");
+				box.setVisible(false);
+			}
+		});
+		okayButton.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent event) {
+				box.setVisible(false);
+			}
+		});
+		box.add(new Label("Password:"), BorderLayout.NORTH);
+		box.add(textField, BorderLayout.CENTER);
+		buttonPane.add(cancelButton);
+		buttonPane.add(okayButton);
+		box.add(buttonPane, BorderLayout.SOUTH);
+		box.pack();
+		box.setVisible(true);
+		box.dispose();
+		String pwd = textField.getText();
+		if (pwd.length() == 0)
+			return null;
+		return pwd;
 	}
 
 	protected class ImageCanvas extends Canvas
@@ -260,7 +292,12 @@ public class Viewer extends Frame implements WindowListener, ActionListener, Ite
 	}
 
 	protected void updateOutline() {
-		Outline[] outline = doc.loadOutline();
+		Outline[] outline;
+		try {
+			outline = doc.loadOutline();
+		} catch (Exception ex) {
+			outline = null;
+		}
 		outlineList.removeAll();
 		if (outline != null) {
 			flatOutline = new Vector<Outline>();
@@ -319,7 +356,7 @@ public class Viewer extends Frame implements WindowListener, ActionListener, Ite
 		int oldPageNumber = pageNumber;
 		int oldLayoutEm = layoutEm;
 		int oldZoomLevel = zoomLevel;
-		Rect[] oldSearchHits = searchHits;
+		Quad[] oldSearchHits = searchHits;
 
 		if (source == firstButton)
 			pageNumber = 0;
@@ -446,6 +483,14 @@ public class Viewer extends Frame implements WindowListener, ActionListener, Ite
 
 		try {
 			Document doc = Document.openDocument(selectedFile.getAbsolutePath());
+			if (doc.needsPassword()) {
+				String pwd;
+				do {
+					pwd = passwordDialog(null);
+					if (pwd == null)
+						System.exit(1);
+				} while (!doc.authenticatePassword(pwd));
+			}
 			Viewer app = new Viewer(doc);
 			app.setVisible(true);
 			return;

@@ -3,13 +3,17 @@
 
 #include <string.h>
 
+#if !defined (INT32_MAX)
+#define INT32_MAX 2147483647L
+#endif
+
 typedef struct tar_entry_s tar_entry;
 typedef struct fz_tar_archive_s fz_tar_archive;
 
 struct tar_entry_s
 {
 	char *name;
-	int offset, size;
+	int64_t offset, size;
 };
 
 struct fz_tar_archive_s
@@ -25,9 +29,9 @@ static inline int isoctdigit(char c)
 	return c >= '0' && c <= '7';
 }
 
-static inline int otoi(const char *s)
+static inline int64_t otoi(const char *s)
 {
-	int value = 0;
+	int64_t value = 0;
 
 	while (*s && isoctdigit(*s))
 	{
@@ -54,7 +58,7 @@ static void ensure_tar_entries(fz_context *ctx, fz_tar_archive *tar)
 	char name[100];
 	char octsize[12];
 	char typeflag;
-	int offset, blocks, size;
+	int64_t offset, blocks, size;
 	size_t n;
 
 	tar->count = 0;
@@ -76,7 +80,10 @@ static void ensure_tar_entries(fz_context *ctx, fz_tar_archive *tar)
 		n = fz_read(ctx, file, (unsigned char *) octsize, nelem(octsize));
 		if (n < nelem(octsize))
 			fz_throw(ctx, FZ_ERROR_GENERIC, "premature end of data in tar entry size");
+		octsize[nelem(octsize) - 1] = '\0';
 		size = otoi(octsize);
+		if (size > INT32_MAX)
+			fz_throw(ctx, FZ_ERROR_GENERIC, "tar archive entry larger than 2 GB");
 
 		fz_seek(ctx, file, 20, 1);
 		typeflag = fz_read_byte(ctx, file);
@@ -85,10 +92,10 @@ static void ensure_tar_entries(fz_context *ctx, fz_tar_archive *tar)
 		blocks = (size + 511) / 512;
 		fz_seek(ctx, file, blocks * 512, 1);
 
-		if (typeflag != '0')
+		if (typeflag != '0' && typeflag != '\0')
 			continue;
 
-		tar->entries = fz_resize_array(ctx, tar->entries, tar->count + 1, sizeof *tar->entries);
+		tar->entries = fz_realloc_array(ctx, tar->entries, tar->count + 1, tar_entry);
 
 		tar->entries[tar->count].name = fz_strdup(ctx, name);
 		tar->entries[tar->count].offset = offset;
@@ -171,23 +178,44 @@ static int count_tar_entries(fz_context *ctx, fz_archive *arch)
 	return tar->count;
 }
 
+/*
+	Detect if stream object is a tar achieve.
+
+	Assumes that the stream object is seekable.
+*/
 int
 fz_is_tar_archive(fz_context *ctx, fz_stream *file)
 {
-	const unsigned char signature[6] = { 'u', 's', 't', 'a', 'r', ' ' };
+	const unsigned char gnusignature[6] = { 'u', 's', 't', 'a', 'r', ' ' };
+	const unsigned char paxsignature[6] = { 'u', 's', 't', 'a', 'r', '\0' };
+	const unsigned char v7signature[6] = { '\0', '\0', '\0', '\0', '\0', '\0' };
 	unsigned char data[6];
 	size_t n;
 
 	fz_seek(ctx, file, 257, 0);
 	n = fz_read(ctx, file, data, nelem(data));
-	if (n != nelem(signature))
+	if (n != nelem(data))
 		return 0;
-	if (memcmp(data, signature, nelem(signature)))
-		return 0;
+	if (!memcmp(data, gnusignature, nelem(gnusignature)))
+		return 1;
+	if (!memcmp(data, paxsignature, nelem(paxsignature)))
+		return 1;
+	if (!memcmp(data, v7signature, nelem(v7signature)))
+		return 1;
 
-	return 1;
+	return 0;
 }
 
+/*
+	Open a tar archive stream.
+
+	Open an archive using a seekable stream object rather than
+	opening a file or directory on disk.
+
+	An exception is throw if the stream is not a tar archive as
+	indicated by the presence of a tar signature.
+
+*/
 fz_archive *
 fz_open_tar_archive_with_stream(fz_context *ctx, fz_stream *file)
 {
@@ -218,6 +246,15 @@ fz_open_tar_archive_with_stream(fz_context *ctx, fz_stream *file)
 	return &tar->super;
 }
 
+/*
+	Open a tar archive file.
+
+	An exception is throw if the file is not a tar archive as
+	indicated by the presence of a tar signature.
+
+	filename: a path to a tar archive file as it would be given to
+	open(2).
+*/
 fz_archive *
 fz_open_tar_archive(fz_context *ctx, const char *filename)
 {

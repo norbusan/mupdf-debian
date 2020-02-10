@@ -35,6 +35,30 @@ static int pdf_write_stroke_color_appearance(fz_context *ctx, pdf_annot *annot, 
 	return 1;
 }
 
+static int pdf_is_dark_fill_color(fz_context *ctx, pdf_annot *annot)
+{
+	float color[4], gray;
+	int n;
+	pdf_annot_color(ctx, annot, &n, color);
+	switch (n)
+	{
+	default:
+		gray = 1;
+		break;
+	case 1:
+		gray = color[0];
+		break;
+	case 3:
+		gray = color[0] * 0.3f + color[1] * 0.59f + color[2] * 0.11f;
+		break;
+	case 4:
+		gray = color[0] * 0.3f + color[1] * 0.59f + color[2] * 0.11f + color[3];
+		gray = 1 - fz_min(gray, 1);
+		break;
+	}
+	return gray < 0.25f;
+}
+
 static int pdf_write_fill_color_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf)
 {
 	float color[4];
@@ -271,9 +295,31 @@ pdf_write_square_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf, f
 }
 
 static void
+draw_circle(fz_context *ctx, fz_buffer *buf, const char *op, float rx, float ry, float cx, float cy)
+{
+	float mx = rx * CIRCLE_MAGIC;
+	float my = ry * CIRCLE_MAGIC;
+	fz_append_printf(ctx, buf, "%g %g m\n", cx, cy+ry);
+	fz_append_printf(ctx, buf, "%g %g %g %g %g %g c\n", cx+mx, cy+ry, cx+rx, cy+my, cx+rx, cy);
+	fz_append_printf(ctx, buf, "%g %g %g %g %g %g c\n", cx+rx, cy-my, cx+mx, cy-ry, cx, cy-ry);
+	fz_append_printf(ctx, buf, "%g %g %g %g %g %g c\n", cx-mx, cy-ry, cx-rx, cy-my, cx-rx, cy);
+	fz_append_printf(ctx, buf, "%g %g %g %g %g %g c\n", cx-rx, cy+my, cx-mx, cy+ry, cx, cy+ry);
+	fz_append_string(ctx, buf, op);
+}
+
+static void
+draw_circle_in_box(fz_context *ctx, fz_buffer *buf, const char *op, float lw, float x0, float y0, float x1, float y1)
+{
+	float rx = (x1 - x0) / 2 - lw;
+	float ry = (y1 - y0) / 2 - lw;
+	float cx = x0 + lw + rx;
+	float cy = y0 + lw + ry;
+	draw_circle(ctx, buf, op, rx, ry, cx, cy);
+}
+
+static void
 pdf_write_circle_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf, fz_rect *rect)
 {
-	float rx, ry, cx, cy, mx, my;
 	float lw;
 	int ic;
 
@@ -281,19 +327,7 @@ pdf_write_circle_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf, f
 	pdf_write_stroke_color_appearance(ctx, annot, buf);
 	ic = pdf_write_interior_fill_color_appearance(ctx, annot, buf);
 
-	rx = (rect->x1 - rect->x0) / 2 - lw;
-	ry = (rect->y1 - rect->y0) / 2 - lw;
-	cx = rect->x0 + lw + rx;
-	cy = rect->y0 + lw + ry;
-	mx = rx * CIRCLE_MAGIC;
-	my = ry * CIRCLE_MAGIC;
-
-	fz_append_printf(ctx, buf, "%g %g m\n", cx, cy+ry);
-	fz_append_printf(ctx, buf, "%g %g %g %g %g %g c\n", cx+mx, cy+ry, cx+rx, cy+my, cx+rx, cy);
-	fz_append_printf(ctx, buf, "%g %g %g %g %g %g c\n", cx+rx, cy-my, cx+mx, cy-ry, cx, cy-ry);
-	fz_append_printf(ctx, buf, "%g %g %g %g %g %g c\n", cx-mx, cy-ry, cx-rx, cy-my, cx-rx, cy);
-	fz_append_printf(ctx, buf, "%g %g %g %g %g %g c\n", cx-rx, cy+my, cx-mx, cy+ry, cx, cy+ry);
-	fz_append_string(ctx, buf, ic ? "b" : "s");
+	draw_circle_in_box(ctx, buf, ic ? "b\n" : "s\n", lw, rect->x0, rect->y0, rect->x1, rect->y1);
 }
 
 static void
@@ -594,6 +628,41 @@ pdf_write_squiggly_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf,
 }
 
 static void
+pdf_write_redact_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf, fz_rect *rect)
+{
+	fz_point quad[4];
+	pdf_obj *qp;
+	int i, n;
+
+	fz_append_printf(ctx, buf, "1 0 0 RG\n");
+
+	qp = pdf_dict_get(ctx, annot->obj, PDF_NAME(QuadPoints));
+	n = pdf_array_len(ctx, qp);
+	if (n > 0)
+	{
+		*rect = fz_empty_rect;
+		for (i = 0; i < n; i += 8)
+		{
+			extract_quad(ctx, quad, qp, i);
+			fz_append_printf(ctx, buf, "%g %g m\n", quad[LL].x, quad[LL].y);
+			fz_append_printf(ctx, buf, "%g %g l\n", quad[LR].x, quad[LR].y);
+			fz_append_printf(ctx, buf, "%g %g l\n", quad[UR].x, quad[UR].y);
+			fz_append_printf(ctx, buf, "%g %g l\n", quad[UL].x, quad[UL].y);
+			fz_append_printf(ctx, buf, "s\n");
+			union_quad(rect, quad, 1);
+		}
+	}
+	else
+	{
+		fz_append_printf(ctx, buf, "%g %g m\n", rect->x0+1, rect->y0+1);
+		fz_append_printf(ctx, buf, "%g %g l\n", rect->x1-1, rect->y0+1);
+		fz_append_printf(ctx, buf, "%g %g l\n", rect->x1-1, rect->y1-1);
+		fz_append_printf(ctx, buf, "%g %g l\n", rect->x0+1, rect->y1-1);
+		fz_append_printf(ctx, buf, "s\n");
+	}
+}
+
+static void
 pdf_write_caret_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf, fz_rect *rect, fz_rect *bbox)
 {
 	float xc = (rect->x0 + rect->x1) / 2;
@@ -620,8 +689,13 @@ pdf_write_icon_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf, fz_
 	if (!pdf_write_fill_color_appearance(ctx, annot, buf))
 		fz_append_string(ctx, buf, "1 g\n");
 
-	fz_append_string(ctx, buf, "1 w\n0.5 0.5 15 15 re b\n");
-	fz_append_string(ctx, buf, "0 g\n1 0 0 -1 4 12 cm\n");
+	fz_append_string(ctx, buf, "1 w\n0.5 0.5 15 15 re\nb\n");
+	fz_append_string(ctx, buf, "1 0 0 -1 4 12 cm\n");
+
+	if (pdf_is_dark_fill_color(ctx, annot))
+		fz_append_string(ctx, buf, "1 g\n");
+	else
+		fz_append_string(ctx, buf, "0 g\n");
 
 	name = pdf_annot_icon_name(ctx, annot);
 
@@ -673,7 +747,7 @@ measure_simple_string(fz_context *ctx, fz_font *font, const char *text)
 	{
 		int c, g;
 		text += fz_chartorune(&c, text);
-		c = pdf_winansi_from_unicode(c);
+		c = fz_windows_1252_from_unicode(c);
 		if (c < 0) c = REPLACEMENT;
 		g = fz_encode_character(ctx, font, c);
 		w += fz_advance_glyph(ctx, font, g, 0);
@@ -689,7 +763,7 @@ write_simple_string(fz_context *ctx, fz_buffer *buf, const char *a, const char *
 	{
 		int c;
 		a += fz_chartorune(&c, a);
-		c = pdf_winansi_from_unicode(c);
+		c = fz_windows_1252_from_unicode(c);
 		if (c < 0) c = REPLACEMENT;
 		if (c == '(' || c == ')' || c == '\\')
 			fz_append_byte(ctx, buf, '\\');
@@ -871,7 +945,7 @@ write_comb_string(fz_context *ctx, fz_buffer *buf, const char *a, const char *b,
 		int c, g;
 
 		a += fz_chartorune(&c, a);
-		c = pdf_winansi_from_unicode(c);
+		c = fz_windows_1252_from_unicode(c);
 		if (c < 0) c = REPLACEMENT;
 
 		g = fz_encode_character(ctx, font, c);
@@ -889,6 +963,95 @@ write_comb_string(fz_context *ctx, fz_buffer *buf, const char *a, const char *b,
 	fz_append_string(ctx, buf, "] TJ\n");
 }
 
+static void
+layout_comb_string(fz_context *ctx, fz_layout_block *out, float x, float y,
+	const char *a, const char *b, fz_font *font, float size, float cell_w)
+{
+	int n, c, g;
+	int first = 1;
+	float w;
+	if (a == b)
+		fz_add_layout_line(ctx, out, x + cell_w / 2, y, size, a);
+	while (a < b)
+	{
+		n = fz_chartorune(&c, a);
+		c = fz_windows_1252_from_unicode(c);
+		if (c < 0) c = REPLACEMENT;
+		g = fz_encode_character(ctx, font, c);
+		w = fz_advance_glyph(ctx, font, g, 0) * size;
+		if (first)
+		{
+			fz_add_layout_line(ctx, out, x + (cell_w - w) / 2, y, size, a);
+			first = 0;
+		}
+		fz_add_layout_char(ctx, out, x + (cell_w - w) / 2, w, a);
+		a += n;
+		x += cell_w;
+	}
+}
+
+static void
+layout_simple_string(fz_context *ctx, fz_layout_block *out, fz_font *font, float size,
+	float x, float y, const char *a, const char *b)
+{
+	float w;
+	int n, c, g;
+	fz_add_layout_line(ctx, out, x, y, size, a);
+	while (a < b)
+	{
+		n = fz_chartorune(&c, a);
+		c = fz_windows_1252_from_unicode(c);
+		if (c < 0) c = REPLACEMENT;
+		g = fz_encode_character(ctx, font, c);
+		w = fz_advance_glyph(ctx, font, g, 0) * size;
+		fz_add_layout_char(ctx, out, x, w, a);
+		a += n;
+		x += w;
+	}
+}
+
+static void
+layout_simple_string_with_quadding(fz_context *ctx, fz_layout_block *out,
+	fz_font *font, float size, float lineheight,
+	float xorig, float y, const char *a, float maxw, int q)
+{
+	const char *b;
+	float x = 0, w;
+	int add_line_at_end = 0;
+
+	if (!*a)
+		add_line_at_end = 1;
+
+	while (*a)
+	{
+		w = break_simple_string(ctx, font, size, a, &b, maxw);
+		if (b > a)
+		{
+			if (q > 0)
+			{
+				if (q == 1)
+					x = (maxw - w) / 2;
+				else
+					x = (maxw - w);
+			}
+			if (b[-1] == '\n' || b[-1] == '\r')
+			{
+				layout_simple_string(ctx, out, font, size, xorig+x, y, a, b-1);
+				add_line_at_end = 1;
+			}
+			else
+			{
+				layout_simple_string(ctx, out, font, size, xorig+x, y, a, b);
+				add_line_at_end = 0;
+			}
+			a = b;
+			y -= lineheight;
+		}
+	}
+	if (add_line_at_end)
+		fz_add_layout_line(ctx, out, xorig, y, size, a);
+}
+
 static const char *full_font_name(const char **name)
 {
 	if (!strcmp(*name, "Cour")) return "Courier";
@@ -902,19 +1065,18 @@ static const char *full_font_name(const char **name)
 static void
 write_variable_text(fz_context *ctx, pdf_annot *annot, fz_buffer *buf, pdf_obj **res,
 	const char *text, const char *fontname, float size, float color[3], int q,
-	float w, float h, float xpadding, float ypadding, int multiline, int comb)
+	float w, float h, float padding, float baseline, float lineheight,
+	int multiline, int comb, int adjust_baseline)
 {
 	pdf_obj *res_font;
 	fz_font *font;
-	float lineheight;
-	float baseline;
+
+	w -= padding * 2;
+	h -= padding * 2;
 
 	font = fz_new_base14_font(ctx, full_font_name(&fontname));
 	fz_try(ctx)
 	{
-		w -= xpadding * 2;
-		h -= ypadding * 2;
-
 		if (size == 0)
 		{
 			if (multiline)
@@ -927,8 +1089,15 @@ write_variable_text(fz_context *ctx, pdf_annot *annot, fz_buffer *buf, pdf_obj *
 			}
 		}
 
-		lineheight = size * 1.15f; /* empirically derived from Adobe reader */
-		baseline = size * 0.8f;
+		lineheight = size * lineheight;
+		baseline = size * baseline;
+
+		if (adjust_baseline)
+		{
+			/* Make sure baseline is inside rectangle */
+			if (baseline + 0.2f * size > h)
+				baseline = h - 0.2f * size;
+		}
 
 		/* /Resources << /Font << /Helv %d 0 R >> >> */
 		*res = pdf_new_dict(ctx, annot->page->doc, 1);
@@ -941,13 +1110,13 @@ write_variable_text(fz_context *ctx, pdf_annot *annot, fz_buffer *buf, pdf_obj *
 		if (multiline)
 		{
 			fz_append_printf(ctx, buf, "%g TL\n", lineheight);
-			fz_append_printf(ctx, buf, "%g %g Td\n", xpadding, ypadding+h);
+			fz_append_printf(ctx, buf, "%g %g Td\n", padding, padding+h-baseline+lineheight);
 			write_simple_string_with_quadding(ctx, buf, font, size, text, w, q);
 		}
 		else if (comb > 0)
 		{
 			float ty = (h - size) / 2;
-			fz_append_printf(ctx, buf, "%g %g Td\n", xpadding, ypadding+h-baseline-ty);
+			fz_append_printf(ctx, buf, "%g %g Td\n", padding, padding+h-baseline-ty);
 			write_comb_string(ctx, buf, text, text + strlen(text), font, (w * 1000 / size) / comb);
 		}
 		else
@@ -961,11 +1130,82 @@ write_variable_text(fz_context *ctx, pdf_annot *annot, fz_buffer *buf, pdf_obj *
 				else
 					tx = (w - tw);
 			}
-			fz_append_printf(ctx, buf, "%g %g Td\n", xpadding+tx, ypadding+h-baseline-ty);
+			fz_append_printf(ctx, buf, "%g %g Td\n", padding+tx, padding+h-baseline-ty);
 			write_simple_string(ctx, buf, text, text + strlen(text));
 			fz_append_printf(ctx, buf, " Tj\n");
 		}
 		fz_append_string(ctx, buf, "ET\n");
+	}
+	fz_always(ctx)
+		fz_drop_font(ctx, font);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+}
+
+static void
+layout_variable_text(fz_context *ctx, fz_layout_block *out,
+	const char *text, const char *fontname, float size, int q,
+	float x, float y, float w, float h, float padding, float baseline, float lineheight,
+	int multiline, int comb, int adjust_baseline)
+{
+	fz_font *font;
+
+	w -= padding * 2;
+	h -= padding * 2;
+
+	font = fz_new_base14_font(ctx, full_font_name(&fontname));
+	fz_try(ctx)
+	{
+		if (size == 0)
+		{
+			if (multiline)
+				size = 12;
+			else
+			{
+				size = w / measure_simple_string(ctx, font, text);
+				if (size > h)
+					size = h;
+			}
+		}
+
+		lineheight = size * lineheight;
+		baseline = size * baseline;
+
+		if (adjust_baseline)
+		{
+			/* Make sure baseline is inside rectangle */
+			if (baseline + 0.2f * size > h)
+				baseline = h - 0.2f * size;
+		}
+
+		if (multiline)
+		{
+			x += padding;
+			y += padding + h - baseline;
+			layout_simple_string_with_quadding(ctx, out, font, size, lineheight, x, y, text, w, q);
+		}
+		else if (comb > 0)
+		{
+			float ty = (h - size) / 2;
+			x += padding;
+			y += padding + h - baseline - ty;
+			layout_comb_string(ctx, out, x, y, text, text + strlen(text), font, size, w / comb);
+		}
+		else
+		{
+			float tx = 0, ty = (h - size) / 2;
+			if (q > 0)
+			{
+				float tw = measure_simple_string(ctx, font, text) * size;
+				if (q == 1)
+					tx = (w - tw) / 2;
+				else
+					tx = (w - tw);
+			}
+			x += padding + tx;
+			y += padding + h - baseline - ty;
+			layout_simple_string(ctx, out, font, size, x, y, text, text + strlen(text));
+		}
 	}
 	fz_always(ctx)
 		fz_drop_font(ctx, font);
@@ -1007,7 +1247,10 @@ pdf_write_free_text_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf
 		fz_append_printf(ctx, buf, "%g %g %g %g re\nS\n", b/2, b/2, w-b, h-b);
 	}
 
-	write_variable_text(ctx, annot, buf, res, text, font, size, color, q, w, h, b*2, b*2, 1, 0);
+	fz_append_printf(ctx, buf, "%g %g %g %g re\nW\nn\n", b, b, w-b*2, h-b*2);
+
+	write_variable_text(ctx, annot, buf, res, text, font, size, color, q, w, h, b*2,
+		0.8f, 1.2f, 1, 0, 0);
 }
 
 static void
@@ -1018,6 +1261,7 @@ pdf_write_tx_widget_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf
 	const char *font;
 	float size, color[3];
 	float w, h, t, b;
+	int has_bc = 0;
 	int q, r;
 
 	r = pdf_dict_get_int(ctx, pdf_dict_get(ctx, annot->obj, PDF_NAME(MK)), PDF_NAME(R));
@@ -1026,6 +1270,7 @@ pdf_write_tx_widget_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf
 
 	w = rect->x1 - rect->x0;
 	h = rect->y1 - rect->y0;
+	r = r % 360;
 	if (r == 90 || r == 270)
 		t = h, h = w, w = t;
 	*matrix = fz_rotate(r);
@@ -1037,33 +1282,162 @@ pdf_write_tx_widget_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf
 		fz_append_printf(ctx, buf, "0 0 %g %g re\nf\n", w, h);
 
 	b = pdf_write_border_appearance(ctx, annot, buf);
-	if (b > 0)
+	if (b > 0 && pdf_write_MK_BC_appearance(ctx, annot, buf))
 	{
-		if (pdf_write_MK_BC_appearance(ctx, annot, buf))
-			fz_append_printf(ctx, buf, "%g %g %g %g re\nS\n", b/2, b/2, w-b, h-b);
-		else
-			b = 0;
+		fz_append_printf(ctx, buf, "%g %g %g %g re\ns\n", b/2, b/2, w-b, h-b);
+		has_bc = 1;
 	}
 
+	fz_append_printf(ctx, buf, "%g %g %g %g re\nW\nn\n", b, b, w-b*2, h-b*2);
+
 	if (ff & PDF_TX_FIELD_IS_MULTILINE)
-		write_variable_text(ctx, annot, buf, res, text, font, size, color, q, w, h, b+2, b+3, 1, 0);
+	{
+		write_variable_text(ctx, annot, buf, res, text, font, size, color, q, w, h, b*2,
+			1.116f, 1.116f, 1, 0, 1);
+	}
 	else if (ff & PDF_TX_FIELD_IS_COMB)
 	{
 		int maxlen = pdf_to_int(ctx, pdf_dict_get_inheritable(ctx, annot->obj, PDF_NAME(MaxLen)));
-		write_variable_text(ctx, annot, buf, res, text, font, size, color, q, w, h, 0, 0, 0, maxlen);
+		if (has_bc && maxlen > 1)
+		{
+			float cell_w = (w - 2 * b) / maxlen;
+			int i;
+			for (i = 1; i < maxlen; ++i)
+			{
+				float x = b + cell_w * i;
+				fz_append_printf(ctx, buf, "%g %g m %g %g l s\n", x, b, x, h-b);
+			}
+		}
+		write_variable_text(ctx, annot, buf, res, text, font, size, color, q, w, h, 0,
+			0.8f, 1.2f, 0, maxlen, 0);
 	}
 	else
-		write_variable_text(ctx, annot, buf, res, text, font, size, color, q, w, h, b+2, b, 0, 0);
+	{
+		write_variable_text(ctx, annot, buf, res, text, font, size, color, q, w, h, b*2,
+			0.8f, 1.2f, 0, 0, 0);
+	}
 
 	fz_append_string(ctx, buf, "Q\nEMC\n");
 }
 
+fz_layout_block *
+pdf_layout_text_widget(fz_context *ctx, pdf_annot *annot)
+{
+	fz_layout_block *out;
+	const char *font;
+	const char *text;
+	fz_rect rect;
+	float size, color[3];
+	float w, h, t, b, x, y;
+	int q, r;
+	int ff;
+
+	rect = pdf_dict_get_rect(ctx, annot->obj, PDF_NAME(Rect));
+	text = pdf_field_value(ctx, annot->obj);
+	ff = pdf_field_flags(ctx, annot->obj);
+
+	b = pdf_annot_border(ctx, annot);
+	r = pdf_dict_get_int(ctx, pdf_dict_get(ctx, annot->obj, PDF_NAME(MK)), PDF_NAME(R));
+	q = pdf_annot_quadding(ctx, annot);
+	pdf_annot_default_appearance(ctx, annot, &font, &size, color);
+
+	w = rect.x1 - rect.x0;
+	h = rect.y1 - rect.y0;
+	r = r % 360;
+	if (r == 90 || r == 270)
+		t = h, h = w, w = t;
+
+	x = rect.x0;
+	y = rect.y0;
+
+	out = fz_new_layout(ctx);
+	fz_try(ctx)
+	{
+		pdf_page_transform(ctx, annot->page, NULL, &out->matrix);
+		out->matrix = fz_concat(out->matrix, fz_rotate(r));
+		out->inv_matrix = fz_invert_matrix(out->matrix);
+
+		if (ff & PDF_TX_FIELD_IS_MULTILINE)
+		{
+			layout_variable_text(ctx, out, text, font, size, q, x, y, w, h, b*2, 1.116f, 1.116f, 1, 0, 1);
+		}
+		else if (ff & PDF_TX_FIELD_IS_COMB)
+		{
+			int maxlen = pdf_to_int(ctx, pdf_dict_get_inheritable(ctx, annot->obj, PDF_NAME(MaxLen)));
+			layout_variable_text(ctx, out, text, font, size, q, x, y, w, h, 0, 0.8f, 1.2f, 0, maxlen, 0);
+		}
+		else
+		{
+			layout_variable_text(ctx, out, text, font, size, q, x, y, w, h, b*2, 0.8f, 1.2f, 0, 0, 0);
+		}
+	}
+	fz_catch(ctx)
+	{
+		fz_drop_layout(ctx, out);
+		fz_rethrow(ctx);
+	}
+	return out;
+}
+
 static void
 pdf_write_ch_widget_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf,
-	fz_rect *rect, fz_rect *bbox, fz_matrix *matrix, pdf_obj **res,
-	const char *text, int ff)
+	fz_rect *rect, fz_rect *bbox, fz_matrix *matrix, pdf_obj **res)
 {
-	pdf_write_tx_widget_appearance(ctx, annot, buf, rect, bbox, matrix, res, text, ff);
+	int ff = pdf_field_flags(ctx, annot->obj);
+	if (ff & PDF_CH_FIELD_IS_COMBO)
+	{
+		/* TODO: Pop-down arrow */
+		pdf_write_tx_widget_appearance(ctx, annot, buf, rect, bbox, matrix, res,
+			pdf_field_value(ctx, annot->obj), 0);
+	}
+	else
+	{
+		fz_buffer *text = fz_new_buffer(ctx, 1024);
+		fz_try(ctx)
+		{
+			pdf_obj *opt = pdf_dict_get(ctx, annot->obj, PDF_NAME(Opt));
+			int i = pdf_dict_get_int(ctx, annot->obj, PDF_NAME(TI));
+			int n = pdf_array_len(ctx, opt);
+			/* TODO: Scrollbar */
+			/* TODO: Highlight selected items */
+			if (i < 0)
+				i = 0;
+			for (; i < n; ++i)
+			{
+				pdf_obj *val = pdf_array_get(ctx, opt, i);
+				if (pdf_is_array(ctx, val))
+					fz_append_string(ctx, text, pdf_array_get_text_string(ctx, val, 1));
+				else
+					fz_append_string(ctx, text, pdf_to_text_string(ctx, val));
+				fz_append_byte(ctx, text, '\n');
+			}
+			pdf_write_tx_widget_appearance(ctx, annot, buf, rect, bbox, matrix, res,
+				fz_string_from_buffer(ctx, text), PDF_TX_FIELD_IS_MULTILINE);
+		}
+		fz_always(ctx)
+			fz_drop_buffer(ctx, text);
+		fz_catch(ctx)
+			fz_rethrow(ctx);
+	}
+}
+
+static void
+pdf_write_sig_widget_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf,
+	fz_rect *rect, fz_rect *bbox, fz_matrix *matrix, pdf_obj **res)
+{
+	float x0 = rect->x0 + 1;
+	float y0 = rect->y0 + 1;
+	float x1 = rect->x1 - 1;
+	float y1 = rect->y1 - 1;
+	float w = x1 - x0;
+	float h = y1 - y0;
+	fz_append_printf(ctx, buf, "1 w\n0 G\n");
+	fz_append_printf(ctx, buf, "%g %g %g %g re\n", x0, y0, w, h);
+	fz_append_printf(ctx, buf, "%g %g m %g %g l\n", x0, y0, x1, y1);
+	fz_append_printf(ctx, buf, "%g %g m %g %g l\n", x1, y0, x0, y1);
+	fz_append_printf(ctx, buf, "s\n");
+	*bbox = *rect;
+	*matrix = fz_identity;
 }
 
 static void
@@ -1071,49 +1445,37 @@ pdf_write_widget_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf,
 	fz_rect *rect, fz_rect *bbox, fz_matrix *matrix, pdf_obj **res)
 {
 	pdf_obj *ft = pdf_dict_get_inheritable(ctx, annot->obj, PDF_NAME(FT));
-	int ff = pdf_get_field_flags(ctx, annot->page->doc, annot->obj);
 	if (pdf_name_eq(ctx, ft, PDF_NAME(Tx)))
 	{
-		pdf_document *doc = annot->page->doc;
-		pdf_obj *f = pdf_dict_getl(ctx, annot->obj, PDF_NAME(AA), PDF_NAME(F), NULL);
-		char *text = NULL;
-		if (f && doc->js)
+		int ff = pdf_field_flags(ctx, annot->obj);
+		char *format = NULL;
+		const char *text = NULL;
+		if (!annot->ignore_trigger_events)
 		{
-			pdf_js_event e;
-			e.target = annot->obj;
-			e.value = pdf_field_value(ctx, doc, annot->obj);
-			fz_try(ctx)
-				pdf_js_setup_event(doc->js, &e);
-			fz_always(ctx)
-				fz_free(ctx, e.value);
-			fz_catch(ctx)
-				fz_rethrow(ctx);
-			pdf_execute_action(ctx, doc, annot->obj, f);
-			if (pdf_js_get_event(doc->js)->rc)
-				text = fz_strdup(ctx, pdf_js_get_event(doc->js)->value);
+			format = pdf_field_event_format(ctx, annot->page->doc, annot->obj);
+			if (format)
+				text = format;
 			else
-				text = pdf_field_value(ctx, doc, annot->obj);
+				text = pdf_field_value(ctx, annot->obj);
 		}
 		else
 		{
-			text = pdf_field_value(ctx, doc, annot->obj);
+			text = pdf_field_value(ctx, annot->obj);
 		}
 		fz_try(ctx)
 			pdf_write_tx_widget_appearance(ctx, annot, buf, rect, bbox, matrix, res, text, ff);
 		fz_always(ctx)
-			fz_free(ctx, text);
+			fz_free(ctx, format);
 		fz_catch(ctx)
 			fz_rethrow(ctx);
 	}
 	else if (pdf_name_eq(ctx, ft, PDF_NAME(Ch)))
 	{
-		char *text = pdf_field_value(ctx, annot->page->doc, annot->obj);
-		fz_try(ctx)
-			pdf_write_ch_widget_appearance(ctx, annot, buf, rect, bbox, matrix, res, text, ff);
-		fz_always(ctx)
-			fz_free(ctx, text);
-		fz_catch(ctx)
-			fz_rethrow(ctx);
+		pdf_write_ch_widget_appearance(ctx, annot, buf, rect, bbox, matrix, res);
+	}
+	else if (pdf_name_eq(ctx, ft, PDF_NAME(Sig)))
+	{
+		pdf_write_sig_widget_appearance(ctx, annot, buf, rect, bbox, matrix, res);
 	}
 	else
 	{
@@ -1128,7 +1490,8 @@ pdf_write_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf,
 	switch (pdf_annot_type(ctx, annot))
 	{
 	default:
-		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot create appearance stream");
+		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot create appearance stream for %s annotations",
+			pdf_dict_get_name(ctx, annot->obj, PDF_NAME(Subtype)));
 	case PDF_ANNOT_WIDGET:
 		pdf_write_widget_appearance(ctx, annot, buf, rect, bbox, matrix, res);
 		break;
@@ -1192,6 +1555,11 @@ pdf_write_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf,
 		*matrix = fz_identity;
 		*bbox = *rect;
 		break;
+	case PDF_ANNOT_REDACT:
+		pdf_write_redact_appearance(ctx, annot, buf, rect);
+		*matrix = fz_identity;
+		*bbox = *rect;
+		break;
 	case PDF_ANNOT_STAMP:
 		pdf_write_stamp_appearance(ctx, annot, buf, rect, bbox, res);
 		*matrix = fz_identity;
@@ -1199,6 +1567,268 @@ pdf_write_appearance(fz_context *ctx, pdf_annot *annot, fz_buffer *buf,
 	case PDF_ANNOT_FREE_TEXT:
 		pdf_write_free_text_appearance(ctx, annot, buf, rect, bbox, matrix, res);
 		break;
+	}
+}
+
+static pdf_obj *draw_push_button(fz_context *ctx, pdf_annot *annot, fz_rect bbox, fz_matrix matrix, float w, float h,
+	const char *caption, const char *font, float size, float color[3],
+	int down)
+{
+	pdf_obj *ap, *res = NULL;
+	fz_buffer *buf;
+	float bc[3] = { 0, 0, 0 };
+	float bg[3] = { 0.8f, 0.8f, 0.8f };
+	float hi[3], sh[3];
+	int has_bg, has_bc;
+	float b;
+	int i;
+
+	buf = fz_new_buffer(ctx, 1024);
+	fz_var(res);
+	fz_try(ctx)
+	{
+		b = pdf_annot_border(ctx, annot);
+		has_bc = pdf_annot_MK_BC_rgb(ctx, annot, bc);
+		has_bg = pdf_annot_MK_BG_rgb(ctx, annot, bg);
+
+		for (i = 0; i < 3; ++i)
+		{
+			if (down)
+			{
+				sh[i] = 1 - (1 - bg[i]) / 2;
+				hi[i] = bg[i] / 2;
+			}
+			else
+			{
+				hi[i] = 1 - (1 - bg[i]) / 2;
+				sh[i] = bg[i] / 2;
+			}
+		}
+
+		fz_append_string(ctx, buf, "q\n");
+		fz_append_printf(ctx, buf, "%g w\n", b);
+		if (has_bg)
+		{
+			fz_append_printf(ctx, buf, "%g %g %g rg\n", bg[0], bg[1], bg[2]);
+			fz_append_printf(ctx, buf, "0 0 %g %g re\nf\n", 0, 0, w, h);
+		}
+		if (has_bc && b > 0)
+		{
+			fz_append_printf(ctx, buf, "%g %g %g RG\n", bc[0], bc[1], bc[2]);
+			fz_append_printf(ctx, buf, "%g %g %g %g re\nS\n", b/2, b/2, w-b, h-b);
+		}
+		if (has_bg)
+		{
+			fz_append_printf(ctx, buf, "%g %g %g rg\n", hi[0], hi[1], hi[2]);
+			fz_append_printf(ctx, buf, "%g %g m %g %g l %g %g l %g %g l %g %g l %g %g l f\n",
+				b, b, b, h-b, w-b, h-b, w-b-2, h-b-2, b+2, h-b-2, b+2, b+2);
+			fz_append_printf(ctx, buf, "%g %g %g rg\n", sh[0], sh[1], sh[2]);
+			fz_append_printf(ctx, buf, "%g %g m %g %g l %g %g l %g %g l %g %g l %g %g l f\n",
+				b, b, b+2, b+2, w-b-2, b+2, w-b-2, h-b-2, w-b, h-b, w-b, b);
+		}
+		if (down)
+			fz_append_string(ctx, buf, "1 0 0 1 2 -2 cm\n");
+		write_variable_text(ctx, annot, buf, &res, caption, font, size, color, 1, w, h, b+6, 0.8f, 1.2f, 0, 0, 0);
+		fz_append_string(ctx, buf, "Q\n");
+
+		ap = pdf_new_xobject(ctx, annot->page->doc, bbox, matrix, res, buf);
+	}
+	fz_always(ctx)
+	{
+		pdf_drop_obj(ctx, res);
+		fz_drop_buffer(ctx, buf);
+	}
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+	return ap;
+}
+
+static pdf_obj *draw_radio_button(fz_context *ctx, pdf_annot *annot, fz_rect bbox, fz_matrix matrix, float w, float h, int yes)
+{
+	pdf_obj *ap;
+	fz_buffer *buf;
+	float b;
+
+	buf = fz_new_buffer(ctx, 1024);
+	fz_try(ctx)
+	{
+		fz_append_string(ctx, buf, "q\n");
+		if (pdf_write_MK_BG_appearance(ctx, annot, buf))
+			draw_circle_in_box(ctx, buf, "f\n", 0, 0, 0, w, h);
+		b = pdf_write_border_appearance(ctx, annot, buf);
+		if (b > 0 && pdf_write_MK_BC_appearance(ctx, annot, buf))
+			draw_circle_in_box(ctx, buf, "s\n", b, 0, 0, w, h);
+		if (yes)
+		{
+			fz_append_string(ctx, buf, "0 g\n");
+			draw_circle(ctx, buf, "f\n", (w-b*2)/4, (h-b*2)/4, w/2, h/2);
+		}
+		fz_append_string(ctx, buf, "Q\n");
+		ap = pdf_new_xobject(ctx, annot->page->doc, bbox, matrix, NULL, buf);
+	}
+	fz_always(ctx)
+		fz_drop_buffer(ctx, buf);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+	return ap;
+}
+
+static pdf_obj *draw_check_button(fz_context *ctx, pdf_annot *annot, fz_rect bbox, fz_matrix matrix, float w, float h, int yes)
+{
+	float black[3] = { 0, 0, 0 };
+	pdf_obj *ap, *res = NULL;
+	fz_buffer *buf;
+	float b;
+
+	fz_var(res);
+
+	buf = fz_new_buffer(ctx, 1024);
+	fz_try(ctx)
+	{
+		fz_append_string(ctx, buf, "q\n");
+		if (pdf_write_MK_BG_appearance(ctx, annot, buf))
+			fz_append_printf(ctx, buf, "0 0 %g %g re\nf\n", w, h);
+		b = pdf_write_border_appearance(ctx, annot, buf);
+		if (b > 0 && pdf_write_MK_BC_appearance(ctx, annot, buf))
+			fz_append_printf(ctx, buf, "%g %g %g %g re\nS\n", b/2, b/2, w-b, h-b);
+		if (yes)
+			write_variable_text(ctx, annot, buf, &res, "3", "ZaDb", h, black, 0, w, h, b+h/10, 0.8f, 1.2f, 0, 0, 0);
+		fz_append_string(ctx, buf, "Q\n");
+		ap = pdf_new_xobject(ctx, annot->page->doc, bbox, matrix, res, buf);
+	}
+	fz_always(ctx)
+	{
+		pdf_drop_obj(ctx, res);
+		fz_drop_buffer(ctx, buf);
+	}
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+	return ap;
+}
+
+static void pdf_update_button_appearance(fz_context *ctx, pdf_annot *annot)
+{
+	int ff = pdf_field_flags(ctx, annot->obj);
+	fz_rect rect = pdf_dict_get_rect(ctx, annot->obj, PDF_NAME(Rect));
+	fz_matrix matrix;
+	fz_rect bbox;
+	float w, h, t;
+	int r;
+
+	r = pdf_dict_get_int(ctx, pdf_dict_get(ctx, annot->obj, PDF_NAME(MK)), PDF_NAME(R));
+	w = rect.x1 - rect.x0;
+	h = rect.y1 - rect.y0;
+	r = r % 360;
+	if (r == 90 || r == 270)
+		t = h, h = w, w = t;
+	matrix = fz_rotate(r);
+	bbox = fz_make_rect(0, 0, w, h);
+
+
+	if (ff & PDF_BTN_FIELD_IS_PUSHBUTTON)
+	{
+		pdf_obj *ap_n = NULL;
+		pdf_obj *ap_d = NULL;
+		fz_var(ap_n);
+		fz_var(ap_d);
+		fz_try(ctx)
+		{
+			pdf_obj *ap, *MK, *CA, *AC;
+			const char *font;
+			const char *label;
+			float size, color[3];
+
+			pdf_annot_default_appearance(ctx, annot, &font, &size, color);
+
+			MK = pdf_dict_get(ctx, annot->obj, PDF_NAME(MK));
+			CA = pdf_dict_get(ctx, MK, PDF_NAME(CA));
+			AC = pdf_dict_get(ctx, MK, PDF_NAME(AC));
+
+			label = pdf_to_text_string(ctx, CA);
+			ap_n = draw_push_button(ctx, annot, bbox, matrix, w, h, label, font, size, color, 0);
+
+			label = pdf_to_text_string(ctx, AC ? AC : CA);
+			ap_d = draw_push_button(ctx, annot, bbox, matrix, w, h, label, font, size, color, 1);
+
+			ap = pdf_dict_put_dict(ctx, annot->obj, PDF_NAME(AP), 2);
+			pdf_dict_put(ctx, ap, PDF_NAME(N), ap_n);
+			pdf_dict_put(ctx, ap, PDF_NAME(D), ap_d);
+
+			pdf_drop_obj(ctx, annot->ap);
+			if (annot->is_hot && annot->is_active)
+				annot->ap = pdf_keep_obj(ctx, ap_d);
+			else
+				annot->ap = pdf_keep_obj(ctx, ap_n);
+			annot->has_new_ap = 1;
+		}
+		fz_always(ctx)
+		{
+			pdf_drop_obj(ctx, ap_n);
+			pdf_drop_obj(ctx, ap_d);
+		}
+		fz_catch(ctx)
+			fz_rethrow(ctx);
+	}
+	else
+	{
+		pdf_obj *as_yes = NULL;
+		pdf_obj *ap_off = NULL;
+		pdf_obj *ap_yes = NULL;
+		fz_var(ap_off);
+		fz_var(ap_yes);
+		fz_var(as_yes);
+		fz_try(ctx)
+		{
+			pdf_obj *ap, *ap_n, *as;
+
+			if (w > h) w = h;
+			if (h > w) h = w;
+
+			if (ff & PDF_BTN_FIELD_IS_RADIO)
+			{
+				ap_off = draw_radio_button(ctx, annot, bbox, matrix, w, h, 0);
+				ap_yes = draw_radio_button(ctx, annot, bbox, matrix, w, h, 1);
+			}
+			else
+			{
+				ap_off = draw_check_button(ctx, annot, bbox, matrix, w, h, 0);
+				ap_yes = draw_check_button(ctx, annot, bbox, matrix, w, h, 1);
+			}
+
+			as = pdf_dict_get(ctx, annot->obj, PDF_NAME(AS));
+			if (!as)
+			{
+				pdf_dict_put(ctx, annot->obj, PDF_NAME(AS), PDF_NAME(Off));
+				as = PDF_NAME(Off);
+			}
+
+			if (as == PDF_NAME(Off))
+				as_yes = pdf_keep_obj(ctx, pdf_button_field_on_state(ctx, annot->obj));
+			else
+				as_yes = pdf_keep_obj(ctx, as);
+
+			ap = pdf_dict_put_dict(ctx, annot->obj, PDF_NAME(AP), 2);
+			ap_n = pdf_dict_put_dict(ctx, ap, PDF_NAME(N), 2);
+			pdf_dict_put(ctx, ap_n, PDF_NAME(Off), ap_off);
+			pdf_dict_put(ctx, ap_n, as_yes, ap_yes);
+
+			pdf_drop_obj(ctx, annot->ap);
+			if (as == PDF_NAME(Off))
+				annot->ap = pdf_keep_obj(ctx, ap_off);
+			else
+				annot->ap = pdf_keep_obj(ctx, ap_yes);
+			annot->has_new_ap = 1;
+		}
+		fz_always(ctx)
+		{
+			pdf_drop_obj(ctx, as_yes);
+			pdf_drop_obj(ctx, ap_yes);
+			pdf_drop_obj(ctx, ap_off);
+		}
+		fz_catch(ctx)
+		{
+			fz_rethrow(ctx);
+		}
 	}
 }
 
@@ -1213,8 +1843,6 @@ void pdf_update_signature_appearance(fz_context *ctx, pdf_annot *annot, const ch
 	fz_rect rect;
 	float w, h, size, name_w;
 
-	rect = pdf_dict_get_rect(ctx, annot->obj, PDF_NAME(Rect));
-
 	fz_var(helv);
 	fz_var(zadb);
 	fz_var(res);
@@ -1222,60 +1850,70 @@ void pdf_update_signature_appearance(fz_context *ctx, pdf_annot *annot, const ch
 	buf = fz_new_buffer(ctx, 1024);
 	fz_try(ctx)
 	{
-		helv = fz_new_base14_font(ctx, "Helvetica");
-		zadb = fz_new_base14_font(ctx, "ZapfDingbats");
-
-		res = pdf_new_dict(ctx, annot->page->doc, 1);
-		res_font = pdf_dict_put_dict(ctx, res, PDF_NAME(Font), 1);
-		pdf_dict_put_drop(ctx, res_font, PDF_NAME(Helv), pdf_add_simple_font(ctx, annot->page->doc, helv, 0));
-		pdf_dict_put_drop(ctx, res_font, PDF_NAME(ZaDb), pdf_add_simple_font(ctx, annot->page->doc, zadb, 0));
-
-		w = (rect.x1 - rect.x0) / 2;
-		h = (rect.y1 - rect.y0);
-
-		/* Use flower symbol from ZapfDingbats as sigil */
-		fz_append_printf(ctx, buf, "q 1 0.8 0.8 rg BT /ZaDb %g Tf %g %g Td (`) Tj ET Q\n",
-			h*1.1f,
-			rect.x0 + w - (h*0.4f),
-			rect.y0 + h*0.1f);
-
-		/* Name */
-		name_w = measure_simple_string(ctx, helv, name);
-		size = fz_min(fz_min((w - 4) / name_w, h), 24);
-		fz_append_string(ctx, buf, "BT\n");
-		fz_append_printf(ctx, buf, "/Helv %g Tf\n", size);
-		fz_append_printf(ctx, buf, "%g %g Td\n", rect.x0+2, rect.y1 - size*0.8f - (h-size)/2);
-		write_simple_string(ctx, buf, name, name + strlen(name));
-		fz_append_string(ctx, buf, " Tj\n");
-		fz_append_string(ctx, buf, "ET\n");
-
-		/* Information text */
-		size = fz_min(fz_min((w / 12), h / 6), 16);
-		fz_append_string(ctx, buf, "BT\n");
-		fz_append_printf(ctx, buf, "/Helv %g Tf\n", size);
-		fz_append_printf(ctx, buf, "%g TL\n", size);
-		fz_append_printf(ctx, buf, "%g %g Td\n", rect.x0+w+2, rect.y1);
-		fz_snprintf(tmp, sizeof tmp, "Digitally signed by %s", name);
-		write_simple_string_with_quadding(ctx, buf, helv, size, tmp, w-4, 0);
-		fz_snprintf(tmp, sizeof tmp, "DN: %s", dn);
-		write_simple_string_with_quadding(ctx, buf, helv, size, tmp, w-4, 0);
-		if (date)
+		if (name && dn)
 		{
-			fz_snprintf(tmp, sizeof tmp, "Date: %s", date);
+			helv = fz_new_base14_font(ctx, "Helvetica");
+			zadb = fz_new_base14_font(ctx, "ZapfDingbats");
+
+			res = pdf_new_dict(ctx, annot->page->doc, 1);
+			res_font = pdf_dict_put_dict(ctx, res, PDF_NAME(Font), 1);
+			pdf_dict_put_drop(ctx, res_font, PDF_NAME(Helv), pdf_add_simple_font(ctx, annot->page->doc, helv, 0));
+			pdf_dict_put_drop(ctx, res_font, PDF_NAME(ZaDb), pdf_add_simple_font(ctx, annot->page->doc, zadb, 0));
+
+			rect = pdf_dict_get_rect(ctx, annot->obj, PDF_NAME(Rect));
+			w = (rect.x1 - rect.x0) / 2;
+			h = (rect.y1 - rect.y0);
+
+			/* Use flower symbol from ZapfDingbats as sigil */
+			fz_append_printf(ctx, buf, "q 1 0.8 0.8 rg BT /ZaDb %g Tf %g %g Td (`) Tj ET Q\n",
+					h*1.1f,
+					rect.x0 + w - (h*0.4f),
+					rect.y0 + h*0.1f);
+
+			/* Name */
+			name_w = measure_simple_string(ctx, helv, name);
+			size = fz_min(fz_min((w - 4) / name_w, h), 24);
+			fz_append_string(ctx, buf, "BT\n");
+			fz_append_printf(ctx, buf, "/Helv %g Tf\n", size);
+			fz_append_printf(ctx, buf, "%g %g Td\n", rect.x0+2, rect.y1 - size*0.8f - (h-size)/2);
+			write_simple_string(ctx, buf, name, name + strlen(name));
+			fz_append_string(ctx, buf, " Tj\n");
+			fz_append_string(ctx, buf, "ET\n");
+
+			/* Information text */
+			size = fz_min(fz_min((w / 12), h / 6), 16);
+			fz_append_string(ctx, buf, "BT\n");
+			fz_append_printf(ctx, buf, "/Helv %g Tf\n", size);
+			fz_append_printf(ctx, buf, "%g TL\n", size);
+			fz_append_printf(ctx, buf, "%g %g Td\n", rect.x0+w+2, rect.y1);
+			fz_snprintf(tmp, sizeof tmp, "Digitally signed by %s", name);
 			write_simple_string_with_quadding(ctx, buf, helv, size, tmp, w-4, 0);
+			fz_snprintf(tmp, sizeof tmp, "DN: %s", dn);
+			write_simple_string_with_quadding(ctx, buf, helv, size, tmp, w-4, 0);
+			if (date)
+			{
+				fz_snprintf(tmp, sizeof tmp, "Date: %s", date);
+				write_simple_string_with_quadding(ctx, buf, helv, size, tmp, w-4, 0);
+			}
+			fz_append_string(ctx, buf, "ET\n");
 		}
-		fz_append_string(ctx, buf, "ET\n");
+		else
+		{
+			rect.x0 = rect.y0 = 0;
+			rect.x1 = rect.y1 = 100;
+			res = pdf_new_dict(ctx, annot->page->doc, 0);
+			fz_append_string(ctx, buf, "% DSBlank\n");
+		}
 
 		/* Update the AP/N stream */
 		ap = pdf_dict_get(ctx, annot->obj, PDF_NAME(AP));
 		if (!ap)
 			ap = pdf_dict_put_dict(ctx, annot->obj, PDF_NAME(AP), 1);
 		new_ap_n = pdf_new_xobject(ctx, annot->page->doc, rect, fz_identity, res, buf);
-		pdf_dict_put(ctx, ap, PDF_NAME(N), new_ap_n);
-
 		pdf_drop_obj(ctx, annot->ap);
 		annot->ap = new_ap_n;
 		annot->has_new_ap = 1;
+		pdf_dict_put(ctx, ap, PDF_NAME(N), new_ap_n);
 	}
 	fz_always(ctx)
 	{
@@ -1290,6 +1928,9 @@ void pdf_update_signature_appearance(fz_context *ctx, pdf_annot *annot, const ch
 	}
 }
 
+/*
+	Recreate the appearance stream for an annotation, if necessary.
+*/
 void pdf_update_appearance(fz_context *ctx, pdf_annot *annot)
 {
 	pdf_obj *subtype;
@@ -1301,12 +1942,22 @@ void pdf_update_appearance(fz_context *ctx, pdf_annot *annot)
 	if (subtype == PDF_NAME(Link))
 		return;
 
+	/* Check if the field is dirtied by JS events */
+	if (pdf_obj_is_dirty(ctx, annot->obj))
+		annot->needs_new_ap = 1;
+
+	/* Check if the current appearance has been swapped */
 	as = pdf_dict_get(ctx, annot->obj, PDF_NAME(AS));
 	ap = pdf_dict_get(ctx, annot->obj, PDF_NAME(AP));
 	ap_n = pdf_dict_get(ctx, ap, PDF_NAME(N));
+	if (annot->is_hot && annot->is_active && subtype == PDF_NAME(Widget))
+	{
+		pdf_obj *ap_d = pdf_dict_get(ctx, ap, PDF_NAME(D));
+		if (ap_d)
+			ap_n = ap_d;
+	}
 	if (!pdf_is_stream(ctx, ap_n))
 		ap_n = pdf_dict_get(ctx, ap_n, as);
-
 	if (annot->ap != ap_n)
 	{
 		pdf_drop_obj(ctx, annot->ap);
@@ -1328,10 +1979,16 @@ void pdf_update_appearance(fz_context *ctx, pdf_annot *annot)
 
 		annot->needs_new_ap = 0;
 
-		/* Ignore Btn widgets */
+		/* Special case for Btn widgets that need multiple appearance streams. */
 		if (pdf_name_eq(ctx, pdf_dict_get(ctx, annot->obj, PDF_NAME(Subtype)), PDF_NAME(Widget)))
+		{
 			if (pdf_name_eq(ctx, pdf_dict_get_inheritable(ctx, annot->obj, PDF_NAME(FT)), PDF_NAME(Btn)))
+			{
+				pdf_update_button_appearance(ctx, annot);
+				pdf_clean_obj(ctx, annot->obj);
 				return;
+			}
+		}
 
 		buf = fz_new_buffer(ctx, 1024);
 		fz_try(ctx)
@@ -1372,51 +2029,32 @@ void pdf_update_appearance(fz_context *ctx, pdf_annot *annot)
 			fz_warn(ctx, "cannot create appearance stream");
 		}
 	}
+
+	pdf_clean_obj(ctx, annot->obj);
 }
 
+/*
+	Regenerate any appearance streams that are out of date and check for
+	cases where a different appearance stream should be selected because of
+	state changes.
+
+	Note that a call to pdf_pass_event for one page may lead to changes on
+	any other, so an app should call pdf_update_annot for every annotation
+	it currently displays. Also it is important that the pdf_annot object
+	is the one used to last render the annotation. If instead the app were
+	to drop the page or annotations and reload them then a call to
+	pdf_update_annot would not reliably be able to report all changed
+	annotations.
+
+	Returns true if the annotation appearance has changed since the last time
+	pdf_update_annot was called or the annotation was first loaded.
+*/
 int
 pdf_update_annot(fz_context *ctx, pdf_annot *annot)
 {
-	pdf_document *doc = annot->page->doc;
-	pdf_obj *obj, *ap, *as, *n;
-	int changed = 0;
-
-	/* TODO: handle form field updates without using the annot pdf_obj dirty flag */
-	obj = annot->obj;
-	if (pdf_obj_is_dirty(ctx, obj))
-	{
-		pdf_clean_obj(ctx, obj);
-		annot->needs_new_ap = 1;
-	}
+	int changed;
 
 	pdf_update_appearance(ctx, annot);
-
-	ap = pdf_dict_get(ctx, obj, PDF_NAME(AP));
-	as = pdf_dict_get(ctx, obj, PDF_NAME(AS));
-
-	if (pdf_is_dict(ctx, ap))
-	{
-		pdf_hotspot *hp = &doc->hotspot;
-
-		n = NULL;
-		if (hp->num == pdf_to_num(ctx, obj) && (hp->state & HOTSPOT_POINTER_DOWN))
-			n = pdf_dict_get(ctx, ap, PDF_NAME(D)); /* down state */
-		if (n == NULL)
-			n = pdf_dict_get(ctx, ap, PDF_NAME(N)); /* normal state */
-
-		/* lookup current state in sub-dictionary */
-		if (!pdf_is_stream(ctx, n))
-			n = pdf_dict_get(ctx, n, as);
-
-		if (annot->ap != n)
-		{
-			pdf_drop_obj(ctx, annot->ap);
-			annot->ap = NULL;
-			if (pdf_is_stream(ctx, n))
-				annot->ap = pdf_keep_obj(ctx, n);
-			annot->has_new_ap = 1;
-		}
-	}
 
 	changed = annot->has_new_ap;
 	annot->has_new_ap = 0;

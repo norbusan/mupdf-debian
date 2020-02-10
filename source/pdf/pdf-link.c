@@ -42,11 +42,11 @@ resolve_dest(fz_context *ctx, pdf_document *doc, pdf_obj *dest)
 char *
 pdf_parse_link_dest(fz_context *ctx, pdf_document *doc, pdf_obj *dest)
 {
-	pdf_obj *obj;
-	char buf[256];
+	pdf_obj *obj, *pageobj;
+	fz_rect mediabox;
+	fz_matrix pagectm;
 	const char *ld;
-	int page;
-	int x, y;
+	int page, x, y, h;
 
 	dest = resolve_dest(ctx, doc, dest);
 	if (dest == NULL)
@@ -66,54 +66,70 @@ pdf_parse_link_dest(fz_context *ctx, pdf_document *doc, pdf_obj *dest)
 		return fz_strdup(ctx, ld);
 	}
 
-	obj = pdf_array_get(ctx, dest, 0);
-	if (pdf_is_int(ctx, obj))
-		page = pdf_to_int(ctx, obj);
+	pageobj = pdf_array_get(ctx, dest, 0);
+	if (pdf_is_int(ctx, pageobj))
+	{
+		page = pdf_to_int(ctx, pageobj);
+		pageobj = pdf_lookup_page_obj(ctx, doc, page);
+	}
 	else
 	{
 		fz_try(ctx)
-			page = pdf_lookup_page_number(ctx, doc, obj);
+			page = pdf_lookup_page_number(ctx, doc, pageobj);
 		fz_catch(ctx)
 			page = -1;
 	}
 
-	x = y = 0;
+	if (page < 0)
+		return NULL;
+
 	obj = pdf_array_get(ctx, dest, 1);
-	if (pdf_name_eq(ctx, obj, PDF_NAME(XYZ)))
+	if (obj)
 	{
-		x = pdf_array_get_int(ctx, dest, 2);
-		y = pdf_array_get_int(ctx, dest, 3);
-	}
-	else if (pdf_name_eq(ctx, obj, PDF_NAME(FitR)))
-	{
-		x = pdf_array_get_int(ctx, dest, 2);
-		y = pdf_array_get_int(ctx, dest, 5);
-	}
-	else if (pdf_name_eq(ctx, obj, PDF_NAME(FitH)) || pdf_name_eq(ctx, obj, PDF_NAME(FitBH)))
-		y = pdf_array_get_int(ctx, dest, 2);
-	else if (pdf_name_eq(ctx, obj, PDF_NAME(FitV)) || pdf_name_eq(ctx, obj, PDF_NAME(FitBV)))
-		x = pdf_array_get_int(ctx, dest, 2);
+		/* Link coords use a coordinate space that does not seem to respect Rotate or UserUnit. */
+		/* All we need to do is figure out the page height to flip the coordinate space. */
+		pdf_page_obj_transform(ctx, pageobj, &mediabox, &pagectm);
+		mediabox = fz_transform_rect(mediabox, pagectm);
+		h = mediabox.y1 - mediabox.y0;
 
-	if (page >= 0)
-	{
-		if (x != 0 || y != 0)
-			fz_snprintf(buf, sizeof buf, "#%d,%d,%d", page + 1, x, y);
+		if (pdf_name_eq(ctx, obj, PDF_NAME(XYZ)))
+		{
+			x = pdf_array_get_int(ctx, dest, 2);
+			y = h - pdf_array_get_int(ctx, dest, 3);
+		}
+		else if (pdf_name_eq(ctx, obj, PDF_NAME(FitR)))
+		{
+			x = pdf_array_get_int(ctx, dest, 2);
+			y = h - pdf_array_get_int(ctx, dest, 5);
+		}
+		else if (pdf_name_eq(ctx, obj, PDF_NAME(FitH)) || pdf_name_eq(ctx, obj, PDF_NAME(FitBH)))
+		{
+			x = 0;
+			y = h - pdf_array_get_int(ctx, dest, 2);
+		}
+		else if (pdf_name_eq(ctx, obj, PDF_NAME(FitV)) || pdf_name_eq(ctx, obj, PDF_NAME(FitBV)))
+		{
+			x = pdf_array_get_int(ctx, dest, 2);
+			y = 0;
+		}
 		else
-			fz_snprintf(buf, sizeof buf, "#%d", page + 1);
-		return fz_strdup(ctx, buf);
+		{
+			x = 0;
+			y = 0;
+		}
+		return fz_asprintf(ctx, "#%d,%d,%d", page + 1, x, y);
 	}
 
-	return NULL;
+	return fz_asprintf(ctx, "#%d", page + 1);
 }
 
 char *
 pdf_parse_file_spec(fz_context *ctx, pdf_document *doc, pdf_obj *file_spec, pdf_obj *dest)
 {
-	pdf_obj *filename=NULL;
-	char *path = NULL;
-	char *uri = NULL;
-	char buf[256];
-	size_t n;
+	pdf_obj *filename = NULL;
+	const char *path;
+	char *uri;
+	char frag[256];
 
 	if (pdf_is_string(ctx, file_spec))
 		filename = file_spec;
@@ -134,40 +150,28 @@ pdf_parse_file_spec(fz_context *ctx, pdf_document *doc, pdf_obj *file_spec, pdf_
 		return NULL;
 	}
 
-	path = fz_strdup(ctx, pdf_to_text_string(ctx, filename));
+	if (pdf_is_array(ctx, dest))
+		fz_snprintf(frag, sizeof frag, "#page=%d", pdf_array_get_int(ctx, dest, 0) + 1);
+	else if (pdf_is_name(ctx, dest))
+		fz_snprintf(frag, sizeof frag, "#%s", pdf_to_name(ctx, dest));
+	else if (pdf_is_string(ctx, dest))
+		fz_snprintf(frag, sizeof frag, "#%s", pdf_to_str_buf(ctx, dest));
+	else
+		frag[0] = 0;
+
+	path = pdf_to_text_string(ctx, filename);
+	uri = NULL;
 #ifdef _WIN32
 	if (!pdf_name_eq(ctx, pdf_dict_get(ctx, file_spec, PDF_NAME(FS)), PDF_NAME(URL)))
 	{
-		/* move the file name into the expected place and use the expected path separator */
-		char *c;
+		/* Fix up the drive letter (change "/C/Documents/Foo" to "C:/Documents/Foo") */
 		if (path[0] == '/' && (('A' <= path[1] && path[1] <= 'Z') || ('a' <= path[1] && path[1] <= 'z')) && path[2] == '/')
-		{
-			path[0] = path[1];
-			path[1] = ':';
-		}
-		for (c = path; *c; c++)
-		{
-			if (*c == '/')
-				*c = '\\';
-		}
+			uri = fz_asprintf(ctx, "file://%c:%s%s", path[1], path+2, frag);
 	}
 #endif
+	if (!uri)
+		uri = fz_asprintf(ctx, "file://%s%s", path, frag);
 
-	if (pdf_is_array(ctx, dest))
-		fz_snprintf(buf, sizeof buf, "#page=%d", pdf_array_get_int(ctx, dest, 0) + 1);
-	else if (pdf_is_name(ctx, dest))
-		fz_snprintf(buf, sizeof buf, "#%s", pdf_to_name(ctx, dest));
-	else if (pdf_is_string(ctx, dest))
-		fz_snprintf(buf, sizeof buf, "#%s", pdf_to_str_buf(ctx, dest));
-	else
-		buf[0] = 0;
-
-	n = 7 + strlen(path) + strlen(buf) + 1;
-	uri = fz_malloc(ctx, n);
-	fz_strlcpy(uri, "file://", n);
-	fz_strlcat(uri, path, n);
-	fz_strlcat(uri, buf, n);
-	fz_free(ctx, path);
 	return uri;
 }
 
@@ -188,11 +192,11 @@ pdf_parse_link_action(fz_context *ctx, pdf_document *doc, pdf_obj *action, int p
 	else if (pdf_name_eq(ctx, PDF_NAME(URI), obj))
 	{
 		/* URI entries are ASCII strings */
-		const char *uri = pdf_dict_get_string(ctx, action, PDF_NAME(URI), NULL);
+		const char *uri = pdf_dict_get_text_string(ctx, action, PDF_NAME(URI));
 		if (!fz_is_external_link(ctx, uri))
 		{
 			pdf_obj *uri_base_obj = pdf_dict_getp(ctx, pdf_trailer(ctx, doc), "Root/URI/Base");
-			const char *uri_base = uri_base_obj ? pdf_to_str_buf(ctx, uri_base_obj) : "file://";
+			const char *uri_base = uri_base_obj ? pdf_to_text_string(ctx, uri_base_obj) : "file://";
 			char *new_uri = fz_malloc(ctx, strlen(uri_base) + strlen(uri) + 1);
 			strcpy(new_uri, uri_base);
 			strcat(new_uri, uri);
@@ -335,18 +339,8 @@ pdf_resolve_link(fz_context *ctx, pdf_document *doc, const char *uri, float *xp,
 			const char *y = strrchr(uri, ',');
 			if (x && y)
 			{
-				pdf_obj *obj;
-				fz_matrix ctm;
-				fz_point p;
-
-				p.x = x ? fz_atoi(x + 1) : 0;
-				p.y = y ? fz_atoi(y + 1) : 0;
-				obj = pdf_lookup_page_obj(ctx, doc, page);
-				pdf_page_obj_transform(ctx, obj, NULL, &ctm);
-				p = fz_transform_point(p, ctm);
-
-				if (xp) *xp = p.x;
-				if (yp) *yp = p.y;
+				if (xp) *xp = x ? fz_atoi(x + 1) : 0;
+				if (yp) *yp = y ? fz_atoi(y + 1) : 0;
 			}
 		}
 		return page;

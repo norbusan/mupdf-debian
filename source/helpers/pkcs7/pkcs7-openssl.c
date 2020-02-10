@@ -268,7 +268,6 @@ static enum pdf_signature_error pk7_verify_sig(PKCS7 *p7, BIO *detached)
 	if (!p7bio)
 		goto exit;
 
-
 	/* We now have to 'read' from p7bio to calculate digests etc. */
 	while (BIO_read(p7bio, readbuf, sizeof(readbuf)) > 0)
 		;
@@ -303,7 +302,7 @@ static enum pdf_signature_error pk7_verify_sig(PKCS7 *p7, BIO *detached)
 			switch (err)
 			{
 			case PKCS7_R_DIGEST_FAILURE:
-				res = PDF_SIGNATURE_ERROR_DOCUMENT_CHANGED;
+				res = PDF_SIGNATURE_ERROR_DIGEST_FAILURE;
 				break;
 			default:
 				break;
@@ -313,6 +312,7 @@ static enum pdf_signature_error pk7_verify_sig(PKCS7 *p7, BIO *detached)
 	}
 
 exit:
+	BIO_free(p7bio);
 	ERR_free_strings();
 
 	return res;
@@ -402,7 +402,7 @@ static enum pdf_signature_error pk7_verify_cert(X509_STORE *cert_store, PKCS7 *p
 	}
 
 exit:
-	X509_STORE_CTX_cleanup(ctx);
+	X509_STORE_CTX_free(ctx);
 	ERR_free_strings();
 
 	return res;
@@ -427,9 +427,9 @@ enum pdf_signature_error pkcs7_openssl_check_digest(fz_context *ctx, fz_stream *
 	res = pk7_verify_sig(pk7sig, bdata);
 
 exit:
-	BIO_free(bsig);
 	BIO_free(bdata);
 	PKCS7_free(pk7sig);
+	BIO_free(bsig);
 
 	return res;
 }
@@ -442,7 +442,7 @@ enum pdf_signature_error pkcs7_openssl_check_certificate(char *sig, int sig_len)
 	BIO *bsig = NULL;
 	BIO *bcert = NULL;
 	STACK_OF(X509) *certs = NULL;
-	int res = 0;
+	int res = PDF_SIGNATURE_ERROR_UNKNOWN;
 
 	bsig = BIO_new_mem_buf(sig, sig_len);
 	pk7sig = d2i_PKCS7_bio(bsig, NULL);
@@ -476,11 +476,11 @@ enum pdf_signature_error pkcs7_openssl_check_certificate(char *sig, int sig_len)
 	res = pk7_verify_cert(st, pk7sig);
 
 exit:
-	BIO_free(bsig);
+	X509_STORE_free(st);
+	PKCS7_free(pk7cert);
 	BIO_free(bcert);
 	PKCS7_free(pk7sig);
-	PKCS7_free(pk7cert);
-	X509_STORE_free(st);
+	BIO_free(bsig);
 
 	return res;
 }
@@ -689,10 +689,11 @@ static int signer_create_digest(pdf_pkcs7_signer *signer, fz_stream *in, unsigne
 	res = 1;
 
 exit:
+	BIO_free(bp7);
+	BIO_free(bp7in);
 	PKCS7_free(p7);
 	BIO_free(bdata);
-	BIO_free(bp7in);
-	BIO_free(bp7);
+
 	return res;
 }
 
@@ -788,8 +789,8 @@ pdf_pkcs7_signer *pkcs7_openssl_read_pfx(fz_context *ctx, const char *pfile, con
 	}
 	fz_always(ctx)
 	{
-		BIO_free(pfxbio);
 		PKCS12_free(p12);
+		BIO_free(pfxbio);
 	}
 	fz_catch(ctx)
 	{
@@ -822,8 +823,8 @@ pdf_pkcs7_designated_name *pkcs7_openssl_designated_name(fz_context *ctx, char *
 	name = x509_designated_name(ctx, x509);
 
 exit:
-	BIO_free(bsig);
 	PKCS7_free(pk7sig);
+	BIO_free(bsig);
 
 	return name;
 }

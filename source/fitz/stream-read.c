@@ -4,6 +4,17 @@
 
 #define MIN_BOMB (100 << 20)
 
+/*
+	Read from a stream into a given data block.
+
+	stm: The stream to read from.
+
+	data: The data block to read into.
+
+	len: The length of the data block (in bytes).
+
+	Returns the number of bytes read. May throw exceptions.
+*/
 size_t
 fz_read(fz_context *ctx, fz_stream *stm, unsigned char *buf, size_t len)
 {
@@ -31,6 +42,15 @@ fz_read(fz_context *ctx, fz_stream *stm, unsigned char *buf, size_t len)
 
 static unsigned char skip_buf[4096];
 
+/*
+	Read from a stream discarding data.
+
+	stm: The stream to read from.
+
+	len: The number of bytes to read.
+
+	Returns the number of bytes read. May throw exceptions.
+*/
 size_t fz_skip(fz_context *ctx, fz_stream *stm, size_t len)
 {
 	size_t count, l, total = 0;
@@ -49,16 +69,40 @@ size_t fz_skip(fz_context *ctx, fz_stream *stm, size_t len)
 	return total;
 }
 
+/*
+	Read all of a stream into a buffer.
+
+	stm: The stream to read from
+
+	initial: Suggested initial size for the buffer.
+
+	Returns a buffer created from reading from the stream. May throw
+	exceptions on failure to allocate.
+*/
 fz_buffer *
 fz_read_all(fz_context *ctx, fz_stream *stm, size_t initial)
 {
 	return fz_read_best(ctx, stm, initial, NULL);
 }
 
+/*
+	Attempt to read a stream into a buffer. If truncated
+	is NULL behaves as fz_read_all, sets a truncated flag in case of
+	error.
+
+	stm: The stream to read from.
+
+	initial: Suggested initial size for the buffer.
+
+	truncated: Flag to store success/failure indication in.
+
+	Returns a buffer created from reading from the stream.
+*/
 fz_buffer *
 fz_read_best(fz_context *ctx, fz_stream *stm, size_t initial, int *truncated)
 {
 	fz_buffer *buf = NULL;
+	int check_bomb = (initial > 0);
 	size_t n;
 
 	fz_var(buf);
@@ -78,10 +122,8 @@ fz_read_best(fz_context *ctx, fz_stream *stm, size_t initial, int *truncated)
 			if (buf->len == buf->cap)
 				fz_grow_buffer(ctx, buf);
 
-			if (buf->len >= MIN_BOMB && buf->len / 200 > initial)
-			{
+			if (check_bomb && buf->len >= MIN_BOMB && buf->len / 200 > initial)
 				fz_throw(ctx, FZ_ERROR_GENERIC, "compression bomb detected");
-			}
 
 			n = fz_read(ctx, stm, buf->data + buf->len, buf->cap - buf->len);
 			if (n == 0)
@@ -111,6 +153,13 @@ fz_read_best(fz_context *ctx, fz_stream *stm, size_t initial, int *truncated)
 	return buf;
 }
 
+/*
+	Read a line from stream into the buffer until either a
+	terminating newline or EOF, which it replaces with a null byte ('\0').
+
+	Returns buf on success, and NULL when end of file occurs while no characters
+	have been read.
+*/
 char *
 fz_read_line(fz_context *ctx, fz_stream *stm, char *mem, size_t n)
 {
@@ -137,12 +186,24 @@ fz_read_line(fz_context *ctx, fz_stream *stm, char *mem, size_t n)
 	return (s == mem && c == EOF) ? NULL : mem;
 }
 
+/*
+	return the current reading position within a stream
+*/
 int64_t
 fz_tell(fz_context *ctx, fz_stream *stm)
 {
 	return stm->pos - (stm->wp - stm->rp);
 }
 
+/*
+	Seek within a stream.
+
+	stm: The stream to seek within.
+
+	offset: The offset to seek to.
+
+	whence: From where the offset is measured (see fseek).
+*/
 void
 fz_seek(fz_context *ctx, fz_stream *stm, int64_t offset, int whence)
 {
@@ -177,13 +238,9 @@ fz_seek(fz_context *ctx, fz_stream *stm, int64_t offset, int whence)
 		fz_warn(ctx, "cannot seek");
 }
 
-int fz_stream_meta(fz_context *ctx, fz_stream *stm, int key, int size, void *ptr)
-{
-	if (!stm || !stm->meta)
-		return -1;
-	return stm->meta(ctx, stm, key, size, ptr);
-}
-
+/*
+	Read all the contents of a file into a buffer.
+*/
 fz_buffer *
 fz_read_file(fz_context *ctx, const char *filename)
 {
@@ -209,6 +266,14 @@ fz_read_file(fz_context *ctx, const char *filename)
 	return buf;
 }
 
+/*
+	fz_read_[u]int(16|24|32|64)(_le)?
+
+	Read a 16/32/64 bit signed/unsigned integer from stream,
+	in big or little-endian byte orders.
+
+	Throws an exception if EOF is encountered.
+*/
 uint16_t fz_read_uint16(fz_context *ctx, fz_stream *stm)
 {
 	uint32_t a = fz_read_byte(ctx, stm);
@@ -315,6 +380,12 @@ int16_t fz_read_int16_le(fz_context *ctx, fz_stream *stm) { return (int16_t)fz_r
 int32_t fz_read_int32_le(fz_context *ctx, fz_stream *stm) { return (int32_t)fz_read_uint32_le(ctx, stm); }
 int64_t fz_read_int64_le(fz_context *ctx, fz_stream *stm) { return (int64_t)fz_read_uint64_le(ctx, stm); }
 
+/*
+	Read a null terminated string from the stream into
+	a buffer of a given length. The buffer will be null terminated.
+	Throws on failure (including the failure to fit the entire string
+	including the terminator into the buffer).
+*/
 void fz_read_string(fz_context *ctx, fz_stream *stm, char *buffer, int len)
 {
 	int c;

@@ -216,7 +216,7 @@ static void fz_postindex_edgebuffer(fz_context *ctx, fz_rasterizer *r)
 
 	if (eb->table_cap < total)
 	{
-		eb->table = fz_resize_array(ctx, eb->table, total, sizeof(int));
+		eb->table = fz_realloc_array(ctx, eb->table, total, int);
 		eb->table_cap = total;
 	}
 
@@ -236,7 +236,7 @@ static int fz_reset_edgebuffer(fz_context *ctx, fz_rasterizer *r)
 
 	if (eb->index_cap < height)
 	{
-		eb->index = fz_resize_array(ctx, eb->index, height, sizeof(int));
+		eb->index = fz_realloc_array(ctx, eb->index, height, int);
 		eb->index_cap = height;
 	}
 	memset(eb->index, 0, sizeof(int) * height);
@@ -1435,7 +1435,6 @@ static void mark_line_app(fz_context *ctx, fz_edgebuffer *eb, fixed sx, fixed sy
 		t = sy, sy = ey, ey = t;
 	}
 	do_mark_line_app(ctx, eb, sx, sy, ex, ey, rev);
-
 }
 
 static void fz_insert_edgebuffer_app(fz_context *ctx, fz_rasterizer *ras, float fsx, float fsy, float fex, float fey, int rev)
@@ -1879,17 +1878,7 @@ fz_rasterizer *
 fz_new_edgebuffer(fz_context *ctx, fz_edgebuffer_rule rule)
 {
 	fz_edgebuffer *eb;
-
 	eb = fz_new_derived_rasterizer(ctx, fz_edgebuffer, rule == FZ_EDGEBUFFER_ANY_PART_OF_PIXEL ? &edgebuffer_app : &edgebuffer_cop);
-	fz_try(ctx)
-	{
-		eb->app = rule == FZ_EDGEBUFFER_ANY_PART_OF_PIXEL;
-	}
-	fz_catch(ctx)
-	{
-		fz_free(ctx, eb);
-		fz_rethrow(ctx);
-	}
-
+	eb->app = rule == FZ_EDGEBUFFER_ANY_PART_OF_PIXEL;
 	return &eb->super;
 }

@@ -529,7 +529,7 @@ ptrdiff_t pdf_lexbuf_grow(fz_context *ctx, pdf_lexbuf *lb)
 	}
 	else
 	{
-		lb->scratch = fz_resize_array(ctx, lb->scratch, newsize, 1);
+		lb->scratch = fz_realloc(ctx, lb->scratch, newsize);
 	}
 	lb->size = newsize;
 	return lb->scratch - old;
@@ -645,6 +645,9 @@ pdf_lex_no_string(fz_context *ctx, fz_stream *f, pdf_lexbuf *buf)
 	}
 }
 
+/*
+	print a lexed token to a buffer, growing if necessary
+*/
 void pdf_append_token(fz_context *ctx, fz_buffer *fzbuf, int tok, pdf_lexbuf *buf)
 {
 	switch (tok)

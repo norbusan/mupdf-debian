@@ -1,10 +1,6 @@
 #ifndef MUPDF_PDF_PARSE_H
 #define MUPDF_PDF_PARSE_H
 
-/*
- * tokenizer and low-level object parser
- */
-
 typedef enum
 {
 	PDF_TOK_ERROR, PDF_TOK_EOF,
@@ -31,9 +27,6 @@ pdf_obj *pdf_parse_dict(fz_context *ctx, pdf_document *doc, fz_stream *f, pdf_le
 pdf_obj *pdf_parse_stm_obj(fz_context *ctx, pdf_document *doc, fz_stream *f, pdf_lexbuf *buf);
 pdf_obj *pdf_parse_ind_obj(fz_context *ctx, pdf_document *doc, fz_stream *f, pdf_lexbuf *buf, int *num, int *gen, int64_t *stm_ofs, int *try_repair);
 
-/*
-	pdf_append_token: print a lexed token to a buffer, growing if necessary
-*/
 void pdf_append_token(fz_context *ctx, fz_buffer *buf, int tok, pdf_lexbuf *lex);
 
 #endif

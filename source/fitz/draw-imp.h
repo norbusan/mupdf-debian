@@ -54,7 +54,6 @@ static inline int fz_idiv_up(int a, int b)
 #define fz_rasterizer_aa_bits(ras) 4
 #define fz_rasterizer_aa_text_bits(ras) 4
 
-
 #elif AA_BITS > 0
 #define AA_SCALE(s, x) ((x * 255) >> 2)
 #define fz_aa_hscale 2
@@ -81,11 +80,11 @@ static inline int fz_idiv_up(int a, int b)
 #else
 
 #define AA_SCALE(scale, x) ((x * scale) >> 8)
-#define fz_aa_hscale (ctx->aa->hscale)
-#define fz_aa_vscale (ctx->aa->vscale)
-#define fz_aa_scale (ctx->aa->scale)
-#define fz_aa_bits (ctx->aa->bits)
-#define fz_aa_text_bits (ctx->aa->text_bits)
+#define fz_aa_hscale (ctx->aa.hscale)
+#define fz_aa_vscale (ctx->aa.vscale)
+#define fz_aa_scale (ctx->aa.scale)
+#define fz_aa_bits (ctx->aa.bits)
+#define fz_aa_text_bits (ctx->aa.text_bits)
 #define fz_rasterizer_aa_hscale(ras) ((ras)->aa.hscale)
 #define fz_rasterizer_aa_vscale(ras) ((ras)->aa.vscale)
 #define fz_rasterizer_aa_scale(ras) ((ras)->aa.scale)
@@ -100,17 +99,6 @@ static inline int fz_idiv_up(int a, int b)
  * antialiasing is done. If it is undefined to we will leave the antialiasing
  * accuracy as a run time choice.
  */
-struct fz_aa_context_s
-{
-	int hscale;
-	int vscale;
-	int scale;
-	int bits;
-	int text_bits;
-	float min_line_width;
-};
-
-/* Overprint bitmap */
 
 struct fz_overprint_s
 {
@@ -141,10 +129,6 @@ static int inline fz_overprint_required(const fz_overprint *op)
 
 	return 0;
 }
-
-/*
- * Scan converter
- */
 
 typedef struct fz_rasterizer_s fz_rasterizer;
 
@@ -427,7 +411,6 @@ float fz_rasterizer_graphics_min_line_width(fz_rasterizer *ras);
 */
 void fz_set_rasterizer_graphics_min_line_width(fz_context *ctx, fz_aa_context *aa, float min_line_width);
 
-
 fz_rasterizer *fz_new_gel(fz_context *ctx);
 
 typedef enum
@@ -443,10 +426,6 @@ int fz_flatten_stroke_path(fz_context *ctx, fz_rasterizer *rast, const fz_path *
 
 fz_irect *fz_bound_path_accurate(fz_context *ctx, fz_irect *bbox, const fz_irect *scissor, const fz_path *path, const fz_stroke_state *stroke, fz_matrix ctm, float flatness, float linewidth);
 
-/*
- * Plotting functions.
- */
-
 typedef void (fz_solid_color_painter_t)(unsigned char * FZ_RESTRICT dp, int n, int w, const unsigned char * FZ_RESTRICT color, int da, const fz_overprint *eop);
 
 typedef void (fz_span_painter_t)(unsigned char * FZ_RESTRICT dp, int da, const unsigned char * FZ_RESTRICT sp, int sa, int n, int w, int alpha, const fz_overprint *eop);
@@ -456,8 +435,8 @@ fz_solid_color_painter_t *fz_get_solid_color_painter(int n, const unsigned char 
 fz_span_painter_t *fz_get_span_painter(int da, int sa, int n, int alpha, const fz_overprint *eop);
 fz_span_color_painter_t *fz_get_span_color_painter(int n, int da, const unsigned char *color, const fz_overprint *eop);
 
-void fz_paint_image(fz_pixmap *dst, const fz_irect *scissor, fz_pixmap *shape, fz_pixmap *group_alpha, const fz_pixmap *img, fz_matrix ctm, int alpha, int lerp_allowed, int gridfit_as_tiled, const fz_overprint *eop);
-void fz_paint_image_with_color(fz_pixmap *dst, const fz_irect *scissor, fz_pixmap *shape, fz_pixmap *group_alpha, const fz_pixmap *img, fz_matrix ctm, const unsigned char *colorbv, int lerp_allowed, int gridfit_as_tiled, const fz_overprint *eop);
+void fz_paint_image(fz_context *ctx, fz_pixmap *dst, const fz_irect *scissor, fz_pixmap *shape, fz_pixmap *group_alpha, fz_pixmap *img, fz_matrix ctm, int alpha, int lerp_allowed, int gridfit_as_tiled, const fz_overprint *eop);
+void fz_paint_image_with_color(fz_context *ctx, fz_pixmap *dst, const fz_irect *scissor, fz_pixmap *shape, fz_pixmap *group_alpha, fz_pixmap *img, fz_matrix ctm, const unsigned char *colorbv, int lerp_allowed, int gridfit_as_tiled, const fz_overprint *eop);
 
 void fz_paint_pixmap(fz_pixmap *dst, const fz_pixmap *src, int alpha);
 void fz_paint_pixmap_alpha(fz_pixmap *dst, const fz_pixmap *src, int alpha);

@@ -5,7 +5,6 @@
 #include "mupdf/fitz/context.h"
 #include "mupdf/fitz/geometry.h"
 #include "mupdf/fitz/store.h"
-#include "mupdf/fitz/colorspace.h"
 #include "mupdf/fitz/pixmap.h"
 #include "mupdf/fitz/compressed-buffer.h"
 
@@ -79,64 +78,14 @@ typedef struct fz_shade_s
 	fz_compressed_buffer *buffer;
 } fz_shade;
 
-/*
-	fz_keep_shade: Add a reference to a fz_shade.
-
-	shade: The reference to keep.
-
-	Returns shade.
-*/
 fz_shade *fz_keep_shade(fz_context *ctx, fz_shade *shade);
-
-/*
-	fz_drop_shade: Drop a reference to a fz_shade.
-
-	shade: The reference to drop. If this is the last
-	reference, shade will be destroyed.
-*/
 void fz_drop_shade(fz_context *ctx, fz_shade *shade);
 
-/*
-	fz_drop_shade_imp: Internal function to destroy a
-	shade. Only exposed for use with the fz_store.
-
-	shade: The reference to destroy.
-*/
 void fz_drop_shade_imp(fz_context *ctx, fz_storable *shade);
 
-/*
-	fz_bound_shade: Bound a given shading.
-
-	shade: The shade to bound.
-
-	ctm: The transform to apply to the shade before bounding.
-
-	r: Pointer to storage to put the bounds in.
-
-	Returns r, updated to contain the bounds for the shading.
-*/
 fz_rect fz_bound_shade(fz_context *ctx, fz_shade *shade, fz_matrix ctm);
 
-/*
-	fz_paint_shade: Render a shade to a given pixmap.
-
-	shade: The shade to paint.
-
-	override_cs: NULL, or colorspace to override the shades
-	inbuilt colorspace.
-
-	ctm: The transform to apply.
-
-	dest: The pixmap to render into.
-
-	color_params: The color rendering settings
-
-	bbox: Pointer to a bounding box to limit the rendering
-	of the shade.
-
-	op: NULL, or pointer to overprint bitmap.
-*/
-void fz_paint_shade(fz_context *ctx, fz_shade *shade, fz_colorspace *override_cs, fz_matrix ctm, fz_pixmap *dest, const fz_color_params *color_params, fz_irect bbox, const fz_overprint *eop);
+void fz_paint_shade(fz_context *ctx, fz_shade *shade, fz_colorspace *override_cs, fz_matrix ctm, fz_pixmap *dest, fz_color_params color_params, fz_irect bbox, const fz_overprint *eop);
 
 /*
  *	Handy routine for processing mesh based shades
@@ -150,7 +99,7 @@ struct fz_vertex_s
 };
 
 /*
-	fz_shade_prepare_fn: Callback function type for use with
+	Callback function type for use with
 	fz_process_shade.
 
 	arg: Opaque pointer from fz_process_shade caller.
@@ -162,7 +111,7 @@ struct fz_vertex_s
 typedef void (fz_shade_prepare_fn)(fz_context *ctx, void *arg, fz_vertex *v, const float *c);
 
 /*
-	fz_shade_process_fn: Callback function type for use with
+	Callback function type for use with
 	fz_process_shade.
 
 	arg: Opaque pointer from fz_process_shade caller.
@@ -173,28 +122,7 @@ typedef void (fz_shade_prepare_fn)(fz_context *ctx, void *arg, fz_vertex *v, con
 */
 typedef void (fz_shade_process_fn)(fz_context *ctx, void *arg, fz_vertex *av, fz_vertex *bv, fz_vertex *cv);
 
-/*
-	fz_process_shade: Process a shade, using supplied callback
-	functions. This decomposes the shading to a mesh (even ones
-	that are not natively meshes, such as linear or radial
-	shadings), and processes triangles from those meshes.
-
-	shade: The shade to process.
-
-	ctm: The transform to use
-
-	prepare: Callback function to 'prepare' each vertex.
-	This function is passed an array of floats, and populates
-	a fz_vertex structure.
-
-	process: This function is passed 3 pointers to vertex
-	structures, and actually performs the processing (typically
-	filling the area between the vertexes).
-
-	process_arg: An opaque argument passed through from caller
-	to callback functions.
-*/
-void fz_process_shade(fz_context *ctx, fz_shade *shade, fz_matrix ctm,
+void fz_process_shade(fz_context *ctx, fz_shade *shade, fz_matrix ctm, fz_rect scissor,
 			fz_shade_prepare_fn *prepare,
 			fz_shade_process_fn *process,
 			void *process_arg);

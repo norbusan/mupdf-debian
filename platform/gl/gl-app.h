@@ -111,13 +111,11 @@ const char *ui_get_clipboard(void);
 
 void ui_init_fonts(void);
 void ui_finish_fonts(void);
-float ui_measure_character(int ucs);
-void ui_begin_text(void);
-float ui_draw_character(int ucs, float x, float y);
-void ui_end_text(void);
 
-float ui_draw_string(float x, float y, const char *str);
+void ui_draw_string(float x, float y, const char *str);
 void ui_draw_string_part(float x, float y, const char *s, const char *e);
+void ui_draw_character(float x, float y, int c);
+float ui_measure_character(int ucs);
 float ui_measure_string(const char *str);
 float ui_measure_string_part(const char *s, const char *e);
 
@@ -155,12 +153,13 @@ struct list
 	fz_irect area;
 	int scroll_y;
 	int item_y;
+	int is_tree;
 };
 
 void ui_begin(void);
 void ui_end(void);
 
-int ui_mouse_inside(fz_irect *area);
+int ui_mouse_inside(fz_irect area);
 
 void ui_layout(enum side side, enum fill fill, enum anchor anchor, int padx, int pady);
 fz_irect ui_pack_layout(int slave_w, int slave_h, enum side side, enum fill fill, enum anchor anchor, int padx, int pady);
@@ -178,6 +177,7 @@ void ui_panel_end(void);
 void ui_spacer(void);
 void ui_splitter(int *x, int min, int max, enum side side);
 void ui_label(const char *fmt, ...);
+void ui_label_with_scrollbar(char *text, int width, int height, int *scroll);
 int ui_button(const char *label);
 int ui_checkbox(const char *label, int *value);
 int ui_slider(int *value, int min, int max, int width);
@@ -187,9 +187,12 @@ void ui_input_init(struct input *input, const char *text);
 int ui_input(struct input *input, int width, int height);
 void ui_scrollbar(int x0, int y0, int x1, int y1, int *value, int page_size, int max);
 
+void ui_tree_begin(struct list *list, int count, int req_w, int req_h, int is_tree);
+int ui_tree_item(struct list *list, const void *id, const char *label, int selected, int depth, int is_branch, int *is_open);
+void ui_tree_end(struct list *list);
+
 void ui_list_begin(struct list *list, int count, int req_w, int req_h);
 int ui_list_item(struct list *list, const void *id, const char *label, int selected);
-int ui_list_item_x(struct list *list, const void *id, int indent, const char *label, int selected);
 void ui_list_end(struct list *list);
 
 int ui_popup(const void *id, const char *label, int is_button, int count);
@@ -239,12 +242,17 @@ extern fz_rect page_bounds, draw_page_bounds, view_page_bounds;
 extern fz_irect view_page_area;
 extern char filename[];
 extern int showform;
+extern int showannotate;
+extern int reloadrequested;
 
+void toggle_annotate();
 void run_main_loop(void);
 void do_annotate_panel(void);
 void do_annotate_canvas(fz_irect canvas_area);
 void do_widget_panel(void);
 void do_widget_canvas(fz_irect canvas_area);
+void load_page(void);
 void render_page(void);
 void update_title(void);
 void reload(void);
+void do_save_pdf_file(void);

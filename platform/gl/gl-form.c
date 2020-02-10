@@ -10,6 +10,12 @@
 #include "mupdf/helpers/pkcs7-check.h"
 #include "mupdf/helpers/pkcs7-openssl.h"
 
+static pdf_widget *sig_widget;
+static char sig_designated_name[500];
+static enum pdf_signature_error sig_cert_error;
+static enum pdf_signature_error sig_digest_error;
+static int sig_subsequent_edits;
+
 static char cert_filename[PATH_MAX];
 static struct input cert_password;
 
@@ -22,7 +28,7 @@ static void do_sign(void)
 	fz_try(ctx)
 	{
 		signer = pkcs7_openssl_read_pfx(ctx, cert_filename, cert_password.text);
-		pdf_sign_signature(ctx, pdf, selected_annot, signer);
+		pdf_sign_signature(ctx, pdf, sig_widget, signer);
 		ui_show_warning_dialog("Signed document successfully.");
 	}
 	fz_always(ctx)
@@ -33,7 +39,21 @@ static void do_sign(void)
 	fz_catch(ctx)
 		ui_show_warning_dialog("%s", fz_caught_message(ctx));
 
-	if (pdf_update_page(ctx, selected_annot->page))
+	if (pdf_update_page(ctx, sig_widget->page))
+		render_page();
+}
+
+static void do_clear_signature(void)
+{
+	fz_try(ctx)
+	{
+		pdf_clear_signature(ctx, pdf, sig_widget);
+		ui_show_warning_dialog("Signature cleared successfully.");
+	}
+	fz_catch(ctx)
+		ui_show_warning_dialog("%s", fz_caught_message(ctx));
+
+	if (pdf_update_page(ctx, sig_widget->page))
 		render_page();
 }
 
@@ -84,13 +104,9 @@ static void cert_file_dialog(void)
 	}
 }
 
-static pdf_widget *sig_widget;
-static char sig_status[500];
-static int sig_result;
-
-static void sig_dialog(void)
+static void sig_sign_dialog(void)
 {
-	const char *label = pdf_field_label(ctx, sig_widget->page->doc, sig_widget->obj);
+	const char *label = pdf_field_label(ctx, sig_widget->obj);
 
 	ui_dialog_begin(400, (ui.gridsize+4)*3 + ui.lineheight*10);
 	{
@@ -99,10 +115,7 @@ static void sig_dialog(void)
 		ui_label("%s", label);
 		ui_spacer();
 
-		if (sig_result)
-			ui_label("Signature is valid.\n%s", sig_status);
-		else
-			ui_label("Could not verify signature:\n%s", sig_status);
+		ui_label("Would you like to sign this field?");
 
 		ui_layout(B, X, NW, 2, 2);
 		ui_panel_begin(0, ui.gridsize, 0, 0, 0);
@@ -111,12 +124,61 @@ static void sig_dialog(void)
 			if (ui_button("Cancel") || (!ui.focus && ui.key == KEY_ESCAPE))
 				ui.dialog = NULL;
 			ui_spacer();
-			if (ui_button("Sign"))
+			if (!(pdf_field_flags(ctx, sig_widget->obj) & PDF_FIELD_IS_READ_ONLY))
 			{
-				fz_strlcpy(cert_filename, filename, sizeof cert_filename);
-				ui_init_open_file(".", cert_file_filter);
-				ui.dialog = cert_file_dialog;
+				if (ui_button("Sign"))
+				{
+					fz_strlcpy(cert_filename, filename, sizeof cert_filename);
+					ui_init_open_file(".", cert_file_filter);
+					ui.dialog = cert_file_dialog;
+				}
 			}
+		}
+		ui_panel_end();
+	}
+	ui_dialog_end();
+}
+
+static void sig_verify_dialog(void)
+{
+	const char *label = pdf_field_label(ctx, sig_widget->obj);
+
+	ui_dialog_begin(400, (ui.gridsize+4)*3 + ui.lineheight*10);
+	{
+		ui_layout(T, X, NW, 2, 2);
+
+		ui_label("%s", label);
+		ui_spacer();
+
+		ui_label("Designated name: %s.", sig_designated_name);
+		ui_spacer();
+
+		if (sig_cert_error)
+			ui_label("Certificate error: %s", pdf_signature_error_description(sig_cert_error));
+		else
+			ui_label("Certificate is trusted.");
+
+		ui_spacer();
+
+		if (sig_digest_error)
+			ui_label("Digest error: %s", pdf_signature_error_description(sig_digest_error));
+		else if (sig_subsequent_edits)
+			ui_label("The signature is valid but there have been edits since signing.");
+		else
+			ui_label("The document is unchanged since signing.");
+
+		ui_layout(B, X, NW, 2, 2);
+		ui_panel_begin(0, ui.gridsize, 0, 0, 0);
+		{
+			ui_layout(L, NONE, S, 0, 0);
+			if (ui_button("Clear"))
+			{
+				ui.dialog = NULL;
+				do_clear_signature();
+			}
+			ui_layout(R, NONE, S, 0, 0);
+			if (ui_button("Close") || (!ui.focus && ui.key == KEY_ESCAPE))
+				ui.dialog = NULL;
 		}
 		ui_panel_end();
 	}
@@ -125,9 +187,25 @@ static void sig_dialog(void)
 
 static void show_sig_dialog(pdf_widget *widget)
 {
-	sig_widget = widget;
-	sig_result = pdf_check_signature(ctx, pdf, widget, sig_status, sizeof sig_status);
-	ui.dialog = sig_dialog;
+	fz_try(ctx)
+	{
+		sig_widget = widget;
+
+		if (pdf_signature_is_signed(ctx, pdf, widget->obj))
+		{
+			sig_cert_error = pdf_check_certificate(ctx, pdf, widget->obj);
+			sig_digest_error = pdf_check_digest(ctx, pdf, widget->obj);
+			sig_subsequent_edits = pdf_signature_incremental_change_since_signing(ctx, pdf, widget->obj);
+			pdf_signature_designated_name(ctx, pdf, widget->obj, sig_designated_name, sizeof(sig_designated_name));
+			ui.dialog = sig_verify_dialog;
+		}
+		else
+		{
+			ui.dialog = sig_sign_dialog;
+		}
+	}
+	fz_catch(ctx)
+		ui_show_warning_dialog("%s", fz_caught_message(ctx));
 }
 
 static pdf_widget *tx_widget;
@@ -135,8 +213,8 @@ static struct input tx_input;
 
 static void tx_dialog(void)
 {
-	int ff = pdf_get_field_flags(ctx, tx_widget->page->doc, tx_widget->obj);
-	const char *label = pdf_field_label(ctx, tx_widget->page->doc, tx_widget->obj);
+	int ff = pdf_field_flags(ctx, tx_widget->obj);
+	const char *label = pdf_field_label(ctx, tx_widget->obj);
 	int tx_h = (ff & PDF_TX_FIELD_IS_MULTILINE) ? 10 : 1;
 	int lbl_h = ui_break_lines((char*)label, NULL, 20, 394, NULL);
 	int is;
@@ -156,7 +234,7 @@ static void tx_dialog(void)
 			ui_spacer();
 			if (ui_button("Okay") || is == UI_INPUT_ACCEPT)
 			{
-				pdf_field_set_value(ctx, tx_widget->page->doc, tx_widget->obj, tx_input.text);
+				pdf_set_text_field_value(ctx, tx_widget, tx_input.text);
 				if (pdf_update_page(ctx, tx_widget->page))
 					render_page();
 				ui.dialog = NULL;
@@ -169,10 +247,7 @@ static void tx_dialog(void)
 
 void show_tx_dialog(pdf_widget *widget)
 {
-	char *value;
-	value = pdf_field_value(ctx, widget->page->doc, widget->obj);
-	ui_input_init(&tx_input, value);
-	fz_free(ctx, value);
+	ui_input_init(&tx_input, pdf_field_value(ctx, widget->obj));
 	ui.focus = &tx_input;
 	ui.dialog = tx_dialog;
 	tx_widget = widget;
@@ -182,17 +257,17 @@ static pdf_widget *ch_widget;
 static void ch_dialog(void)
 {
 	const char *label;
-	char *value;
+	const char *value;
 	const char **options;
 	int n, choice;
 	int label_h;
 
-	label = pdf_field_label(ctx, ch_widget->page->doc, ch_widget->obj);
+	label = pdf_field_label(ctx, ch_widget->obj);
 	label_h = ui_break_lines((char*)label, NULL, 20, 394, NULL);
 	n = pdf_choice_widget_options(ctx, ch_widget->page->doc, ch_widget, 0, NULL);
-	options = fz_malloc_array(ctx, n, sizeof(char*));
+	options = fz_malloc_array(ctx, n, const char *);
 	pdf_choice_widget_options(ctx, ch_widget->page->doc, ch_widget, 0, options);
-	value = pdf_field_value(ctx, ch_widget->page->doc, ch_widget->obj);
+	value = pdf_field_value(ctx, ch_widget->obj);
 
 	ui_dialog_begin(400, (ui.gridsize+4)*3 + ui.lineheight*(label_h-1));
 	{
@@ -201,7 +276,7 @@ static void ch_dialog(void)
 		ui_label("%s", label);
 		choice = ui_select("Widget/Ch", value, options, n);
 		if (choice >= 0)
-			pdf_field_set_value(ctx, ch_widget->page->doc, ch_widget->obj, options[choice]);
+			pdf_set_choice_field_value(ctx, ch_widget, options[choice]);
 
 		ui_layout(B, X, NW, 2, 2);
 		ui_panel_begin(0, ui.gridsize, 0, 0, 0);
@@ -221,63 +296,55 @@ static void ch_dialog(void)
 	}
 	ui_dialog_end();
 
-	fz_free(ctx, value);
 	fz_free(ctx, options);
 }
 
 void do_widget_canvas(fz_irect canvas_area)
 {
-	pdf_ui_event event;
 	pdf_widget *widget;
 	fz_rect bounds;
 	fz_irect area;
-	fz_point p;
 
 	if (!pdf)
 		return;
 
-	p = fz_transform_point_xy(ui.x, ui.y, view_page_inv_ctm);
-
-	if (ui.down && !ui.active)
-	{
-		event.etype = PDF_EVENT_TYPE_POINTER;
-		event.event.pointer.pt = p;
-		event.event.pointer.ptype = PDF_POINTER_DOWN;
-		if (pdf_pass_event(ctx, pdf, page, &event))
-		{
-			if (pdf->focus)
-				ui.active = &do_widget_canvas;
-			if (pdf_update_page(ctx, page))
-				render_page();
-		}
-	}
-	else if (ui.active == &do_widget_canvas && !ui.down)
-	{
-		ui.active = NULL;
-		event.etype = PDF_EVENT_TYPE_POINTER;
-		event.event.pointer.pt = p;
-		event.event.pointer.ptype = PDF_POINTER_UP;
-		if (pdf_pass_event(ctx, pdf, page, &event))
-		{
-			if (pdf_update_page(ctx, page))
-				render_page();
-		}
-	}
-
-	for (widget = pdf_first_widget(ctx, pdf, page); widget; widget = pdf_next_widget(ctx, widget))
+	for (widget = pdf_first_widget(ctx, page); widget; widget = pdf_next_widget(ctx, widget))
 	{
 		bounds = pdf_bound_widget(ctx, widget);
 		bounds = fz_transform_rect(bounds, view_page_ctm);
 		area = fz_irect_from_rect(bounds);
 
-		if (ui_mouse_inside(&canvas_area) && ui_mouse_inside(&area))
+		if (ui_mouse_inside(canvas_area) && ui_mouse_inside(area))
 		{
+			if (!widget->is_hot)
+				pdf_annot_event_enter(ctx, widget);
+			widget->is_hot = 1;
+
 			ui.hot = widget;
 			if (!ui.active && ui.down)
+			{
 				ui.active = widget;
+				pdf_annot_event_down(ctx, widget);
+				if (selected_annot != widget)
+				{
+					if (selected_annot && pdf_annot_type(ctx, selected_annot) == PDF_ANNOT_WIDGET)
+						pdf_annot_event_blur(ctx, selected_annot);
+					selected_annot = widget;
+					pdf_annot_event_focus(ctx, widget);
+				}
+			}
+		}
+		else
+		{
+			if (widget->is_hot)
+				pdf_annot_event_exit(ctx, widget);
+			widget->is_hot = 0;
 		}
 
-		if (ui.hot == widget || showform)
+		/* Set is_hot and is_active to select current appearance */
+		widget->is_active = (ui.active == widget && ui.down);
+
+		if (showform)
 		{
 			glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 			glEnable(GL_BLEND);
@@ -286,28 +353,58 @@ void do_widget_canvas(fz_irect canvas_area)
 			glDisable(GL_BLEND);
 		}
 
-		if (pdf_get_field_flags(ctx, NULL, widget->obj) & PDF_FIELD_IS_READ_ONLY)
-			continue;
-
-		if ((ui.hot == widget && ui.active == widget && !ui.down) ||
-			(pdf->focus == widget && !ui.down))
+		if (ui.active == widget || (!ui.active && ui.hot == widget))
 		{
-			switch (pdf_widget_type(ctx, widget))
+			glLineStipple(1, 0xAAAA);
+			glEnable(GL_LINE_STIPPLE);
+			glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+			glEnable(GL_BLEND);
+			glColor4f(1, 1, 1, 1);
+			glBegin(GL_LINE_LOOP);
+			glVertex2f(area.x0-0.5f, area.y0-0.5f);
+			glVertex2f(area.x1+0.5f, area.y0-0.5f);
+			glVertex2f(area.x1+0.5f, area.y1+0.5f);
+			glVertex2f(area.x0-0.5f, area.y1+0.5f);
+			glEnd();
+			glDisable(GL_BLEND);
+			glDisable(GL_LINE_STIPPLE);
+		}
+
+		if (ui.hot == widget && ui.active == widget && !ui.down)
+		{
+			pdf_annot_event_up(ctx, widget);
+
+			if (pdf_widget_type(ctx, widget) == PDF_WIDGET_TYPE_SIGNATURE)
 			{
-			case PDF_WIDGET_TYPE_TEXT:
-				show_tx_dialog(widget);
-				break;
-			case PDF_WIDGET_TYPE_LISTBOX:
-			case PDF_WIDGET_TYPE_COMBOBOX:
-				ui.dialog = ch_dialog;
-				ch_widget = widget;
-				break;
-			case PDF_WIDGET_TYPE_SIGNATURE:
 				show_sig_dialog(widget);
-				break;
 			}
-			pdf->focus = NULL;
-			pdf->focus_obj = NULL;
+			else
+			{
+				if (pdf_field_flags(ctx, widget->obj) & PDF_FIELD_IS_READ_ONLY)
+					continue;
+
+				switch (pdf_widget_type(ctx, widget))
+				{
+				default:
+					break;
+				case PDF_WIDGET_TYPE_CHECKBOX:
+				case PDF_WIDGET_TYPE_RADIOBUTTON:
+					pdf_toggle_widget(ctx, widget);
+					break;
+				case PDF_WIDGET_TYPE_TEXT:
+					show_tx_dialog(widget);
+					break;
+				case PDF_WIDGET_TYPE_COMBOBOX:
+				case PDF_WIDGET_TYPE_LISTBOX:
+					ui.dialog = ch_dialog;
+					ch_widget = widget;
+					break;
+				}
+			}
+
 		}
 	}
+
+	if (pdf_update_page(ctx, page))
+		render_page();
 }

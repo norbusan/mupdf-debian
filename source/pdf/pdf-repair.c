@@ -1,6 +1,5 @@
 #include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
-#include "pdf-imp.h"
 
 #include <string.h>
 
@@ -22,7 +21,7 @@ static void add_root(fz_context *ctx, pdf_obj *obj, pdf_obj ***roots, int *num_r
 		int new_max_roots = *max_roots * 2;
 		if (new_max_roots == 0)
 			new_max_roots = 4;
-		*roots = fz_resize_array(ctx, *roots, new_max_roots, sizeof(**roots));
+		*roots = fz_realloc_array(ctx, *roots, new_max_roots, pdf_obj*);
 		*max_roots = new_max_roots;
 	}
 	(*roots)[(*num_roots)++] = pdf_keep_obj(ctx, obj);
@@ -270,7 +269,7 @@ orphan_object(fz_context *ctx, pdf_document *doc, pdf_obj *obj)
 
 		fz_try(ctx)
 		{
-			doc->orphans = fz_resize_array(ctx, doc->orphans, new_max, sizeof(*doc->orphans));
+			doc->orphans = fz_realloc_array(ctx, doc->orphans, new_max, pdf_obj*);
 			doc->orphans_max = new_max;
 		}
 		fz_catch(ctx)
@@ -343,7 +342,7 @@ pdf_repair_xref(fz_context *ctx, pdf_document *doc)
 		pdf_xref_entry *entry;
 		listlen = 0;
 		listcap = 1024;
-		list = fz_malloc_array(ctx, listcap, sizeof(struct entry));
+		list = fz_malloc_array(ctx, listcap, struct entry);
 
 		/* look for '%PDF' version marker within first kilobyte of file */
 		n = fz_read(ctx, doc->file, (unsigned char *)buf->scratch, fz_mini(buf->size, 1024));
@@ -383,7 +382,10 @@ pdf_repair_xref(fz_context *ctx, pdf_document *doc)
 				do
 					c = fz_read_byte(ctx, doc->file);
 				while (c != EOF && !is_white(c));
-				continue;
+				if (c == EOF)
+					tok = PDF_TOK_EOF;
+				else
+					continue;
 			}
 
 			/* If we have the next token already, then we'll jump
@@ -444,7 +446,7 @@ pdf_repair_xref(fz_context *ctx, pdf_document *doc)
 				if (listlen + 1 == listcap)
 				{
 					listcap = (listcap * 3) / 2;
-					list = fz_resize_array(ctx, list, listcap, sizeof(struct entry));
+					list = fz_realloc_array(ctx, list, listcap, struct entry);
 				}
 
 				list[listlen].num = num;
@@ -465,6 +467,8 @@ pdf_repair_xref(fz_context *ctx, pdf_document *doc)
 			 * by a corrupt file. */
 			else if (tok == PDF_TOK_OPEN_DICT)
 			{
+				pdf_obj *dictobj;
+
 				fz_try(ctx)
 				{
 					dict = pdf_parse_dict(ctx, doc, doc->file, buf);
@@ -481,37 +485,35 @@ pdf_repair_xref(fz_context *ctx, pdf_document *doc)
 
 				fz_try(ctx)
 				{
-					obj = pdf_dict_get(ctx, dict, PDF_NAME(Encrypt));
-					if (obj)
+					dictobj = pdf_dict_get(ctx, dict, PDF_NAME(Encrypt));
+					if (dictobj)
 					{
 						pdf_drop_obj(ctx, encrypt);
-						encrypt = pdf_keep_obj(ctx, obj);
+						encrypt = pdf_keep_obj(ctx, dictobj);
 					}
 
-					obj = pdf_dict_get(ctx, dict, PDF_NAME(ID));
-					if (obj && (!id || !encrypt || pdf_dict_get(ctx, dict, PDF_NAME(Encrypt))))
+					dictobj = pdf_dict_get(ctx, dict, PDF_NAME(ID));
+					if (dictobj && (!id || !encrypt || pdf_dict_get(ctx, dict, PDF_NAME(Encrypt))))
 					{
 						pdf_drop_obj(ctx, id);
-						id = pdf_keep_obj(ctx, obj);
+						id = pdf_keep_obj(ctx, dictobj);
 					}
 
-					obj = pdf_dict_get(ctx, dict, PDF_NAME(Root));
-					if (obj)
-						add_root(ctx, obj, &roots, &num_roots, &max_roots);
+					dictobj = pdf_dict_get(ctx, dict, PDF_NAME(Root));
+					if (dictobj)
+						add_root(ctx, dictobj, &roots, &num_roots, &max_roots);
 
-					obj = pdf_dict_get(ctx, dict, PDF_NAME(Info));
-					if (obj)
+					dictobj = pdf_dict_get(ctx, dict, PDF_NAME(Info));
+					if (dictobj)
 					{
 						pdf_drop_obj(ctx, info);
-						info = pdf_keep_obj(ctx, obj);
+						info = pdf_keep_obj(ctx, dictobj);
 					}
 				}
 				fz_always(ctx)
 					pdf_drop_obj(ctx, dict);
 				fz_catch(ctx)
 					fz_rethrow(ctx);
-
-				obj = NULL;
 			}
 
 			else if (tok == PDF_TOK_EOF)
