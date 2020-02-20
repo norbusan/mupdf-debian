@@ -4,7 +4,6 @@ Upstream-Contact: http://mupdf.com/
 Source: http://mupdf.com/download/
 Files-Excluded: thirdparty/curl
                 thirdparty/freetype
-                thirdparty/glfw
                 thirdparty/harfbuzz
                 thirdparty/jbig2dec
                 thirdparty/libjpeg
@@ -18,6 +17,7 @@ Copyright: 2006-2014, Artifex Software, Inc.
 License: AGPL-3+
 
 Files: resources/cmaps/*
+       scripts/glyphlist.txt
 Copyright: 1990-2009, Adobe Systems Incorporated.
 License: Adobe-BSD-3-clause
  Copyright 1990-2009 Adobe Systems Incorporated.
@@ -140,11 +140,23 @@ License: public-domain
  any purpose on any machine by anyone.
 
 Files: source/fitz/ftoa.c
-       source/fitz/strtod.c
+Copyright: 2009 Florian Loitsch
+License: Expat
+
+Files: thirdparty/mujs/*
+Copyright: 2013-2017 Artifex Software, Inc.
+License: ISC
+
+Files: thirdparty/mujs/jsdtoa.c
+Copyright: 2009 Florian Loitsch
+           1988-1993 The Regents of the University of California.
+           1994 Sun Microsystems, Inc.
+License: Expat AND MIT-Old
+
+Files: thirdparty/mujs/utf.*
 Copyright: 2002 Lucent Technologies
+Comment: The authors of this software are Rob Pike and Ken Thompson.
 License: MIT/Lucent
- The authors of this software are Rob Pike and Ken Thompson.
- Copyright (c) 2002 by Lucent Technologies.
  Permission to use, copy, modify, and distribute this software for any
  purpose without fee is hereby granted, provided that this entire notice
  is included in all copies of any software which is or includes a copy
@@ -158,17 +170,6 @@ License: MIT/Lucent
 Files: source/fitz/ucdn.*
 Copyright: 2012 Grigori Goronzy <greg@kinoho.net>
 License: ISC
- Permission to use, copy, modify, and/or distribute this software for any
- purpose with or without fee is hereby granted, provided that the above
- copyright notice and this permission notice appear in all copies.
- .
- THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 Files: resources/fonts/droid/*
 Copyright: 2005-2008, The Android Open Source Project
@@ -188,24 +189,37 @@ License: Apache-2.0
  can be found in the file
  `/usr/share/common-licenses/Apache-2.0'.
 
-Files: resources/fonts/han/*.otf
+Files: resources/fonts/han/*.ttc
 Copyright: 2014, 2015 Adobe Systems Incorporated
 License: OFL-1.1
 
-Files: resources/fonts/noto/*.ttf
+Files: resources/fonts/noto/*
 Copyright: 2016 Google Inc.
 License: OFL-1.1
 
-Files: resources/fonts/sil/*.cff
+Files: resources/fonts/sil/*
 Copyright: 1997-2014, SIL International (http://scripts.sil.org/)
 License: OFL-1.1
 
-Files: resources/fonts/urw/*.cff
+Files: resources/fonts/urw/*
 Copyright: (URW)++ Design & Development
 License: OFL-1.1
 
+Files: scripts/8859-*.TXT
+       scripts/CP125*.TXT
+       scripts/KOI8-U.TXT
+Copyright: 2015, 2016 Unicode®, Inc.
+License: Unicode-DFS
+
+Files: scripts/bin2coff.c
+Copyright: 2011 Pete Batard <pete@akeo.ie>
+           2018 by Artifex Software
+License: GPL-3+
+
 Files: debian/*
 Copyright: 2010, Kan-Ru Chen <koster@debian.org>
+License: GPL-3+
+
 License: GPL-3+
  This program is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -1001,3 +1015,90 @@ License: OFL-1.1
  DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
  OTHER DEALINGS IN THE FONT SOFTWARE.
+
+License: Unicode-DFS
+ UNICODE, INC. LICENSE AGREEMENT - DATA FILES AND SOFTWARE
+ .
+ See Terms of Use for definitions of Unicode Inc.'s
+ Data Files and Software.
+ .
+ NOTICE TO USER: Carefully read the following legal agreement.
+ BY DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING UNICODE INC.'S
+ DATA FILES ("DATA FILES"), AND/OR SOFTWARE ("SOFTWARE"),
+ YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+ TERMS AND CONDITIONS OF THIS AGREEMENT.
+ IF YOU DO NOT AGREE, DO NOT DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE
+ THE DATA FILES OR SOFTWARE.
+ .
+ COPYRIGHT AND PERMISSION NOTICE
+ .
+ Copyright © 1991-2019 Unicode, Inc. All rights reserved.
+ Distributed under the Terms of Use in https://www.unicode.org/copyright.html.
+ .
+ Permission is hereby granted, free of charge, to any person obtaining
+ a copy of the Unicode data files and any associated documentation
+ (the "Data Files") or Unicode software and any associated documentation
+ (the "Software") to deal in the Data Files or Software
+ without restriction, including without limitation the rights to use,
+ copy, modify, merge, publish, distribute, and/or sell copies of
+ the Data Files or Software, and to permit persons to whom the Data Files
+ or Software are furnished to do so, provided that either
+ (a) this copyright and permission notice appear with all copies
+ of the Data Files or Software, or
+ (b) this copyright and permission notice appear in associated
+ Documentation.
+ .
+ THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF
+ ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+ WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ NONINFRINGEMENT OF THIRD PARTY RIGHTS.
+ IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS
+ NOTICE BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL
+ DAMAGES, OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ PERFORMANCE OF THE DATA FILES OR SOFTWARE.
+ .
+ Except as contained in this notice, the name of a copyright holder
+ shall not be used in advertising or otherwise to promote the sale,
+ use or other dealings in these Data Files or Software without prior
+ written authorization of the copyright holder.
+
+License: MIT-Old
+ Permission to use, copy, modify, and distribute this software and its
+ documentation for any purpose and without fee is hereby granted, provided
+ that the above copyright notice appear in all copies. The University of
+ California makes no representations about the suitability of this software
+ for any purpose. It is provided "as is" without express or implied warranty.
+
+License: Expat
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to
+ deal in the Software without restriction, including without limitation the
+ rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ sell copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+ .
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ IN THE SOFTWARE.
+
+License: ISC
+ Permission to use, copy, modify, and/or distribute this software for any
+ purpose with or without fee is hereby granted, provided that the above
+ copyright notice and this permission notice appear in all copies.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
