@@ -1,3 +1,29 @@
+mupdf (1.16.1+ds1-1) unstable; urgency=medium
+
+  [ Kan-Ru Chen ]
+  * New upstream version 1.16.1+ds1
+    Thanks to Bastian Germann (Closes: #944625)
+  * Bump debhelper compat to 12
+  * Refresh patches
+  * Build mupdf without executable stack.
+    Thanks to Christopher Wellons (Closes: #944817)
+
+  [ Bastian Germann ]
+  * Don't remove non-existing thirdparty/glfw
+  * Rebase patch queue
+  * Build-depend on liblcms2-dev
+  * Add manpages from build, not src
+  * Fix lintian: pkg-config-unavailable-for-cross-compilation
+  * Fix lintian: debian-watch-uses-insecure-uri
+  * Fix lintian: wildcard-matches-nothing-in-dep5-copyright
+  * Fix lintian: manpage-without-executable
+  * Fix lintian: wildcard-matches-nothing-in-dep5-copyright
+  * d/copyright: Match more font files
+  * d/copyright: Add missing files
+  * Build-Conflict with libssl (no license exception) (Closes: #951705)
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sun, 23 Feb 2020 21:54:53 +0900
+
 mupdf (1.15.0+ds1-1) unstable; urgency=medium
 
   * New upstream version 1.15.0+ds1
