@@ -1,4 +1,4 @@
 version=3
 opts=repacksuffix=+ds1,dversionmangle=s/\+ds\d*$//,uversionmangle=s/(\d[^_\-\.]?)[_\-\.](source?)$/$1/ \
-http://mupdf.com/downloads/ \
+https://mupdf.com/downloads/ \
 (?:.*/|.*=|)mupdf[\-\._]?([0-9.]+)-source\.(?:tar\.xz|txz|tar\.bz2|tbz2|tar\.gz|tgz|zip|7z|jar)
