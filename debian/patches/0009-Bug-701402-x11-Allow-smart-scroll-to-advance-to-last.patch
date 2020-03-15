@@ -1,0 +1,22 @@
+From: Sebastian Rasmussen <sebras@gmail.com>
+Date: Tue, 6 Aug 2019 18:09:16 +0200
+Subject: Bug 701402: x11: Allow smart scroll to advance to last page of
+ document.
+
+---
+ platform/x11/pdfapp.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/platform/x11/pdfapp.c b/platform/x11/pdfapp.c
+index 74d4f5d..ee416e0 100644
+--- a/platform/x11/pdfapp.c
++++ b/platform/x11/pdfapp.c
+@@ -1503,7 +1503,7 @@ void pdfapp_onkey(pdfapp_t *app, int c, int modifiers)
+ 		{
+ 			if (app->imgw + app->panx <= app->winw)
+ 			{
+-				if (app->pageno + 1 < app->pagecount)
++				if (app->pageno + 1 <= app->pagecount)
+ 				{
+ 					app->panx = 0;
+ 					app->pany = 0;
