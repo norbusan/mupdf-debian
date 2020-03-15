@@ -1,3 +1,11 @@
+mupdf (1.16.1+ds1-2) unstable; urgency=medium
+
+  [ Kan-Ru Chen ]
+  * Backport fix for upstream bug 701402 allow smart scroll to advance to last page
+    (Closes: #953561)
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Sun, 15 Mar 2020 17:27:43 +0900
+
 mupdf (1.16.1+ds1-1) unstable; urgency=medium
 
   [ Kan-Ru Chen ]
