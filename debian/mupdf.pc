@@ -8,5 +8,5 @@ Description: Library for rendering PDF documents
 Requires.private: freetype2
 Version: 1.15.0
 Libs: -L${libdir} -lmupdf
-Libs.private: -lmupdf-third -lopenjp2 -ljbig2dec -ljpeg -lz -lm
+Libs.private: -lmujs -lopenjp2 -ljbig2dec -ljpeg -lz -lm
 Cflags: -I${includedir}
