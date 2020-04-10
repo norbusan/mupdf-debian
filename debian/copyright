@@ -2,15 +2,7 @@ Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: mupdf
 Upstream-Contact: http://mupdf.com/
 Source: http://mupdf.com/download/
-Files-Excluded: thirdparty/curl
-                thirdparty/freetype
-                thirdparty/harfbuzz
-                thirdparty/jbig2dec
-                thirdparty/libjpeg
-                thirdparty/openjpeg
-                thirdparty/zlib
-                thirdparty/freeglut
-                thirdparty/lcms2
+Files-Excluded: thirdparty
 
 Files: *
 Copyright: 2006-2014, Artifex Software, Inc.

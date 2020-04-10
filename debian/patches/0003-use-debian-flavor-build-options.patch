@@ -5,8 +5,6 @@ Subject: use debian flavor build options
 Do not strip binaries by default and use Debian LDFLAGS
 ---
  Makerules                | 5 ++++-
- thirdparty/mujs/Makefile | 2 ++
- 2 files changed, 6 insertions(+), 1 deletion(-)
 
 diff --git a/Makerules b/Makerules
 index f688c5b..c343ec5 100644
@@ -24,16 +22,3 @@ index f688c5b..c343ec5 100644
  else ifeq ($(build),release)
    CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer
    LDFLAGS += $(LDREMOVEUNREACH) -Wl,-s
-diff --git a/thirdparty/mujs/Makefile b/thirdparty/mujs/Makefile
-index 8eaba05..0e8c47e 100644
---- a/thirdparty/mujs/Makefile
-+++ b/thirdparty/mujs/Makefile
-@@ -30,6 +30,8 @@ ifeq "$(build)" "debug"
- else ifeq "$(build)" "sanitize"
-   CFLAGS += -pipe -g -fsanitize=address -fno-omit-frame-pointer
-   LDFLAGS += -fsanitize=address
-+else ifeq "$(build)" "debian"
-+  LDFLAGS += $(XLDFLAGS)
- else
-   CFLAGS += -Os
-   LDFLAGS += -Wl,-s
