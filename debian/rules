@@ -26,6 +26,7 @@ CFLAGS += -fPIC
 
 BUILD_FLAGS = build=debian OS=Linux XCFLAGS="$(CFLAGS)" XLDFLAGS="$(LDFLAGS)" prefix=/usr
 # Force using system library
+BUILD_FLAGS += USE_SYSTEM_MUJS=yes
 BUILD_FLAGS += USE_SYSTEM_LIBS=yes
 # Force using system lcms2 (was not included in default system library set)
 BUILD_FLAGS += USE_SYSTEM_LCMS2=yes
