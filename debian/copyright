@@ -5,7 +5,7 @@ Source: http://mupdf.com/download/
 Files-Excluded: thirdparty
 
 Files: *
-Copyright: 2006-2014, Artifex Software, Inc.
+Copyright: 2006-2020, Artifex Software, Inc.
 License: AGPL-3+
 
 Files: resources/cmaps/*
