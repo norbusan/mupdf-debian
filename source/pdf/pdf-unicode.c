@@ -83,8 +83,12 @@ pdf_load_to_unicode(fz_context *ctx, pdf_document *doc, pdf_font_desc *font,
 	if (pdf_is_stream(ctx, cmapstm))
 	{
 		pdf_cmap *ucs_from_cpt = pdf_load_embedded_cmap(ctx, doc, cmapstm);
-		font->to_unicode = pdf_remap_cmap(ctx, font->encoding, ucs_from_cpt);
-		pdf_drop_cmap(ctx, ucs_from_cpt);
+		fz_try(ctx)
+			font->to_unicode = pdf_remap_cmap(ctx, font->encoding, ucs_from_cpt);
+		fz_always(ctx)
+			pdf_drop_cmap(ctx, ucs_from_cpt);
+		fz_catch(ctx)
+			fz_rethrow(ctx);
 		font->size += pdf_cmap_size(ctx, font->to_unicode);
 	}
 
@@ -106,14 +110,14 @@ pdf_load_to_unicode(fz_context *ctx, pdf_document *doc, pdf_font_desc *font,
 	{
 		/* TODO one-to-many mappings */
 
+		font->cid_to_ucs = Memento_label(fz_malloc_array(ctx, 256, unsigned short), "cid_to_ucs");
 		font->cid_to_ucs_len = 256;
-		font->cid_to_ucs = fz_malloc_array(ctx, 256, sizeof *font->cid_to_ucs);
 		font->size += 256 * sizeof *font->cid_to_ucs;
 
 		for (cpt = 0; cpt < 256; cpt++)
 		{
 			if (strings[cpt])
-				font->cid_to_ucs[cpt] = pdf_lookup_agl(strings[cpt]);
+				font->cid_to_ucs[cpt] = fz_unicode_from_glyph_name(strings[cpt]);
 			else
 				font->cid_to_ucs[cpt] = FZ_REPLACEMENT_CHARACTER;
 		}

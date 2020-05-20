@@ -1,4 +1,4 @@
-#include "fitz-imp.h"
+#include "mupdf/fitz.h"
 
 #include <string.h>
 #include <stdarg.h>
@@ -14,7 +14,7 @@ fz_new_buffer(fz_context *ctx, size_t size)
 	b->refs = 1;
 	fz_try(ctx)
 	{
-		b->data = fz_malloc(ctx, size);
+		b->data = Memento_label(fz_malloc(ctx, size), "fz_buffer_data");
 	}
 	fz_catch(ctx)
 	{
@@ -80,7 +80,7 @@ fz_buffer *
 fz_new_buffer_from_base64(fz_context *ctx, const char *data, size_t size)
 {
 	fz_buffer *buf = fz_new_buffer(ctx, size);
-	const char *end = data + size;
+	const char *end = data + (size > 0 ? size : strlen(data));
 	const char *s = data;
 	fz_try(ctx)
 	{
@@ -129,7 +129,7 @@ fz_resize_buffer(fz_context *ctx, fz_buffer *buf, size_t size)
 {
 	if (buf->shared)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot resize a buffer with shared storage");
-	buf->data = fz_resize_array(ctx, buf->data, size, 1);
+	buf->data = fz_realloc(ctx, buf->data, size);
 	buf->cap = size;
 	if (buf->len > buf->cap)
 		buf->len = buf->cap;
@@ -162,6 +162,12 @@ fz_trim_buffer(fz_context *ctx, fz_buffer *buf)
 {
 	if (buf->cap > buf->len+1)
 		fz_resize_buffer(ctx, buf, buf->len);
+}
+
+void
+fz_clear_buffer(fz_context *ctx, fz_buffer *buf)
+{
+	buf->len = 0;
 }
 
 void
@@ -209,7 +215,7 @@ fz_append_buffer(fz_context *ctx, fz_buffer *buf, fz_buffer *extra)
 {
 	if (buf->cap - buf->len < extra->len)
 	{
-		buf->data = fz_resize_array(ctx, buf->data, buf->len + extra->len, 1);
+		buf->data = fz_realloc(ctx, buf->data, buf->len + extra->len);
 		buf->cap = buf->len + extra->len;
 	}
 

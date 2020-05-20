@@ -1,5 +1,8 @@
 #include "mupdf/fitz.h"
 
+#include "image-imp.h"
+#include "pixmap-imp.h"
+
 #include <string.h>
 #include <limits.h>
 
@@ -643,7 +646,7 @@ bmp_decompress_rle4(fz_context *ctx, struct info *info, const unsigned char *p, 
 			int n = sp[0];
 			int hi = (sp[1] >> 4) & 0xF;
 			int lo = sp[1] & 0xF;
-			if (dp + n / 2 > ep) {
+			if (dp + n / 2 + (x & 1) > ep) {
 				fz_warn(ctx, "buffer overflow in bitmap data in bmp image");
 				break;
 			}
@@ -934,7 +937,11 @@ bmp_read_image(fz_context *ctx, struct info *info, const unsigned char *p, size_
 	}
 	else
 	{
-		p = bmp_read_color_table(ctx, info, p, begin + info->offset);
+		const unsigned char *color_table_end = begin + info->offset;
+		if (end - begin < info->offset)
+			color_table_end = end;
+		p = bmp_read_color_table(ctx, info, p, color_table_end);
+
 		if (p - begin < info->offset)
 			p = begin + info->offset;
 		return bmp_read_bitmap(ctx, info, p, end);

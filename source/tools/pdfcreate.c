@@ -120,7 +120,7 @@ static void add_image_res(pdf_obj *resources, char *name, char *path)
 		pdf_dict_put_drop(ctx, resources, PDF_NAME(XObject), subres);
 	}
 
-	ref = pdf_add_image(ctx, doc, image, 0);
+	ref = pdf_add_image(ctx, doc, image);
 	pdf_dict_puts(ctx, subres, name, ref);
 	pdf_drop_obj(ctx, ref);
 
@@ -216,7 +216,7 @@ static void create_page(char *input)
 
 int pdfcreate_main(int argc, char **argv)
 {
-	pdf_write_options opts = { 0 };
+	pdf_write_options opts = pdf_default_write_options;
 	char *output = "out.pdf";
 	char *flags = "compress";
 	int i, c;

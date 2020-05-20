@@ -109,16 +109,14 @@ static void fmtuint32(struct fmtbuf *out, unsigned int a, int s, int z, int w, i
 		buf[i++] = fz_hex_digits[a % base];
 		a /= base;
 	}
-	if (z == '0')
-		while (i < w - !!s)
-			buf[i++] = z;
-	if (s)
+	if (s) {
+		if (z == '0')
+			while (i < w - 1)
+				buf[i++] = z;
 		buf[i++] = s;
+	}
 	while (i < w)
 		buf[i++] = z;
-	if (z == ' ')
-		while (i < w)
-			buf[i++] = z;
 	while (i > 0)
 		fmtputc(out, buf[--i]);
 }
@@ -135,19 +133,14 @@ static void fmtuint64(struct fmtbuf *out, uint64_t a, int s, int z, int w, int b
 		buf[i++] = fz_hex_digits[a % base];
 		a /= base;
 	}
-	if (z == '0')
-		while (i < w - !!s)
-			buf[i++] = z;
-	if (s)
-	{
+	if (s) {
+		if (z == '0')
+			while (i < w - 1)
+				buf[i++] = z;
 		buf[i++] = s;
-		w += 1;
 	}
 	while (i < w)
 		buf[i++] = z;
-	if (z == ' ')
-		while (i < w)
-			buf[i++] = z;
 	while (i > 0)
 		fmtputc(out, buf[--i]);
 }
@@ -205,9 +198,18 @@ static void fmtquote(struct fmtbuf *out, const char *s, int sq, int eq)
 		default:
 			if (c < 32 || c > 127) {
 				fmtputc(out, '\\');
-				fmtputc(out, '0' + ((c >> 6) & 7));
-				fmtputc(out, '0' + ((c >> 3) & 7));
-				fmtputc(out, '0' + ((c) & 7));
+				if (sq == '(')
+				{
+					fmtputc(out, '0' + ((c >> 6) & 7));
+					fmtputc(out, '0' + ((c >> 3) & 7));
+					fmtputc(out, '0' + ((c) & 7));
+				}
+				else
+				{
+					fmtputc(out, 'x');
+					fmtputc(out, "0123456789ABCDEF"[(c>>4)&15]);
+					fmtputc(out, "0123456789ABCDEF"[(c)&15]);
+				}
 			} else {
 				if (c == sq || c == eq)
 					fmtputc(out, '\\');
@@ -223,6 +225,21 @@ static void fmtquote(struct fmtbuf *out, const char *s, int sq, int eq)
 		}
 	}
 	fmtputc(out, eq);
+}
+
+static void fmtname(struct fmtbuf *out, const char *s)
+{
+	int c;
+	fmtputc(out, '/');
+	while ((c = *s++) != 0) {
+		if (c <= 32 || c == '/' || c == '#') {
+			fmtputc(out, '#');
+			fmtputc(out, "0123456789ABCDEF"[(c>>4)&15]);
+			fmtputc(out, "0123456789ABCDEF"[(c)&15]);
+		} else {
+			fmtputc(out, c);
+		}
+	}
 }
 
 void
@@ -244,26 +261,24 @@ fz_format_string(fz_context *ctx, void *user, void (*emit)(fz_context *ctx, void
 		if (c == '%')
 		{
 			s = 0;
-			z = 0;
+			z = ' ';
 
 			/* flags */
 			while ((c = *fmt++) != 0)
 			{
-				/* sign */
+				/* plus sign */
 				if (c == '+')
 					s = 1;
-				/* space padding */
+				/* space sign */
 				else if (c == ' ')
-					z = ' ';
-				/* leading zero */
+					s = ' ';
+				/* zero padding */
 				else if (c == '0')
-					z = z != ' ' ? '0' : z;
+					z = '0';
 				/* TODO: '-' to left justify */
 				else
 					break;
 			}
-			if (!z)
-				z = ' ';
 			if (c == 0)
 				break;
 
@@ -388,7 +403,7 @@ fz_format_string(fz_context *ctx, void *user, void (*emit)(fz_context *ctx, void
 
 			case 'p':
 				bits = 8 * sizeof(void *);
-				w = 2 * sizeof(void *);
+				z = '0';
 				fmtputc(&out, '0');
 				fmtputc(&out, 'x');
 				/* fallthrough */
@@ -445,6 +460,11 @@ fz_format_string(fz_context *ctx, void *user, void (*emit)(fz_context *ctx, void
 				str = va_arg(args, const char*);
 				if (!str) str = "";
 				fmtquote(&out, str, '(', ')');
+				break;
+			case 'n': /* pdf name */
+				str = va_arg(args, const char*);
+				if (!str) str = "";
+				fmtname(&out, str);
 				break;
 			}
 		}
@@ -507,13 +527,13 @@ fz_snprintf(char *buffer, size_t space, const char *fmt, ...)
 char *
 fz_asprintf(fz_context *ctx, const char *fmt, ...)
 {
-	int len;
+	size_t len;
 	char *mem;
 	va_list ap;
 	va_start(ap, fmt);
 	len = fz_vsnprintf(NULL, 0, fmt, ap);
 	va_end(ap);
-	mem = fz_malloc(ctx, len+1);
+	mem = Memento_label(fz_malloc(ctx, len+1), "asprintf");
 	va_start(ap, fmt);
 	fz_vsnprintf(mem, len+1, fmt, ap);
 	va_end(ap);

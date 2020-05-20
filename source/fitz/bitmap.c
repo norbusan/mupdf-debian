@@ -1,5 +1,4 @@
 #include "mupdf/fitz.h"
-#include "fitz-imp.h"
 
 #include <string.h>
 
@@ -268,18 +267,28 @@ fz_new_bitmap(fz_context *ctx, int w, int h, int n, int xres, int yres)
 {
 	fz_bitmap *bit;
 
-	bit = fz_malloc_struct(ctx, fz_bitmap);
-	bit->refs = 1;
-	bit->w = w;
-	bit->h = h;
-	bit->n = n;
-	bit->xres = xres;
-	bit->yres = yres;
-	/* Span is 32 bit aligned. We may want to make this 64 bit if we
-	 * use SSE2 etc. */
-	bit->stride = ((n * w + 31) & ~31) >> 3;
+	/* Stride is 32 bit aligned. We may want to make this 64 bit if we use SSE2 etc. */
+	int stride = ((n * w + 31) & ~31) >> 3;
+	if (h < 0 || ((size_t)h > (size_t)(SIZE_MAX / stride)))
+		fz_throw(ctx, FZ_ERROR_MEMORY, "bitmap too large");
 
-	bit->samples = fz_malloc_array(ctx, h, bit->stride);
+	bit = fz_malloc_struct(ctx, fz_bitmap);
+	fz_try(ctx)
+	{
+		bit->refs = 1;
+		bit->w = w;
+		bit->h = h;
+		bit->n = n;
+		bit->xres = xres;
+		bit->yres = yres;
+		bit->stride = stride;
+		bit->samples = Memento_label(fz_malloc(ctx, h * bit->stride), "bitmap_samples");
+	}
+	fz_catch(ctx)
+	{
+		fz_free(ctx, bit);
+		fz_rethrow(ctx);
+	}
 
 	return bit;
 }
@@ -307,7 +316,7 @@ fz_clear_bitmap(fz_context *ctx, fz_bitmap *bit)
 }
 
 static void
-pbm_write_header(fz_context *ctx, fz_band_writer *writer, const fz_colorspace *cs)
+pbm_write_header(fz_context *ctx, fz_band_writer *writer, fz_colorspace *cs)
 {
 	fz_output *out = writer->out;
 	int w = writer->w;
@@ -320,7 +329,7 @@ pbm_write_header(fz_context *ctx, fz_band_writer *writer, const fz_colorspace *c
 }
 
 static void
-pkm_write_header(fz_context *ctx, fz_band_writer *writer, const fz_colorspace *cs)
+pkm_write_header(fz_context *ctx, fz_band_writer *writer, fz_colorspace *cs)
 {
 	fz_output *out = writer->out;
 	int w = writer->w;

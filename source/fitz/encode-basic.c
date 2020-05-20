@@ -1,6 +1,6 @@
 #include "mupdf/fitz.h"
 
-#include <zlib.h>
+#include "z-imp.h"
 
 struct ahx
 {
@@ -309,16 +309,6 @@ struct deflate
 	z_stream z;
 };
 
-static void *z_alloc(void *ctx, unsigned int count, unsigned int size)
-{
-	return fz_malloc_no_throw(ctx, count * size);
-}
-
-static void z_free(void *ctx, void *addr)
-{
-	fz_free(ctx, addr);
-}
-
 static void deflate_write(fz_context *ctx, void *opaque, const void *data, size_t n)
 {
 	struct deflate *state = opaque;
@@ -326,7 +316,7 @@ static void deflate_write(fz_context *ctx, void *opaque, const void *data, size_
 	int err;
 
 	state->z.next_in = (Bytef*)data;
-	state->z.avail_in = n;
+	state->z.avail_in = (uInt)n;
 	do
 	{
 		state->z.next_out = buffer;
@@ -375,8 +365,8 @@ fz_new_deflate_output(fz_context *ctx, fz_output *chain, int effort, int raw)
 	struct deflate *state = fz_malloc_struct(ctx, struct deflate);
 	state->chain = chain;
 	state->z.opaque = ctx;
-	state->z.zalloc = z_alloc;
-	state->z.zfree = z_free;
+	state->z.zalloc = fz_zlib_alloc;
+	state->z.zfree = fz_zlib_free;
 	err = deflateInit2(&state->z, effort, Z_DEFLATED, raw ? -15 : 15, 8, Z_DEFAULT_STRATEGY);
 	if (err != Z_OK)
 	{

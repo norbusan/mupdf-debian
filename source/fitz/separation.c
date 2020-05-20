@@ -1,5 +1,7 @@
 #include "mupdf/fitz.h"
-#include "fitz-imp.h"
+
+#include "color-imp.h"
+#include "pixmap-imp.h"
 
 #include <assert.h>
 #include <string.h>
@@ -9,8 +11,7 @@ enum
 	FZ_SEPARATION_DISABLED_RENDER = 3
 };
 
-
-struct fz_separations_s
+struct fz_separations
 {
 	int refs;
 	int num_separations;
@@ -198,11 +199,11 @@ fz_separations *fz_clone_separations_for_overprint(fz_context *ctx, fz_separatio
 	/* We need to clone us a separation structure, with all
 	 * the composite separations marked as enabled. */
 	clone = fz_malloc_struct(ctx, fz_separations);
+	clone->refs = 1;
+	clone->controllable = 0;
 
 	fz_try(ctx)
 	{
-		clone->refs = 1;
-		clone->controllable = 0;
 		for (i = 0; i < n; i++)
 		{
 			fz_separation_behavior beh = sep_state(sep, i);
@@ -227,10 +228,10 @@ fz_separations *fz_clone_separations_for_overprint(fz_context *ctx, fz_separatio
 }
 
 fz_pixmap *
-fz_clone_pixmap_area_with_different_seps(fz_context *ctx, fz_pixmap *src, const fz_irect *bbox, fz_colorspace *dcs, fz_separations *dseps, const fz_color_params *color_params, fz_default_colorspaces *default_cs)
+fz_clone_pixmap_area_with_different_seps(fz_context *ctx, fz_pixmap *src, const fz_irect *bbox, fz_colorspace *dcs, fz_separations *dseps, fz_color_params color_params, fz_default_colorspaces *default_cs)
 {
 	fz_irect local_bbox;
-	fz_pixmap *dst;
+	fz_pixmap *dst, *pix;
 
 	if (bbox == NULL)
 	{
@@ -247,14 +248,19 @@ fz_clone_pixmap_area_with_different_seps(fz_context *ctx, fz_pixmap *src, const 
 	else
 		dst->flags &= ~FZ_PIXMAP_FLAG_INTERPOLATE;
 
-	return fz_copy_pixmap_area_converting_seps(ctx, dst, src, color_params, NULL, default_cs);
+	fz_try(ctx)
+		pix = fz_copy_pixmap_area_converting_seps(ctx, src, dst, NULL, color_params, default_cs);
+	fz_catch(ctx)
+	{
+		fz_drop_pixmap(ctx, dst);
+		fz_rethrow(ctx);
+	}
+
+	return pix;
 }
 
-/*
-	We assume that we never map from a DeviceN space to another DeviceN space here.
- */
 fz_pixmap *
-fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *src, const fz_color_params *color_params, fz_colorspace *prf, fz_default_colorspaces *default_cs)
+fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *src, fz_pixmap *dst, fz_colorspace *prf, fz_color_params color_params, fz_default_colorspaces *default_cs)
 {
 	int dw = dst->w;
 	int dh = dst->h;
@@ -369,7 +375,7 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *
 		/* Now map the colorants down. */
 		n = fz_colorspace_n(ctx, src->colorspace);
 
-		fz_find_color_converter(ctx, &cc, proof_cs, dst->colorspace, src->colorspace, color_params);
+		fz_find_color_converter(ctx, &cc, src->colorspace, dst->colorspace, proof_cs, color_params);
 
 		fz_try(ctx)
 		{
@@ -382,8 +388,10 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *
 
 				if (name)
 				{
-					if (!strcmp(name, "None"))
+					if (!strcmp(name, "None")) {
+						mapped[i] = 0;
 						continue;
+					}
 					if (!strcmp(name, "All"))
 					{
 						int n1 = dn - da;
@@ -472,7 +480,7 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *
 					/* Src component i is not mapped. We need to convert that down. */
 					memset(colors, 0, sizeof(float) * n);
 					colors[i] = 1;
-					cc.convert(ctx, &cc, convert, colors);
+					cc.convert(ctx, &cc, colors, convert);
 
 					if (fz_colorspace_is_subtractive(ctx, dst->colorspace))
 					{
@@ -579,7 +587,7 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *
 
 						memset(colors, 0, sizeof(float) * n);
 						colors[i] = 1;
-						cc.convert(ctx, &cc, convert, colors);
+						cc.convert(ctx, &cc, colors, convert);
 
 						if (sa)
 						{
@@ -632,7 +640,7 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *
 							{
 								for (j = 0; j < n; j++)
 									colors[j] = mapped[j] ? 0 : sd[j] / 255.0f;
-								cc.convert(ctx, &cc, convert, colors);
+								cc.convert(ctx, &cc, colors, convert);
 
 								for (j = 0; j < dc; j++)
 									dd[j] = fz_clampi(255 * convert[j], 0, 255);
@@ -653,7 +661,7 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *
 								float inva = 1.0f/a;
 								for (j = 0; j < n; j++)
 									colors[j] = mapped[j] ? 0 : sd[j] * inva;
-								cc.convert(ctx, &cc, convert, colors);
+								cc.convert(ctx, &cc, colors, convert);
 
 								for (j = 0; j < dc; j++)
 									dd[j] = fz_clampi(a * convert[j], 0, a);
@@ -676,8 +684,7 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *
 	else
 	{
 		/* Use a standard pixmap converter to convert the process + alpha. */
-		fz_pixmap_converter *pc = fz_lookup_pixmap_converter(ctx, dst->colorspace, src->colorspace);
-		pc(ctx, dst, src, proof_cs, default_cs, NULL, 0);
+		fz_convert_pixmap_samples(ctx, src, dst, proof_cs, default_cs, fz_default_color_params, 0);
 
 		/* And handle the spots ourselves. First make a map of what spots go where. */
 		/* We want to set it up so that:
@@ -755,7 +762,7 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *
 					continue;
 				i++;
 				/* Src spot m (the i'th one) is not mapped. We need to convert that down. */
-				fz_separation_equivalent(ctx, sseps, m, color_params, dst->colorspace, proof_cs, convert);
+				fz_separation_equivalent(ctx, sseps, m, dst->colorspace, convert, proof_cs, color_params);
 
 				if (fz_colorspace_is_subtractive(ctx, dst->colorspace))
 				{
@@ -772,7 +779,7 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *
 									unsigned char v = sd[i];
 									if (v != 0)
 									{
-										unsigned char a = sd[sc];
+										unsigned char a = sd[ss];
 										for (k = 0; k < dc; k++)
 											dd[k] = fz_clampi(dd[k] + v * convert[k], 0, a);
 									}
@@ -814,7 +821,7 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *
 									unsigned char v = 0xff - sd[i];
 									if (v != 0)
 									{
-										unsigned char a = sd[sc];
+										unsigned char a = sd[ss];
 										for (k = 0; k < dc; k++)
 											dd[k] = fz_clampi(dd[k] + v * convert[k], 0, a);
 									}
@@ -861,7 +868,7 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *
 									unsigned char v = sd[i];
 									if (v != 0)
 									{
-										unsigned char a = sd[sc];
+										unsigned char a = sd[ss];
 										for (k = 0; k < dc; k++)
 											dd[k] = fz_clampi(dd[k] - v * convert[k], 0, a);
 									}
@@ -903,7 +910,7 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *
 									unsigned char v = 0xff - sd[i];
 									if (v != 0)
 									{
-										unsigned char a = sd[sc];
+										unsigned char a = sd[ss];
 										for (k = 0; k < dc; k++)
 											dd[k] = fz_clampi(dd[k] - v * convert[k], 0, a);
 									}
@@ -940,7 +947,11 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *dst, fz_pixmap *
 	return dst;
 }
 
-void fz_convert_separation_colors(fz_context *ctx, const fz_color_params *color_params, const fz_colorspace *dst_cs, const fz_separations *dst_seps, float *dst_color, const fz_colorspace *src_cs, const float *src_color)
+void
+fz_convert_separation_colors(fz_context *ctx,
+	fz_colorspace *src_cs, const float *src_color,
+	fz_separations *dst_seps, fz_colorspace *dst_cs, float *dst_color,
+	fz_color_params color_params)
 {
 	int i, j, n, dc, ds, dn, pred;
 	float remainders[FZ_MAX_COLORS];
@@ -1025,14 +1036,19 @@ found_process:
 	{
 		/* There were some spots that didn't copy over */
 		float converted[FZ_MAX_COLORS];
-		fz_convert_color(ctx, color_params, NULL, dst_cs, converted, src_cs, remainders);
-
+		fz_convert_color(ctx, src_cs, remainders, dst_cs, converted, NULL, color_params);
 		for (i = 0; i < dc; i++)
 			dst_color[i] += converted[i];
 	}
 }
 
-void fz_separation_equivalent(fz_context *ctx, const fz_separations *seps, int i, const fz_color_params *color_params, const fz_colorspace *dst_cs, const fz_colorspace *prf, float *convert)
+void
+fz_separation_equivalent(fz_context *ctx,
+	const fz_separations *seps,
+	int i,
+	fz_colorspace *dst_cs, float *convert,
+	fz_colorspace *prf,
+	fz_color_params color_params)
 {
 	float colors[FZ_MAX_COLORS];
 
@@ -1059,5 +1075,5 @@ void fz_separation_equivalent(fz_context *ctx, const fz_separations *seps, int i
 
 	memset(colors, 0, sizeof(float) * fz_colorspace_n(ctx, seps->cs[i]));
 	colors[seps->cs_pos[i]] = 1;
-	fz_convert_color(ctx, color_params, prf, dst_cs, convert, seps->cs[i], colors);
+	fz_convert_color(ctx, seps->cs[i], colors, dst_cs, convert, prf, color_params);
 }

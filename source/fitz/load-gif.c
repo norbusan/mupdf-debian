@@ -1,4 +1,6 @@
-#include "fitz-imp.h"
+#include "mupdf/fitz.h"
+
+#include "pixmap-imp.h"
 
 #include <string.h>
 #include <limits.h>
@@ -176,7 +178,7 @@ gif_read_gct(fz_context *ctx, struct info *info, const unsigned char *p, const u
 	if (end - p < info->gct_entries * 3)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end in global color table in gif image");
 
-	info->gct = fz_malloc(ctx, info->gct_entries * 3);
+	info->gct = Memento_label(fz_malloc(ctx, info->gct_entries * 3), "gif_gct");
 	memmove(info->gct, p, info->gct_entries * 3);
 
 	return p + info->gct_entries * 3;
@@ -207,7 +209,7 @@ gif_read_lct(fz_context *ctx, struct info *info, const unsigned char *p, const u
 	if (end - p < info->lct_entries * 3)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end in local color table in gif image");
 
-	info->lct = fz_malloc(ctx, info->lct_entries * 3);
+	info->lct = Memento_label(fz_malloc(ctx, info->lct_entries * 3), "gif_lct");
 	memmove(info->lct, p, info->lct_entries * 3);
 
 	return p + info->lct_entries * 3;
@@ -357,41 +359,29 @@ gif_read_pte(fz_context *ctx, struct info *info, const unsigned char *p, const u
 static const unsigned char *
 gif_read_icc(fz_context *ctx, struct info *info, const unsigned char *p, const unsigned char *end)
 {
-	fz_colorspace *cs = NULL;
-	fz_stream *bstm = NULL;
-	fz_pixmap *newpix;
-	fz_buffer *icc;
+#if FZ_ENABLE_ICC
+	fz_colorspace *icc = NULL;
+	fz_buffer *buf = NULL;
 
-	icc = fz_new_buffer(ctx, 0);
+	fz_var(p);
 
-	fz_var(bstm);
-	fz_var(cs);
-
+	buf = fz_new_buffer(ctx, 0);
 	fz_try(ctx)
 	{
-		p = gif_read_subblocks(ctx, info, p, end, icc);
-		bstm = fz_open_buffer(ctx, icc);
-
-		cs = fz_new_icc_colorspace_from_stream(ctx, FZ_COLORSPACE_NONE, bstm);
-		if (fz_colorspace_n(ctx, cs) != 3)
-			fz_throw(ctx, FZ_ERROR_GENERIC, "unsupported number of components in ICC profile");
-
-		newpix = fz_convert_pixmap(ctx, info->pix, cs, NULL, NULL, NULL, 1);
-		fz_drop_pixmap(ctx, info->pix);
-		info->pix = newpix;
+		p = gif_read_subblocks(ctx, info, p, end, buf);
+		icc = fz_new_icc_colorspace(ctx, FZ_COLORSPACE_RGB, 0, NULL, buf);
+		fz_drop_colorspace(ctx, info->pix->colorspace);
+		info->pix->colorspace = icc;
 	}
 	fz_always(ctx)
-	{
-		fz_drop_colorspace(ctx, cs);
-		fz_drop_stream(ctx, bstm);
-		fz_drop_buffer(ctx, icc);
-	}
+		fz_drop_buffer(ctx, buf);
 	fz_catch(ctx)
-	{
-		fz_rethrow(ctx);
-	}
+		fz_warn(ctx, "ignoring embedded ICC profile in GIF");
 
 	return p;
+#else
+	return gif_read_subblocks(ctx, info, p, end, NULL);
+#endif
 }
 
 /*
@@ -435,7 +425,7 @@ gif_read_ae(fz_context *ctx, struct info *info, const unsigned char *p, const un
 		fz_throw(ctx, FZ_ERROR_GENERIC, "out of range application extension block size in gif image");
 
 	ignored = 0;
-	for (i = 0; i < nelem(ignorable); i++)
+	for (i = 0; i < (int)nelem(ignorable); i++)
 		ignored |= memcmp(&p[3], ignorable[i], 8 + 3);
 	if (!ignored)
 	{

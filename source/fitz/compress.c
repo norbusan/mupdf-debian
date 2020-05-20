@@ -1,23 +1,8 @@
 #include "mupdf/fitz.h"
 
-#include <zlib.h>
+#include "z-imp.h"
 
 #include <limits.h>
-
-static void *fz_z_alloc(void *opaque, unsigned int count, unsigned int size)
-{
-	fz_context *ctx = (fz_context *)opaque;
-	size_t c = count * size;
-
-	return fz_malloc_no_throw(ctx, c);
-}
-
-static void fz_z_free(void *opaque, void *addr)
-{
-	fz_context *ctx = (fz_context *)opaque;
-
-	fz_free(ctx, addr);
-}
 
 void fz_deflate(fz_context *ctx, unsigned char *dest, size_t *destLen, const unsigned char *source, size_t sourceLen, fz_deflate_level level)
 {
@@ -28,8 +13,8 @@ void fz_deflate(fz_context *ctx, unsigned char *dest, size_t *destLen, const uns
 	left = *destLen;
 	*destLen = 0;
 
-	stream.zalloc = fz_z_alloc;
-	stream.zfree = fz_z_free;
+	stream.zalloc = fz_zlib_alloc;
+	stream.zfree = fz_zlib_free;
 	stream.opaque = ctx;
 
 	err = deflateInit(&stream, (int)level);
@@ -63,7 +48,7 @@ void fz_deflate(fz_context *ctx, unsigned char *dest, size_t *destLen, const uns
 unsigned char *fz_new_deflated_data(fz_context *ctx, size_t *compressed_length, const unsigned char *source, size_t source_length, fz_deflate_level level)
 {
 	size_t bound = fz_deflate_bound(ctx, source_length);
-	unsigned char *cdata = fz_malloc(ctx, bound);
+	unsigned char *cdata = Memento_label(fz_malloc(ctx, bound), "deflated_data");
 	*compressed_length = 0;
 
 	fz_try(ctx)

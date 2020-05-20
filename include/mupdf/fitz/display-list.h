@@ -6,11 +6,11 @@
 #include "mupdf/fitz/geometry.h"
 #include "mupdf/fitz/device.h"
 
-/*
+/**
 	Display list device -- record and play back device commands.
 */
 
-/*
+/**
 	fz_display_list is a list containing drawing commands (text,
 	images, etc.). The intent is two-fold: as a caching-mechanism
 	to reduce parsing of a page, and to be used as a data
@@ -22,20 +22,21 @@
 	list (once or many times) by calling fz_run_display_list. When
 	the list is no longer needed drop it with fz_drop_display_list.
 */
-typedef struct fz_display_list_s fz_display_list;
+typedef struct fz_display_list fz_display_list;
 
-/*
-	fz_new_display_list: Create an empty display list.
+/**
+	Create an empty display list.
 
 	A display list contains drawing commands (text, images, etc.).
 	Use fz_new_list_device for populating the list.
 
-	mediabox: Bounds of the page (in points) represented by the display list.
+	mediabox: Bounds of the page (in points) represented by the
+	display list.
 */
 fz_display_list *fz_new_display_list(fz_context *ctx, fz_rect mediabox);
 
-/*
-	fz_new_list_device: Create a rendering device for a display list.
+/**
+	Create a rendering device for a display list.
 
 	When the device is rendering a page it will populate the
 	display list with drawing commands (text, images, etc.). The
@@ -48,14 +49,12 @@ fz_display_list *fz_new_display_list(fz_context *ctx, fz_rect mediabox);
 */
 fz_device *fz_new_list_device(fz_context *ctx, fz_display_list *list);
 
-/*
-	fz_run_display_list: (Re)-run a display list through a device.
+/**
+	(Re)-run a display list through a device.
 
 	list: A display list, created by fz_new_display_list and
 	populated with objects from a page by running fz_run_page on a
 	device obtained from fz_new_list_device.
-
-	dev: Device obtained from fz_new_*_device.
 
 	ctm: Transform to apply to display list contents. May include
 	for example scaling and rotation, see fz_scale, fz_rotate and
@@ -75,23 +74,29 @@ fz_device *fz_new_list_device(fz_context *ctx, fz_display_list *list);
 */
 void fz_run_display_list(fz_context *ctx, fz_display_list *list, fz_device *dev, fz_matrix ctm, fz_rect scissor, fz_cookie *cookie);
 
-/*
-	fz_keep_display_list: Keep a reference to a display list.
+/**
+	Increment the reference count for a display list. Returns the
+	same pointer.
+
+	Never throws exceptions.
 */
 fz_display_list *fz_keep_display_list(fz_context *ctx, fz_display_list *list);
 
-/*
-	fz_drop_display_list: Drop a reference to a display list, freeing it
-	if the reference count reaches zero.
+/**
+	Decrement the reference count for a display list. When the
+	reference count reaches zero, all the references in the display
+	list itself are dropped, and the display list is freed.
+
+	Never throws exceptions.
 */
 void fz_drop_display_list(fz_context *ctx, fz_display_list *list);
 
-/*
-	fz_bound_display_list: Return the bounding box of the page recorded in a display list.
+/**
+	Return the bounding box of the page recorded in a display list.
 */
 fz_rect fz_bound_display_list(fz_context *ctx, fz_display_list *list);
 
-/*
+/**
 	Create a new image from a display list.
 
 	w, h: The conceptual width/height of the image.
@@ -103,7 +108,7 @@ fz_rect fz_bound_display_list(fz_context *ctx, fz_display_list *list);
 */
 fz_image *fz_new_image_from_display_list(fz_context *ctx, float w, float h, fz_display_list *list);
 
-/*
+/**
 	Check for a display list being empty
 
 	list: The list to check.

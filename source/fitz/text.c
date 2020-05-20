@@ -1,5 +1,4 @@
 #include "mupdf/fitz.h"
-#include "fitz-imp.h"
 
 #include <string.h>
 
@@ -84,7 +83,7 @@ fz_grow_text_span(fz_context *ctx, fz_text_span *span, int n)
 		return;
 	while (span->len + n > new_cap)
 		new_cap = new_cap + 36;
-	span->items = fz_resize_array(ctx, span->items, new_cap, sizeof(fz_text_item));
+	span->items = fz_realloc_array(ctx, span->items, new_cap, fz_text_item);
 	span->cap = new_cap;
 }
 

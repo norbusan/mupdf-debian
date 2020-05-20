@@ -1,10 +1,9 @@
 #include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
-#include "../fitz/fitz-imp.h"
 
 #include <assert.h>
 
-struct pdf_graft_map_s
+struct pdf_graft_map
 {
 	int refs;
 	int len;
@@ -43,7 +42,6 @@ pdf_drop_graft_map(fz_context *ctx, pdf_graft_map *map)
 	}
 }
 
-/* Graft object from dst to source */
 pdf_obj *
 pdf_graft_object(fz_context *ctx, pdf_document *dst, pdf_obj *obj)
 {
@@ -120,6 +118,7 @@ pdf_graft_mapped_object(fz_context *ctx, pdf_graft_map *map, pdf_obj *obj)
 
 		fz_var(buffer);
 		fz_var(ref);
+		fz_var(new_obj);
 
 		fz_try(ctx)
 		{
@@ -131,7 +130,6 @@ pdf_graft_mapped_object(fz_context *ctx, pdf_graft_map *map, pdf_obj *obj)
 
 			/* Return a ref to the new_obj making sure to attach any stream */
 			pdf_update_object(ctx, map->dst, new_num, new_obj);
-			pdf_drop_obj(ctx, new_obj);
 			ref = pdf_new_indirect(ctx, map->dst, new_num, 0);
 			if (pdf_is_stream(ctx, obj))
 			{
@@ -140,7 +138,10 @@ pdf_graft_mapped_object(fz_context *ctx, pdf_graft_map *map, pdf_obj *obj)
 			}
 		}
 		fz_always(ctx)
+		{
+			pdf_drop_obj(ctx, new_obj);
 			fz_drop_buffer(ctx, buffer);
+		}
 		fz_catch(ctx)
 		{
 			pdf_drop_obj(ctx, ref);

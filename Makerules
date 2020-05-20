@@ -17,12 +17,14 @@ else
   LDREMOVEUNREACH := -Wl,--gc-sections
 endif
 
+CFLAGS += -Wsign-compare
+
 SANITIZE_FLAGS += -fsanitize=address
 SANITIZE_FLAGS += -fsanitize=leak
 
 ifeq ($(build),debug)
   CFLAGS += -pipe -g
-  LDFLAGS += -g $(LDREMOVEUNREACH)
+  LDFLAGS += -g
 else ifeq ($(build),release)
   CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer
   LDFLAGS += $(LDREMOVEUNREACH) -Wl,-s
@@ -49,7 +51,7 @@ else ifeq ($(build),native)
   LDFLAGS += $(LDREMOVEUNREACH) -Wl,-s
 else ifeq ($(build),memento)
   CFLAGS += -pipe -g -DMEMENTO
-  LDFLAGS += -g -d -rdynamic
+  LDFLAGS += -g -rdynamic
   ifneq ($(HAVE_LIBDL),no)
     CFLAGS += -DHAVE_LIBDL
     LIBS += -ldl
@@ -71,6 +73,10 @@ SYS_LIBJPEG_LIBS := -ljpeg
 SYS_MUJS_LIBS := -lmujs
 SYS_OPENJPEG_LIBS := -lopenjp2
 SYS_ZLIB_LIBS := -lz
+
+ifneq "$(CLUSTER)" ""
+  CFLAGS += -DCLUSTER
+endif
 
 ifeq ($(OS),MINGW)
   WINDRES := windres
@@ -113,8 +119,8 @@ else ifeq ($(OS),Linux)
 	SYS_ZLIB_LIBS := $(shell pkg-config --libs zlib)
   endif
 
-  HAVE_CURL := $(shell pkg-config --exists libcurl && echo yes)
-  ifeq ($(HAVE_CURL),yes)
+  HAVE_SYS_CURL := $(shell pkg-config --exists libcurl && echo yes)
+  ifeq ($(HAVE_SYS_CURL),yes)
 	SYS_CURL_CFLAGS := $(shell pkg-config --cflags libcurl)
 	SYS_CURL_LIBS := $(shell pkg-config --libs libcurl)
   endif
@@ -153,6 +159,17 @@ endif
 # This does rely on the generated directory being populated with the font files.
 # On a unix-like system, run 'make generate' before doing the cross compile.
 # On Windows, run 'nmake -f scripts\fontdump.nmake' in a Visual Studio command prompt.
+
+ifeq "$(OS)" "wasm"
+  OUT := build/wasm/$(build)
+  CC = emcc
+  CXX = em++
+  AR = emar
+  HAVE_GLUT=no
+  HAVE_X11=no
+  HAVE_OBJCOPY=no
+  HAVE_LIBCRYPTO=no
+endif
 
 ifeq "$(OS)" "mingw32-cross"
   OUT := build/$(OS)/$(build)

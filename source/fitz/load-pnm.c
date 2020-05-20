@@ -1,5 +1,7 @@
 #include "mupdf/fitz.h"
 
+#include "pixmap-imp.h"
+
 #include <string.h>
 #include <limits.h>
 
@@ -176,7 +178,7 @@ pnm_read_tupletype(fz_context *ctx, const unsigned char *p, const unsigned char 
 		p++;
 	len = p - s;
 
-	for (i = 0; i < nelem(tupletypes); i++)
+	for (i = 0; i < (int)nelem(tupletypes); i++)
 		if (len == tupletypes[i].len && !strncmp((char *) s, tupletypes[i].str, len))
 		{
 			*tupletype = tupletypes[i].type;
@@ -209,7 +211,7 @@ pnm_read_token(fz_context *ctx, const unsigned char *p, const unsigned char *e, 
 		p++;
 	len = p - s;
 
-	for (i = 0; i < nelem(tokens); i++)
+	for (i = 0; i < (int)nelem(tokens); i++)
 		if (len == tokens[i].len && !strncmp((char *) s, tokens[i].str, len))
 		{
 			*token = tokens[i].type;
@@ -402,7 +404,8 @@ pnm_binary_read_image(fz_context *ctx, struct info *pnm, const unsigned char *p,
 		h = img->h;
 		n = img->n;
 
-		if (pnm->maxval == 255) {
+		if (pnm->maxval == 255)
+		{
 			memcpy(dp, p, w * h * n);
 			p += n * w * h;
 		}
@@ -468,8 +471,7 @@ pam_binary_read_header(fz_context *ctx, struct info *pnm, const unsigned char *p
 		case TOKEN_MAXVAL: p = pnm_read_number(ctx, p, e, &pnm->maxval); break;
 		case TOKEN_TUPLTYPE: p = pnm_read_tupletype(ctx, p, e, &pnm->tupletype); break;
 		case TOKEN_ENDHDR: break;
-		default:
-			   fz_throw(ctx, FZ_ERROR_GENERIC, "unknown header token in pnm image");
+		default: fz_throw(ctx, FZ_ERROR_GENERIC, "unknown header token in pnm image");
 		}
 
 		if (token != TOKEN_ENDHDR)
@@ -566,11 +568,12 @@ pam_binary_read_image(fz_context *ctx, struct info *pnm, const unsigned char *p,
 
 		w = pnm->width;
 		h = pnm->height;
-		n = fz_colorspace_n(ctx, pnm->cs);
+		n = fz_colorspace_n(ctx, pnm->cs) + pnm->alpha;
 
 		/* some encoders incorrectly pack bits into bytes and invert the image */
 		packed = 0;
-		if (pnm->maxval == 1) {
+		if (pnm->maxval == 1)
+		{
 			const unsigned char *e_packed = p + w * h * n / 8;
 			if (e_packed < e - 1 && e_packed[0] == 'P' && e_packed[1] >= '0' && e_packed[1] <= '7')
 				e = e_packed;
@@ -611,7 +614,8 @@ pam_binary_read_image(fz_context *ctx, struct info *pnm, const unsigned char *p,
 
 			/* some encoders incorrectly pack bits into bytes and invert the image */
 			packed = 0;
-			if (pnm->maxval == 1) {
+			if (pnm->maxval == 1)
+			{
 				const unsigned char *e_packed = p + w * h * n / 8;
 				if (e_packed < e - 1 && e_packed[0] == 'P' && e_packed[1] >= '0' && e_packed[1] <= '7')
 					e = e_packed;

@@ -3,7 +3,7 @@
 
 #include <string.h>
 
-typedef struct globals_s
+typedef struct
 {
 	pdf_document *doc;
 	fz_context *ctx;
@@ -338,7 +338,6 @@ void pdf_clean_file(fz_context *ctx, char *infile, char *outfile, char *password
 	}
 	fz_catch(ctx)
 	{
-		if (opts && opts->errors)
-			*opts->errors = *opts->errors+1;
+		fz_rethrow(ctx);
 	}
 }

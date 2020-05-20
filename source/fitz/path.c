@@ -1,5 +1,4 @@
 #include "mupdf/fitz.h"
-#include "fitz-imp.h"
 
 #include <string.h>
 #include <assert.h>
@@ -16,7 +15,7 @@
 // a trailing move. Trailing moves can always be stripped when path
 // construction completes.
 
-typedef enum fz_path_command_e
+typedef enum
 {
 	FZ_MOVETO = 'M',
 	FZ_LINETO = 'L',
@@ -39,7 +38,7 @@ typedef enum fz_path_command_e
 	FZ_QUADTOCLOSE = 'q',
 } fz_path_item_kind;
 
-struct fz_path_s
+struct fz_path
 {
 	int8_t refs;
 	uint8_t packed;
@@ -51,7 +50,7 @@ struct fz_path_s
 	fz_point begin;
 };
 
-typedef struct fz_packed_path_s
+typedef struct
 {
 	int8_t refs;
 	uint8_t packed;
@@ -84,6 +83,14 @@ fz_new_path(fz_context *ctx)
 	return path;
 }
 
+/*
+	Take an additional reference to
+	a path.
+
+	No modifications should be carried out on a path
+	to which more than one reference is held, as
+	this can cause race conditions.
+*/
 fz_path *
 fz_keep_path(fz_context *ctx, const fz_path *pathc)
 {
@@ -134,11 +141,11 @@ int fz_packed_path_size(const fz_path *path)
 	}
 }
 
-int
-fz_pack_path(fz_context *ctx, uint8_t *pack_, int max, const fz_path *path)
+size_t
+fz_pack_path(fz_context *ctx, uint8_t *pack_, size_t max, const fz_path *path)
 {
 	uint8_t *ptr;
-	int size;
+	size_t size;
 
 	if (path->packed)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "Can't repack a packed path");
@@ -165,10 +172,10 @@ fz_pack_path(fz_context *ctx, uint8_t *pack_, int max, const fz_path *path)
 			pack->coord_len = path->coord_len;
 			pack->cmd_cap = path->cmd_len;
 			pack->cmd_len = path->cmd_len;
-			pack->coords = fz_malloc_array(ctx, path->coord_len, sizeof(float));
+			pack->coords = Memento_label(fz_malloc_array(ctx, path->coord_len, float), "path_packed_coords");
 			fz_try(ctx)
 			{
-				pack->cmds = fz_malloc_array(ctx, path->cmd_len, sizeof(uint8_t));
+				pack->cmds = Memento_label(fz_malloc_array(ctx, path->cmd_len, uint8_t), "path_packed_cmds");
 			}
 			fz_catch(ctx)
 			{
@@ -209,7 +216,7 @@ push_cmd(fz_context *ctx, fz_path *path, int cmd)
 	if (path->cmd_len + 1 >= path->cmd_cap)
 	{
 		int new_cmd_cap = fz_maxi(16, path->cmd_cap * 2);
-		path->cmds = fz_resize_array(ctx, path->cmds, new_cmd_cap, sizeof(unsigned char));
+		path->cmds = fz_realloc_array(ctx, path->cmds, new_cmd_cap, unsigned char);
 		path->cmd_cap = new_cmd_cap;
 	}
 
@@ -222,7 +229,7 @@ push_coord(fz_context *ctx, fz_path *path, float x, float y)
 	if (path->coord_len + 2 >= path->coord_cap)
 	{
 		int new_coord_cap = fz_maxi(32, path->coord_cap * 2);
-		path->coords = fz_resize_array(ctx, path->coords, new_coord_cap, sizeof(float));
+		path->coords = fz_realloc_array(ctx, path->coords, new_coord_cap, float);
 		path->coord_cap = new_coord_cap;
 	}
 
@@ -239,7 +246,7 @@ push_ord(fz_context *ctx, fz_path *path, float xy, int isx)
 	if (path->coord_len + 1 >= path->coord_cap)
 	{
 		int new_coord_cap = fz_maxi(32, path->coord_cap * 2);
-		path->coords = fz_resize_array(ctx, path->coords, new_coord_cap, sizeof(float));
+		path->coords = fz_realloc_array(ctx, path->coords, new_coord_cap, float);
 		path->coord_cap = new_coord_cap;
 	}
 
@@ -1163,12 +1170,12 @@ fz_transform_path(fz_context *ctx, fz_path *path, fz_matrix ctm)
 		}
 		if (path->cmd_len + extra_cmd < path->cmd_cap)
 		{
-			path->cmds = fz_resize_array(ctx, path->cmds, path->cmd_len + extra_cmd, sizeof(unsigned char));
+			path->cmds = fz_realloc_array(ctx, path->cmds, path->cmd_len + extra_cmd, unsigned char);
 			path->cmd_cap = path->cmd_len + extra_cmd;
 		}
 		if (path->coord_len + extra_coord < path->coord_cap)
 		{
-			path->coords = fz_resize_array(ctx, path->coords, path->coord_len + extra_coord, sizeof(float));
+			path->coords = fz_realloc_array(ctx, path->coords, path->coord_len + extra_coord, float);
 			path->coord_cap = path->coord_len + extra_coord;
 		}
 		memmove(path->cmds + extra_cmd, path->cmds, path->cmd_len * sizeof(unsigned char));
@@ -1308,12 +1315,12 @@ void fz_trim_path(fz_context *ctx, fz_path *path)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "Can't trim a packed path");
 	if (path->cmd_cap > path->cmd_len)
 	{
-		path->cmds = fz_resize_array(ctx, path->cmds, path->cmd_len, sizeof(unsigned char));
+		path->cmds = fz_realloc_array(ctx, path->cmds, path->cmd_len, unsigned char);
 		path->cmd_cap = path->cmd_len;
 	}
 	if (path->coord_cap > path->coord_len)
 	{
-		path->coords = fz_resize_array(ctx, path->coords, path->coord_len, sizeof(float));
+		path->coords = fz_realloc_array(ctx, path->coords, path->coord_len, float);
 		path->coord_cap = path->coord_len;
 	}
 }
@@ -1461,10 +1468,10 @@ fz_clone_path(fz_context *ctx, fz_path *path)
 		case FZ_PATH_PACKED_OPEN:
 			new_path->cmd_len = path->cmd_len;
 			new_path->cmd_cap = path->cmd_cap;
-			new_path->cmds = clone_block(ctx, path->cmds, path->cmd_cap);
+			new_path->cmds = Memento_label(clone_block(ctx, path->cmds, path->cmd_cap), "path_cmds");
 			new_path->coord_len = path->coord_len;
 			new_path->coord_cap = path->coord_cap;
-			new_path->coords = clone_block(ctx, path->coords, sizeof(float)*path->coord_cap);
+			new_path->coords = Memento_label(clone_block(ctx, path->coords, sizeof(float)*path->coord_cap), "path_coords");
 			new_path->current = path->current;
 			new_path->begin = path->begin;
 			break;
@@ -1480,9 +1487,9 @@ fz_clone_path(fz_context *ctx, fz_path *path)
 				new_path->coord_len = ppath->coord_len;
 				new_path->coord_cap = ppath->coord_len;
 				data = (uint8_t *)&ppath[1];
-				new_path->coords = clone_block(ctx, data, sizeof(float)*path->coord_cap);
+				new_path->coords = Memento_label(clone_block(ctx, data, sizeof(float)*path->coord_cap), "path_coords");
 				data += sizeof(float) * path->coord_cap;
-				new_path->cmds = clone_block(ctx, data, path->cmd_cap);
+				new_path->cmds = Memento_label(clone_block(ctx, data, path->cmd_cap), "path_cmds");
 				xy = new_path->coords;
 				for (i = 0; i < new_path->cmd_len; i++)
 				{
@@ -1544,6 +1551,7 @@ fz_clone_path(fz_context *ctx, fz_path *path)
 	}
 	fz_catch(ctx)
 	{
+		fz_free(ctx, new_path->coords);
 		fz_free(ctx, new_path->cmds);
 		fz_free(ctx, new_path);
 		fz_rethrow(ctx);
