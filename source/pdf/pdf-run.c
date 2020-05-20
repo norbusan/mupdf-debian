@@ -16,6 +16,17 @@ pdf_run_annot_with_usage(fz_context *ctx, pdf_document *doc, pdf_page *page, pdf
 	if (cookie && page->super.incomplete)
 		cookie->incomplete = 1;
 
+	/* Widgets only get displayed if they have both a T and a TF flag,
+	 * apparently */
+	if (pdf_name_eq(ctx, pdf_dict_get(ctx, annot->obj, PDF_NAME(Subtype)), PDF_NAME(Widget)))
+	{
+		pdf_obj *ft = pdf_dict_get_inheritable(ctx, annot->obj, PDF_NAME(FT));
+		pdf_obj *t = pdf_dict_get_inheritable(ctx, annot->obj, PDF_NAME(T));
+
+		if (ft == NULL || t == NULL)
+			return;
+	}
+
 	fz_try(ctx)
 	{
 		default_cs = pdf_load_default_colorspaces(ctx, doc, page);
@@ -132,17 +143,6 @@ pdf_run_page_contents_with_usage(fz_context *ctx, pdf_document *doc, pdf_page *p
 	}
 }
 
-/*
-	Interpret a loaded page and render it on a device.
-	Just the main page contents without the annotations
-
-	page: A page loaded by pdf_load_page.
-
-	dev: Device used for rendering, obtained from fz_new_*_device.
-
-	ctm: A transformation matrix applied to the objects on the page,
-	e.g. to scale or rotate the page contents as desired.
-*/
 void pdf_run_page_contents(fz_context *ctx, pdf_page *page, fz_device *dev, fz_matrix ctm, fz_cookie *cookie)
 {
 	pdf_document *doc = page->doc;
@@ -167,18 +167,6 @@ void pdf_run_page_contents(fz_context *ctx, pdf_page *page, fz_device *dev, fz_m
 	}
 }
 
-/*
-	Interpret an annotation and render it on a device.
-
-	page: A page loaded by pdf_load_page.
-
-	annot: an annotation.
-
-	dev: Device used for rendering, obtained from fz_new_*_device.
-
-	ctm: A transformation matrix applied to the objects on the page,
-	e.g. to scale or rotate the page contents as desired.
-*/
 void pdf_run_annot(fz_context *ctx, pdf_annot *annot, fz_device *dev, fz_matrix ctm, fz_cookie *cookie)
 {
 	pdf_page *page = annot->page;
@@ -208,7 +196,7 @@ pdf_run_page_widgets_with_usage(fz_context *ctx, pdf_document *doc, pdf_page *pa
 {
 	pdf_widget *widget;
 
-	if (cookie && cookie->progress_max != -1)
+	if (cookie && cookie->progress_max != (size_t)-1)
 	{
 		int count = 1;
 		for (widget = page->widgets; widget; widget = widget->next)
@@ -235,7 +223,7 @@ pdf_run_page_annots_with_usage(fz_context *ctx, pdf_document *doc, pdf_page *pag
 {
 	pdf_annot *annot;
 
-	if (cookie && cookie->progress_max != -1)
+	if (cookie && cookie->progress_max != (size_t)-1)
 	{
 		int count = 1;
 		for (annot = page->annots; annot; annot = annot->next)
@@ -305,22 +293,6 @@ void pdf_run_page_widgets(fz_context *ctx, pdf_page *page, fz_device *dev, fz_ma
 	}
 }
 
-/*
-	Interpret a loaded page and render it on a device.
-
-	page: A page loaded by pdf_load_page.
-
-	dev: Device used for rendering, obtained from fz_new_*_device.
-
-	ctm: A transformation matrix applied to the objects on the page,
-	e.g. to scale or rotate the page contents as desired.
-
-	usage: The 'usage' for displaying the file (typically
-	'View', 'Print' or 'Export'). NULL means 'View'.
-
-	cookie: A pointer to an optional fz_cookie structure that can be used
-	to track progress, collect errors etc.
-*/
 void
 pdf_run_page_with_usage(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_device *dev, fz_matrix ctm, const char *usage, fz_cookie *cookie)
 {
@@ -345,16 +317,6 @@ pdf_run_page_with_usage(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_d
 	}
 }
 
-/*
-	Interpret a loaded page and render it on a device.
-
-	page: A page loaded by pdf_load_page.
-
-	dev: Device used for rendering, obtained from fz_new_*_device.
-
-	ctm: A transformation matrix applied to the objects on the page,
-	e.g. to scale or rotate the page contents as desired.
-*/
 void
 pdf_run_page(fz_context *ctx, pdf_page *page, fz_device *dev, fz_matrix ctm, fz_cookie *cookie)
 {

@@ -361,13 +361,11 @@ static int cs_next(fz_context *ctx, fz_stream *stream, size_t len)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot fetch data: %s", curl_easy_strerror(err));
 	}
 
-	if (read_point > state->content_length)
+	if ((size_t) read_point > state->content_length)
 	{
+		unlock(state);
 		if (state->data_arrived == 0)
-		{
-			unlock(state);
 			fz_throw(ctx, FZ_ERROR_TRYLATER, "read of a block we don't have (A) (offset=%ld)", read_point);
-		}
 		return EOF;
 	}
 

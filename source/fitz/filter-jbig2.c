@@ -1,4 +1,4 @@
-#include "fitz-imp.h"
+#include "mupdf/fitz.h"
 
 #ifdef HAVE_LURATECH
 
@@ -6,15 +6,13 @@
 
 #include <ldf_jb2.h>
 
-typedef struct fz_jbig2d_s fz_jbig2d;
-
-struct fz_jbig2_globals_s
+struct fz_jbig2_globals
 {
 	fz_storable storable;
 	fz_buffer *buf;
 };
 
-struct fz_jbig2d_s
+typedef struct
 {
 	fz_stream *chain;
 	fz_context *ctx;
@@ -26,7 +24,7 @@ struct fz_jbig2d_s
 	fz_buffer *input;
 	unsigned char *output;
 	int idx;
-};
+} fz_jbig2d;
 
 fz_jbig2_globals *
 fz_keep_jbig2_globals(fz_context *ctx, fz_jbig2_globals *globals)
@@ -54,7 +52,7 @@ static void * JB2_Callback
 jbig2_alloc(unsigned long size, void *userdata)
 {
 	fz_jbig2d *state = userdata;
-	return fz_malloc(state->ctx, size);
+	return Memento_label(fz_malloc(state->ctx, size), "jbig2_alloc");
 }
 
 static JB2_Error JB2_Callback
@@ -74,7 +72,7 @@ jbig2_message(const char *msg, JB2_Message_Level level, void *userdata)
 		switch (level)
 		{
 		case cJB2_Message_Information:
-#ifndef NDEBUG
+#ifdef JBIG2_DEBUG
 			fz_warn(state->ctx, "luratech jbig2 info: %s", msg);
 #endif
 			break;
@@ -174,7 +172,7 @@ next_jbig2d(fz_context *ctx, fz_stream *stm, size_t len)
 
 			state->stride = (state->width + 7) >> 3;
 			stm->pos = state->stride * state->height;
-			state->output = fz_malloc(state->ctx, stm->pos);
+			state->output = Memento_label(fz_malloc(state->ctx, stm->pos), "jbig2_output");
 			stm->rp = state->output;
 			stm->wp = state->output;
 
@@ -241,31 +239,29 @@ fz_open_jbig2d(fz_context *ctx, fz_stream *chain, fz_jbig2_globals *globals)
 
 #include <jbig2.h>
 
-typedef struct fz_jbig2d_s fz_jbig2d;
-
-struct fz_jbig2_alloc_s
+typedef struct
 {
 	Jbig2Allocator alloc;
 	fz_context *ctx;
-};
+} fz_jbig2_allocators;
 
-struct fz_jbig2_globals_s
+struct fz_jbig2_globals
 {
 	fz_storable storable;
 	Jbig2GlobalCtx *gctx;
-	struct fz_jbig2_alloc_s alloc;
+	fz_jbig2_allocators alloc;
 };
 
-struct fz_jbig2d_s
+typedef struct
 {
 	fz_stream *chain;
 	Jbig2Ctx *ctx;
-	struct fz_jbig2_alloc_s alloc;
+	fz_jbig2_allocators alloc;
 	fz_jbig2_globals *gctx;
 	Jbig2Image *page;
 	int idx;
 	unsigned char buffer[4096];
-};
+} fz_jbig2d;
 
 fz_jbig2_globals *
 fz_keep_jbig2_globals(fz_context *ctx, fz_jbig2_globals *globals)
@@ -350,7 +346,7 @@ error_callback(void *data, const char *msg, Jbig2Severity severity, int32_t seg_
 		fz_warn(ctx, "jbig2dec error: %s (segment %d)", msg, seg_idx);
 	else if (severity == JBIG2_SEVERITY_WARNING)
 		fz_warn(ctx, "jbig2dec warning: %s (segment %d)", msg, seg_idx);
-#ifndef NDEBUG
+#ifdef JBIG2_DEBUG
 	else if (severity == JBIG2_SEVERITY_INFO)
 		fz_warn(ctx, "jbig2dec info: %s (segment %d)", msg, seg_idx);
 	else if (severity == JBIG2_SEVERITY_DEBUG)
@@ -360,27 +356,27 @@ error_callback(void *data, const char *msg, Jbig2Severity severity, int32_t seg_
 
 static void *fz_jbig2_alloc(Jbig2Allocator *allocator, size_t size)
 {
-	fz_context *ctx = ((struct fz_jbig2_alloc_s *) allocator)->ctx;
-	return fz_malloc_no_throw(ctx, size);
+	fz_context *ctx = ((fz_jbig2_allocators *) allocator)->ctx;
+	return Memento_label(fz_malloc_no_throw(ctx, size), "jbig2_alloc");
 }
 
 static void fz_jbig2_free(Jbig2Allocator *allocator, void *p)
 {
-	fz_context *ctx = ((struct fz_jbig2_alloc_s *) allocator)->ctx;
+	fz_context *ctx = ((fz_jbig2_allocators *) allocator)->ctx;
 	fz_free(ctx, p);
 }
 
 static void *fz_jbig2_realloc(Jbig2Allocator *allocator, void *p, size_t size)
 {
-	fz_context *ctx = ((struct fz_jbig2_alloc_s *) allocator)->ctx;
+	fz_context *ctx = ((fz_jbig2_allocators *) allocator)->ctx;
 	if (size == 0)
 	{
 		fz_free(ctx, p);
 		return NULL;
 	}
 	if (p == NULL)
-		return fz_malloc(ctx, size);
-	return fz_realloc_no_throw(ctx, p, size);
+		return Memento_label(fz_malloc(ctx, size), "jbig2_realloc");
+	return Memento_label(fz_realloc_no_throw(ctx, p, size), "jbig2_realloc");
 }
 
 fz_jbig2_globals *

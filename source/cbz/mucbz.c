@@ -5,14 +5,13 @@
 
 #define DPI 72.0f
 
-typedef struct cbz_document_s cbz_document;
-typedef struct cbz_page_s cbz_page;
-
 static const char *cbz_ext_list[] = {
 	".bmp",
 	".gif",
 	".hdp",
 	".j2k",
+	".jb2",
+	".jbig2",
 	".jp2",
 	".jpeg",
 	".jpg",
@@ -31,19 +30,19 @@ static const char *cbz_ext_list[] = {
 	NULL
 };
 
-struct cbz_page_s
+typedef struct
 {
 	fz_page super;
 	fz_image *image;
-};
+} cbz_page;
 
-struct cbz_document_s
+typedef struct
 {
 	fz_document super;
 	fz_archive *arch;
 	int page_count;
 	const char **page;
-};
+} cbz_document;
 
 static inline int cbz_isdigit(int c)
 {
@@ -130,7 +129,7 @@ cbz_drop_document(fz_context *ctx, fz_document *doc_)
 }
 
 static int
-cbz_count_pages(fz_context *ctx, fz_document *doc_)
+cbz_count_pages(fz_context *ctx, fz_document *doc_, int chapter)
 {
 	cbz_document *doc = (cbz_document*)doc_;
 	return doc->page_count;
@@ -175,7 +174,7 @@ cbz_drop_page(fz_context *ctx, fz_page *page_)
 }
 
 static fz_page *
-cbz_load_page(fz_context *ctx, fz_document *doc_, int number)
+cbz_load_page(fz_context *ctx, fz_document *doc_, int chapter, int number)
 {
 	cbz_document *doc = (cbz_document*)doc_;
 	cbz_page *page = NULL;
@@ -257,6 +256,7 @@ static const char *cbz_extensions[] =
 
 static const char *cbz_mimetypes[] =
 {
+	"application/vnd.comicbook+zip",
 	"application/x-cbt",
 	"application/x-cbz",
 	"application/x-tar",
@@ -270,5 +270,7 @@ fz_document_handler cbz_document_handler =
 	NULL,
 	cbz_open_document_with_stream,
 	cbz_extensions,
-	cbz_mimetypes
+	cbz_mimetypes,
+	NULL,
+	NULL
 };

@@ -133,7 +133,7 @@ xps_add_link_target(fz_context *ctx, xps_document *doc, char *name)
 	doc->target = target;
 }
 
-int
+fz_location
 xps_lookup_link_target(fz_context *ctx, fz_document *doc_, const char *target_uri, float *xp, float *yp)
 {
 	xps_document *doc = (xps_document*)doc_;
@@ -142,8 +142,8 @@ xps_lookup_link_target(fz_context *ctx, fz_document *doc_, const char *target_ur
 	needle = needle ? needle + 1 : target_uri;
 	for (target = doc->target; target; target = target->next)
 		if (!strcmp(target->name, needle))
-			return target->page;
-	return 0;
+			return fz_make_location(0, target->page);
+	return fz_make_location(-1, -1);
 }
 
 static void
@@ -290,7 +290,7 @@ xps_parse_metadata(fz_context *ctx, xps_document *doc, xps_part *part, xps_fixdo
 	doc->base_uri = buf;
 	doc->part_uri = part->name;
 
-	xml = fz_parse_xml(ctx, part->data, 0);
+	xml = fz_parse_xml(ctx, part->data, 0, 0);
 	fz_try(ctx)
 	{
 		xps_parse_metadata_imp(ctx, doc, fz_xml_root(xml), fixdoc);
@@ -358,7 +358,7 @@ xps_read_page_list(fz_context *ctx, xps_document *doc)
 }
 
 int
-xps_count_pages(fz_context *ctx, fz_document *doc_)
+xps_count_pages(fz_context *ctx, fz_document *doc_, int chapter)
 {
 	xps_document *doc = (xps_document*)doc_;
 	return doc->page_count;
@@ -376,7 +376,7 @@ xps_load_fixed_page(fz_context *ctx, xps_document *doc, xps_fixpage *page)
 	part = xps_read_part(ctx, doc, page->name);
 	fz_try(ctx)
 	{
-		xml = fz_parse_xml(ctx, part->data, 0);
+		xml = fz_parse_xml(ctx, part->data, 0, 0);
 
 		root = fz_xml_root(xml);
 		if (!root)
@@ -436,7 +436,7 @@ xps_drop_page_imp(fz_context *ctx, fz_page *page_)
 }
 
 fz_page *
-xps_load_page(fz_context *ctx, fz_document *doc_, int number)
+xps_load_page(fz_context *ctx, fz_document *doc_, int chapter, int number)
 {
 	xps_document *doc = (xps_document*)doc_;
 	xps_page *page = NULL;
@@ -505,5 +505,7 @@ fz_document_handler xps_document_handler =
 	xps_open_document,
 	xps_open_document_with_stream,
 	xps_extensions,
-	xps_mimetypes
+	xps_mimetypes,
+	NULL,
+	NULL
 };

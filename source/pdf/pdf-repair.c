@@ -331,7 +331,6 @@ pdf_repair_xref(fz_context *ctx, pdf_document *doc)
 	doc->repair_attempted = 1;
 
 	doc->dirty = 1;
-	doc->freeze_updates = 1; /* Can't support incremental update after repair */
 
 	pdf_forget_xref(ctx, doc);
 
@@ -345,7 +344,7 @@ pdf_repair_xref(fz_context *ctx, pdf_document *doc)
 		list = fz_malloc_array(ctx, listcap, struct entry);
 
 		/* look for '%PDF' version marker within first kilobyte of file */
-		n = fz_read(ctx, doc->file, (unsigned char *)buf->scratch, fz_mini(buf->size, 1024));
+		n = fz_read(ctx, doc->file, (unsigned char *)buf->scratch, fz_minz(buf->size, 1024));
 
 		fz_seek(ctx, doc->file, 0, 0);
 		if (n >= 4)
@@ -665,14 +664,13 @@ pdf_repair_xref(fz_context *ctx, pdf_document *doc)
 			pdf_drop_obj(ctx, id);
 			id = NULL;
 		}
-
-		fz_free(ctx, list);
 	}
 	fz_always(ctx)
 	{
 		for (i = 0; i < num_roots; i++)
 			pdf_drop_obj(ctx, roots[i]);
 		fz_free(ctx, roots);
+		fz_free(ctx, list);
 	}
 	fz_catch(ctx)
 	{
@@ -680,7 +678,6 @@ pdf_repair_xref(fz_context *ctx, pdf_document *doc)
 		pdf_drop_obj(ctx, id);
 		pdf_drop_obj(ctx, obj);
 		pdf_drop_obj(ctx, info);
-		fz_free(ctx, list);
 		fz_rethrow(ctx);
 	}
 }

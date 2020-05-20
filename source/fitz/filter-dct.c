@@ -8,9 +8,7 @@ typedef void * backing_store_ptr;
 #include "jmemcust.h"
 #endif
 
-typedef struct fz_dctd_s fz_dctd;
-
-struct fz_dctd_s
+typedef struct
 {
 	fz_stream *chain;
 	fz_stream *jpegtables;
@@ -29,7 +27,7 @@ struct fz_dctd_s
 	char msg[JMSG_LENGTH_MAX];
 
 	unsigned char buffer[4096];
-};
+} fz_dctd;
 
 #ifdef SHARE_JPEG
 
@@ -50,7 +48,7 @@ static void *
 fz_dct_mem_alloc(j_common_ptr cinfo, size_t size)
 {
 	fz_dctd *state = JZ_DCT_STATE_FROM_CINFO(cinfo);
-	return fz_malloc_no_throw(state->ctx, size);
+	return Memento_label(fz_malloc_no_throw(state->ctx, size), "dct_alloc");
 }
 
 static void
@@ -234,7 +232,7 @@ next_dctd(fz_context *ctx, fz_stream *stm, size_t max)
 			jpeg_start_decompress(cinfo);
 
 			state->stride = cinfo->output_width * cinfo->output_components;
-			state->scanline = fz_malloc(ctx, state->stride);
+			state->scanline = Memento_label(fz_malloc(ctx, state->stride), "dct_scanline");
 			state->rp = state->scanline;
 			state->wp = state->scanline;
 		}
@@ -312,7 +310,6 @@ close_dctd(fz_context *ctx, void *state_)
 	fz_free(ctx, state);
 }
 
-/* Default: color_transform = -1 (unset), l2factor = 0, jpegtables = NULL */
 fz_stream *
 fz_open_dctd(fz_context *ctx, fz_stream *chain, int color_transform, int l2factor, fz_stream *jpegtables)
 {

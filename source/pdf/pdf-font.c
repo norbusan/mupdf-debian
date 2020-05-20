@@ -1,8 +1,6 @@
 #include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
 
-#include "../fitz/fitz-imp.h"
-
 #include <assert.h>
 
 #include <ft2build.h>
@@ -138,7 +136,7 @@ static int strcmp_ignore_space(const char *a, const char *b)
 const char *pdf_clean_font_name(const char *fontname)
 {
 	int i, k;
-	for (i = 0; i < nelem(base_font_names); i++)
+	for (i = 0; i < (int)nelem(base_font_names); i++)
 		for (k = 0; base_font_names[i][k]; k++)
 			if (!strcmp_ignore_space(base_font_names[i][k], fontname))
 				return base_font_names[i][0];
@@ -287,7 +285,7 @@ static const struct { int code; const char *name; } mre_diff_table[] =
 static int lookup_mre_code(const char *name)
 {
 	int i;
-	for (i = 0; i < nelem(mre_diff_table); ++i)
+	for (i = 0; i < (int)nelem(mre_diff_table); ++i)
 		if (!strcmp(name, mre_diff_table[i].name))
 			return mre_diff_table[i].code;
 	for (i = 0; i < 256; i++)
@@ -703,7 +701,8 @@ pdf_load_simple_font(fz_context *ctx, pdf_document *doc, pdf_obj *dict)
 		else
 			fz_warn(ctx, "freetype could not find any cmaps");
 
-		etable = fz_malloc_array(ctx, 256, unsigned short);
+		/* FIXME: etable may leak on error. */
+		etable = Memento_label(fz_malloc_array(ctx, 256, unsigned short), "cid_to_gid");
 		fontdesc->size += 256 * sizeof(unsigned short);
 		for (i = 0; i < 256; i++)
 		{
@@ -737,7 +736,7 @@ pdf_load_simple_font(fz_context *ctx, pdf_document *doc, pdf_obj *dict)
 						item = pdf_array_get(ctx, diff, i);
 						if (pdf_is_int(ctx, item))
 							k = pdf_to_int(ctx, item);
-						if (pdf_is_name(ctx, item) && k >= 0 && k < nelem(estrings))
+						if (pdf_is_name(ctx, item) && k >= 0 && k < (int)nelem(estrings))
 							estrings[k++] = pdf_to_name(ctx, item);
 					}
 				}
@@ -946,7 +945,7 @@ hail_mary_cmp_key(fz_context *ctx, void *k0, void *k1)
 }
 
 static void
-hail_mary_format_key(fz_context *ctx, char *s, int n, void *key_)
+hail_mary_format_key(fz_context *ctx, char *s, size_t n, void *key_)
 {
 	fz_strlcpy(s, "(hail mary font)", n);
 }
@@ -1069,7 +1068,7 @@ load_cid_font(fz_context *ctx, pdf_document *doc, pdf_obj *dict, pdf_obj *encodi
 
 			len = fz_buffer_storage(ctx, buf, &data);
 			fontdesc->cid_to_gid_len = len / 2;
-			fontdesc->cid_to_gid = fz_malloc_array(ctx, fontdesc->cid_to_gid_len, unsigned short);
+			fontdesc->cid_to_gid = Memento_label(fz_malloc_array(ctx, fontdesc->cid_to_gid_len, unsigned short), "cid_to_gid_map");
 			fontdesc->size += fontdesc->cid_to_gid_len * sizeof(unsigned short);
 			for (z = 0; z < fontdesc->cid_to_gid_len; z++)
 				fontdesc->cid_to_gid[z] = (data[z * 2] << 8) + data[z * 2 + 1];
@@ -1330,7 +1329,7 @@ pdf_make_width_table(fz_context *ctx, pdf_font_desc *fontdesc)
 	}
 
 	font->width_count = n + 1;
-	font->width_table = fz_malloc_array(ctx, font->width_count, short);
+	font->width_table = Memento_label(fz_malloc_array(ctx, font->width_count, short), "font_widths");
 	fontdesc->size += font->width_count * sizeof(short);
 
 	font->width_default = fontdesc->dhmtx.w;

@@ -8,9 +8,6 @@ typedef struct {
 	fz_pwg_options pwg;
 } pwg_band_writer;
 
-/*
-	Output the file header to a pwg stream, ready for pages to follow it.
-*/
 void
 fz_write_pwg_file_header(fz_context *ctx, fz_output *out)
 {
@@ -458,7 +455,7 @@ const char *fz_pwg_write_options_usage =
 	"\n";
 
 static void
-warn_if_long(fz_context *ctx, const char *str, int ret)
+warn_if_long(fz_context *ctx, const char *str, size_t ret)
 {
 	if (ret > 0)
 		fz_warn(ctx, "Option %s is too long, truncated.", str);
@@ -539,9 +536,7 @@ fz_parse_pwg_options(fz_context *ctx, fz_pwg_options *opts, const char *args)
 	return opts;
 }
 
-typedef struct fz_pwg_writer_s fz_pwg_writer;
-
-struct fz_pwg_writer_s
+typedef struct
 {
 	fz_document_writer super;
 	fz_draw_options draw;
@@ -549,7 +544,7 @@ struct fz_pwg_writer_s
 	int mono;
 	fz_pixmap *pixmap;
 	fz_output *out;
-};
+} fz_pwg_writer;
 
 static fz_device *
 pwg_begin_page(fz_context *ctx, fz_document_writer *wri_, fz_rect mediabox)
@@ -608,7 +603,7 @@ pwg_drop_writer(fz_context *ctx, fz_document_writer *wri_)
 }
 
 fz_document_writer *
-fz_new_pwg_writer(fz_context *ctx, const char *path, const char *options)
+fz_new_pwg_writer_with_output(fz_context *ctx, fz_output *out, const char *options)
 {
 	fz_pwg_writer *wri = fz_new_derived_document_writer(ctx, fz_pwg_writer, pwg_begin_page, pwg_end_page, pwg_close_writer, pwg_drop_writer);
 	const char *val;
@@ -620,15 +615,29 @@ fz_new_pwg_writer(fz_context *ctx, const char *path, const char *options)
 		if (fz_has_option(ctx, options, "colorspace", &val))
 			if (fz_option_eq(val, "mono"))
 				wri->mono = 1;
-		wri->out = fz_new_output_with_path(ctx, path ? path : "out.pwg", 0);
+		wri->out = out;
 		fz_write_pwg_file_header(ctx, wri->out);
 	}
 	fz_catch(ctx)
 	{
-		fz_drop_output(ctx, wri->out);
 		fz_free(ctx, wri);
 		fz_rethrow(ctx);
 	}
 
 	return (fz_document_writer*)wri;
+}
+
+fz_document_writer *
+fz_new_pwg_writer(fz_context *ctx, const char *path, const char *options)
+{
+	fz_output *out = fz_new_output_with_path(ctx, path ? path : "out.pwg", 0);
+	fz_document_writer *wri = NULL;
+	fz_try(ctx)
+		wri = fz_new_pwg_writer_with_output(ctx, out, options);
+	fz_catch(ctx)
+	{
+		fz_drop_output(ctx, out);
+		fz_rethrow(ctx);
+	}
+	return wri;
 }

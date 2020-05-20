@@ -1,13 +1,11 @@
 #include "mupdf/fitz.h"
 #include "svg-imp.h"
 
-typedef struct svg_page_s svg_page;
-
-struct svg_page_s
+typedef struct
 {
 	fz_page super;
 	svg_document *doc;
-};
+} svg_page;
 
 static void
 svg_drop_document(fz_context *ctx, fz_document *doc_)
@@ -18,7 +16,7 @@ svg_drop_document(fz_context *ctx, fz_document *doc_)
 }
 
 static int
-svg_count_pages(fz_context *ctx, fz_document *doc_)
+svg_count_pages(fz_context *ctx, fz_document *doc_, int chapter)
 {
 	return 1;
 }
@@ -49,7 +47,7 @@ svg_drop_page(fz_context *ctx, fz_page *page_)
 }
 
 static fz_page *
-svg_load_page(fz_context *ctx, fz_document *doc_, int number)
+svg_load_page(fz_context *ctx, fz_document *doc_, int chapter, int number)
 {
 	svg_document *doc = (svg_document*)doc_;
 	svg_page *page;
@@ -90,6 +88,8 @@ svg_open_document_with_xml(fz_context *ctx, fz_xml *xml, const char *base_uri, f
 	doc->super.load_page = svg_load_page;
 
 	doc->idmap = NULL;
+	if (base_uri)
+		fz_strlcpy(doc->base_uri, base_uri, sizeof doc->base_uri);
 	doc->xml = NULL;
 	doc->root = xml;
 	doc->zip = zip;
@@ -124,7 +124,7 @@ svg_open_document_with_buffer(fz_context *ctx, fz_buffer *buf, const char *base_
 
 	fz_try(ctx)
 	{
-		doc->xml = fz_parse_xml(ctx, buf, 0);
+		doc->xml = fz_parse_xml(ctx, buf, 0, 0);
 		doc->root = fz_xml_root(doc->xml);
 		svg_build_id_map(ctx, doc, doc->root);
 	}
@@ -154,9 +154,6 @@ svg_open_document_with_stream(fz_context *ctx, fz_stream *file)
 	return doc;
 }
 
-/*
-	Parse an SVG document into a display-list.
-*/
 fz_display_list *
 fz_new_display_list_from_svg(fz_context *ctx, fz_buffer *buf, const char *base_uri, fz_archive *zip, float *w, float *h)
 {
@@ -178,9 +175,6 @@ fz_new_display_list_from_svg(fz_context *ctx, fz_buffer *buf, const char *base_u
 	return list;
 }
 
-/*
-	Parse an SVG document into a display-list.
-*/
 fz_display_list *
 fz_new_display_list_from_svg_xml(fz_context *ctx, fz_xml *xml, const char *base_uri, fz_archive *zip, float *w, float *h)
 {
@@ -202,9 +196,6 @@ fz_new_display_list_from_svg_xml(fz_context *ctx, fz_xml *xml, const char *base_
 	return list;
 }
 
-/*
-	Create a scalable image from an SVG document.
-*/
 fz_image *
 fz_new_image_from_svg(fz_context *ctx, fz_buffer *buf, const char *base_uri, fz_archive *zip)
 {
@@ -222,9 +213,6 @@ fz_new_image_from_svg(fz_context *ctx, fz_buffer *buf, const char *base_uri, fz_
 	return image;
 }
 
-/*
-	Create a scalable image from an SVG document.
-*/
 fz_image *
 fz_new_image_from_svg_xml(fz_context *ctx, fz_xml *xml, const char *base_uri, fz_archive *zip)
 {
@@ -260,5 +248,7 @@ fz_document_handler svg_document_handler =
 	NULL,
 	svg_open_document_with_stream,
 	svg_extensions,
-	svg_mimetypes
+	svg_mimetypes,
+	NULL,
+	NULL
 };

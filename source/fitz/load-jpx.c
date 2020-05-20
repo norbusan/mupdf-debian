@@ -1,13 +1,11 @@
 #include "mupdf/fitz.h"
-#include "fitz-imp.h"
+
+#include "pixmap-imp.h"
 
 #include <assert.h>
 #include <string.h>
 
 #if FZ_ENABLE_JPX
-
-typedef struct fz_jpxd_s fz_jpxd;
-typedef struct stream_block_s stream_block;
 
 static void
 jpx_ycc_to_rgb(fz_context *ctx, fz_pixmap *pix, int cbsign, int crsign)
@@ -56,7 +54,7 @@ jpx_ycc_to_rgb(fz_context *ctx, fz_pixmap *pix, int cbsign, int crsign)
 	(cs) == cJP2_Colorspace_Palette_ICCa || \
 	(cs) == cJP2_Colorspace_Palette_CMYKa)
 
-struct fz_jpxd_s
+typedef struct
 {
 	fz_pixmap *pix;
 	JP2_Palette_Params *palette;
@@ -70,19 +68,19 @@ struct fz_jpxd_s
 	JP2_Property_Value vstep[MAX_COMPONENTS];
 	JP2_Property_Value bpss[MAX_COMPONENTS];
 	JP2_Property_Value signs[MAX_COMPONENTS];
-};
+} fz_jpxd;
 
-struct stream_block_s
+typedef struct
 {
 	const unsigned char *data;
 	size_t size;
-};
+} stream_block;
 
 static void * JP2_Callback_Conv
 jpx_alloc(long size, JP2_Callback_Param param)
 {
 	fz_context *ctx = (fz_context *) param;
-	return fz_malloc(ctx, size);
+	return Memento_label(fz_malloc(ctx, size), "jpx_alloc");
 }
 
 static JP2_Error JP2_Callback_Conv
@@ -115,9 +113,8 @@ jpx_write(unsigned char * pucData, short sComponent, unsigned long ulRow,
 	fz_jpxd *state = (fz_jpxd *) param;
 	JP2_Property_Value hstep, vstep;
 	unsigned char *row;
-	int w, h, n, entries, expand;
+	int w, h, n, k, entries, expand;
 	JP2_Property_Value x, y, i, bps, sign;
-	JP2_Property_Value k;
 	unsigned long **palette;
 
 	w = state->pix->w;
@@ -302,7 +299,7 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_
 
 		if (defcs)
 		{
-			if (defcs->n == nchans)
+			if ((JP2_Property_Value)defcs->n == nchans)
 				state->cs = fz_keep_colorspace(ctx, defcs);
 			else
 				fz_warn(ctx, "jpx file (%lu) and dict colorspace (%d, %s) do not match", nchans, defcs->n, defcs->name);
@@ -330,7 +327,7 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_
 			fz_catch(ctx)
 				fz_warn(ctx, "ignoring embedded ICC profile in JPX");
 
-			if (state->cs && state->cs->n != nchans)
+			if (state->cs && (JP2_Property_Value)state->cs->n != nchans)
 			{
 				fz_warn(ctx, "invalid number of components in ICC profile, ignoring ICC profile in JPX");
 				fz_drop_colorspace(ctx, state->cs);
@@ -486,21 +483,21 @@ fz_load_jpx_info(fz_context *ctx, const unsigned char *data, size_t size, int *w
 
 #include <openjpeg.h>
 
-struct fz_jpxd_s
+typedef struct
 {
 	int width;
 	int height;
 	fz_colorspace *cs;
 	int xres;
 	int yres;
-};
+} fz_jpxd;
 
-struct stream_block_s
+typedef struct
 {
 	const unsigned char *data;
 	OPJ_SIZE_T size;
 	OPJ_SIZE_T pos;
-};
+} stream_block;
 
 /* OpenJPEG does not provide a safe mechanism to intercept
  * allocations. In the latest version all allocations go
@@ -555,7 +552,7 @@ void *opj_malloc(size_t size)
 
 	assert(ctx != NULL);
 
-	return fz_malloc_no_throw(ctx, size);
+	return Memento_label(fz_malloc_no_throw(ctx, size), "opj_malloc");
 }
 
 void *opj_calloc(size_t n, size_t size)
@@ -588,7 +585,7 @@ void opj_free(void *ptr)
 static void * opj_aligned_malloc_n(size_t alignment, size_t size)
 {
 	uint8_t *ptr;
-	int off;
+	size_t off;
 
 	if (size == 0)
 		return NULL;
@@ -598,7 +595,7 @@ static void * opj_aligned_malloc_n(size_t alignment, size_t size)
 	if (ptr == NULL)
 		return NULL;
 	off = alignment-(((int)(intptr_t)ptr) & (alignment - 1));
-	ptr[off-1] = off;
+	ptr[off-1] = (uint8_t)off;
 	return ptr + off;
 }
 
@@ -635,7 +632,7 @@ static void fz_opj_error_callback(const char *msg, void *client_data)
 {
 	fz_context *ctx = (fz_context *)client_data;
 	char buf[200];
-	int n;
+	size_t n;
 	fz_strlcpy(buf, msg, sizeof buf);
 	n = strlen(buf);
 	if (buf[n-1] == '\n')
@@ -647,7 +644,7 @@ static void fz_opj_warning_callback(const char *msg, void *client_data)
 {
 	fz_context *ctx = (fz_context *)client_data;
 	char buf[200];
-	int n;
+	size_t n;
 	fz_strlcpy(buf, msg, sizeof buf);
 	n = strlen(buf);
 	if (buf[n-1] == '\n')
@@ -704,8 +701,9 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_
 	opj_image_t *jpx;
 	opj_stream_t *stream;
 	OPJ_CODEC_FORMAT format;
-	int a, n, w, h;
-	int x, y, k;
+	int a, n, k;
+	OPJ_UINT32 w, h;
+	OPJ_UINT32 x, y;
 	stream_block sb;
 	OPJ_UINT32 i;
 
@@ -875,8 +873,7 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_
 				for (x = 0; x < comp->w; x++)
 				{
 					OPJ_INT32 v;
-					int dx;
-					int dy;
+					OPJ_UINT32 dx, dy;
 
 					v = comp->data[y * comp->w + x];
 
@@ -891,8 +888,8 @@ jpx_read_image(fz_context *ctx, fz_jpxd *state, const unsigned char *data, size_
 					{
 						for (dx = 0; dx < comp->dx; dx++)
 						{
-							int xx = ox + x * comp->dx + dx;
-							int yy = oy + y * comp->dy + dy;
+							OPJ_UINT32 xx = ox + x * comp->dx + dx;
+							OPJ_UINT32 yy = oy + y * comp->dy + dy;
 
 							if (xx < w && yy < h)
 								samples[yy * stride + xx * comps + k] = v;

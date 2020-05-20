@@ -10,15 +10,6 @@ const char *fz_pclm_write_options_usage =
 	"\tstrip-height=N: Strip height (default 16)\n"
 	"\n";
 
-/*
-	Parse PCLm options.
-
-	Currently defined options and values are as follows:
-
-		compression=none: No compression
-		compression=flate: Flate compression
-		strip-height=n: Strip height (default 16)
-*/
 fz_pclm_options *
 fz_parse_pclm_options(fz_context *ctx, fz_pclm_options *opts, const char *args)
 {
@@ -129,9 +120,9 @@ pclm_write_header(fz_context *ctx, fz_band_writer *writer_, fz_colorspace *cs)
 
 	fz_free(ctx, writer->stripbuf);
 	fz_free(ctx, writer->compbuf);
-	writer->stripbuf = fz_malloc(ctx, w * sh * n);
+	writer->stripbuf = Memento_label(fz_malloc(ctx, w * sh * n), "pclm_stripbuf");
 	writer->complen = fz_deflate_bound(ctx, w * sh * n);
-	writer->compbuf = fz_malloc(ctx, writer->complen);
+	writer->compbuf = Memento_label(fz_malloc(ctx, writer->complen), "pclm_compbuf");
 
 	/* Send the file header on the first page */
 	if (writer->pages == 0)
@@ -319,9 +310,7 @@ fz_save_pixmap_as_pclm(fz_context *ctx, fz_pixmap *pixmap, char *filename, int a
 
 /* High-level document writer interface */
 
-typedef struct fz_pclm_writer_s fz_pclm_writer;
-
-struct fz_pclm_writer_s
+typedef struct
 {
 	fz_document_writer super;
 	fz_draw_options draw;
@@ -330,7 +319,7 @@ struct fz_pclm_writer_s
 	fz_band_writer *bander;
 	fz_output *out;
 	int pagenum;
-};
+} fz_pclm_writer;
 
 static fz_device *
 pclm_begin_page(fz_context *ctx, fz_document_writer *wri_, fz_rect mediabox)
@@ -383,7 +372,7 @@ pclm_drop_writer(fz_context *ctx, fz_document_writer *wri_)
 }
 
 fz_document_writer *
-fz_new_pclm_writer(fz_context *ctx, const char *path, const char *options)
+fz_new_pclm_writer_with_output(fz_context *ctx, fz_output *out, const char *options)
 {
 	fz_pclm_writer *wri = fz_new_derived_document_writer(ctx, fz_pclm_writer, pclm_begin_page, pclm_end_page, pclm_close_writer, pclm_drop_writer);
 
@@ -391,15 +380,29 @@ fz_new_pclm_writer(fz_context *ctx, const char *path, const char *options)
 	{
 		fz_parse_draw_options(ctx, &wri->draw, options);
 		fz_parse_pclm_options(ctx, &wri->pclm, options);
-		wri->out = fz_new_output_with_path(ctx, path ? path : "out.pclm", 0);
+		wri->out = out;
 		wri->bander = fz_new_pclm_band_writer(ctx, wri->out, &wri->pclm);
 	}
 	fz_catch(ctx)
 	{
-		fz_drop_output(ctx, wri->out);
 		fz_free(ctx, wri);
 		fz_rethrow(ctx);
 	}
 
 	return (fz_document_writer*)wri;
+}
+
+fz_document_writer *
+fz_new_pclm_writer(fz_context *ctx, const char *path, const char *options)
+{
+	fz_output *out = fz_new_output_with_path(ctx, path ? path : "out.pclm", 0);
+	fz_document_writer *wri = NULL;
+	fz_try(ctx)
+		wri = fz_new_pclm_writer_with_output(ctx, out, options);
+	fz_catch(ctx)
+	{
+		fz_drop_output(ctx, out);
+		fz_rethrow(ctx);
+	}
+	return wri;
 }

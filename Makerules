@@ -17,6 +17,8 @@ else
   LDREMOVEUNREACH := -Wl,--gc-sections
 endif
 
+CFLAGS += -Wsign-compare
+
 SANITIZE_FLAGS += -fsanitize=address
 SANITIZE_FLAGS += -fsanitize=leak
 
@@ -49,7 +51,7 @@ else ifeq ($(build),native)
   LDFLAGS += $(LDREMOVEUNREACH) -Wl,-s
 else ifeq ($(build),memento)
   CFLAGS += -pipe -g -DMEMENTO
-  LDFLAGS += -g -d -rdynamic
+  LDFLAGS += -g -rdynamic
   ifneq ($(HAVE_LIBDL),no)
     CFLAGS += -DHAVE_LIBDL
     LIBS += -ldl
@@ -71,6 +73,10 @@ SYS_LIBJPEG_LIBS := -ljpeg
 SYS_MUJS_LIBS := -lmujs
 SYS_OPENJPEG_LIBS := -lopenjp2
 SYS_ZLIB_LIBS := -lz
+
+ifneq "$(CLUSTER)" ""
+  CFLAGS += -DCLUSTER
+endif
 
 ifeq ($(OS),MINGW)
   WINDRES := windres
@@ -158,6 +164,7 @@ ifeq "$(OS)" "wasm"
   OUT := build/wasm/$(build)
   CC = emcc
   CXX = em++
+  AR = emar
   HAVE_GLUT=no
   HAVE_X11=no
   HAVE_OBJCOPY=no

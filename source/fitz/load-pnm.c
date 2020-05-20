@@ -1,5 +1,7 @@
 #include "mupdf/fitz.h"
 
+#include "pixmap-imp.h"
+
 #include <string.h>
 #include <limits.h>
 
@@ -176,7 +178,7 @@ pnm_read_tupletype(fz_context *ctx, const unsigned char *p, const unsigned char 
 		p++;
 	len = p - s;
 
-	for (i = 0; i < nelem(tupletypes); i++)
+	for (i = 0; i < (int)nelem(tupletypes); i++)
 		if (len == tupletypes[i].len && !strncmp((char *) s, tupletypes[i].str, len))
 		{
 			*tupletype = tupletypes[i].type;
@@ -209,7 +211,7 @@ pnm_read_token(fz_context *ctx, const unsigned char *p, const unsigned char *e, 
 		p++;
 	len = p - s;
 
-	for (i = 0; i < nelem(tokens); i++)
+	for (i = 0; i < (int)nelem(tokens); i++)
 		if (len == tokens[i].len && !strncmp((char *) s, tokens[i].str, len))
 		{
 			*token = tokens[i].type;

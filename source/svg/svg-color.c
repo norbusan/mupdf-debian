@@ -186,7 +186,8 @@ static int ishex(int chr)
 void
 svg_parse_color(fz_context *ctx, svg_document *doc, const char *str, float *rgb)
 {
-	int i, l, m, r, cmp, n;
+	int i, l, m, r, cmp;
+	size_t n;
 
 	rgb[0] = 0.0f;
 	rgb[1] = 0.0f;
@@ -235,7 +236,7 @@ svg_parse_color(fz_context *ctx, svg_document *doc, const char *str, float *rgb)
 			if (svg_is_digit(*str))
 			{
 				numberlen = 0;
-				while (svg_is_digit(*str) && numberlen < sizeof(numberbuf) - 1)
+				while (svg_is_digit(*str) && numberlen < (int)sizeof(numberbuf) - 1)
 					numberbuf[numberlen++] = *str++;
 				numberbuf[numberlen] = 0;
 

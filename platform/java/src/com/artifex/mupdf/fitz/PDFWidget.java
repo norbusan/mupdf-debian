@@ -148,4 +148,21 @@ public class PDFWidget extends PDFAnnotation
 		return options;
 	}
 	public native boolean setChoiceValue(String val);
+
+	/* Signature fields */
+	public native boolean sign(PKCS7Signer signer);
+	public native int checkCertificate(PKCS7Verifier verifier);
+	public native int checkDigest(PKCS7Verifier verifier);
+	public native boolean incrementalChangeAfterSigning();
+	public boolean verify(PKCS7Verifier verifier) {
+		if (checkDigest(verifier) != PKCS7Verifier.PKCS7VerifierOK)
+			return false;
+		if (checkCertificate(verifier) != PKCS7Verifier.PKCS7VerifierOK)
+			return false;
+		return !incrementalChangeAfterSigning();
+	}
+	public native PKCS7DesignatedName getDesignatedName(PKCS7Verifier verifier);
+
+	public native int validateSignature();
+	public native boolean isSigned();
 }

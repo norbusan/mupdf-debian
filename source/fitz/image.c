@@ -1,4 +1,8 @@
-#include "fitz-imp.h"
+#include "mupdf/fitz.h"
+
+#include "context-imp.h"
+#include "image-imp.h"
+#include "pixmap-imp.h"
 
 #include <string.h>
 #include <math.h>
@@ -16,27 +20,25 @@ fz_key_storable_needs_reaping(fz_context *ctx, const fz_key_storable *ks)
 
 #define SCALABLE_IMAGE_DPI 96
 
-struct fz_compressed_image_s
+struct fz_compressed_image
 {
 	fz_image super;
-	fz_pixmap *tile;
 	fz_compressed_buffer *buffer;
 };
 
-struct fz_pixmap_image_s
+struct fz_pixmap_image
 {
 	fz_image super;
 	fz_pixmap *tile;
 };
 
-typedef struct fz_image_key_s fz_image_key;
-
-struct fz_image_key_s {
+typedef struct
+{
 	int refs;
 	fz_image *image;
 	int l2factor;
 	fz_irect rect;
-};
+} fz_image_key;
 
 fz_image *
 fz_keep_image(fz_context *ctx, fz_image *image)
@@ -93,7 +95,7 @@ fz_cmp_image_key(fz_context *ctx, void *k0_, void *k1_)
 }
 
 static void
-fz_format_image_key(fz_context *ctx, char *s, int n, void *key_)
+fz_format_image_key(fz_context *ctx, char *s, size_t n, void *key_)
 {
 	fz_image_key *key = (fz_image_key *)key_;
 	fz_snprintf(s, n, "(image %d x %d sf=%d)", key->image->w, key->image->h, key->l2factor);
@@ -369,9 +371,9 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_compressed_image
 			tile->flags &= ~FZ_PIXMAP_FLAG_INTERPOLATE;
 
 		stride = (w * image->n * image->bpc + 7) / 8;
-		if (h > SIZE_MAX / stride)
+		if ((size_t)h > (size_t)(SIZE_MAX / stride))
 			fz_throw(ctx, FZ_ERROR_MEMORY, "image too large");
-		samples = fz_malloc(ctx, h * stride);
+		samples = Memento_label(fz_malloc(ctx, h * stride), "pixmap_samples");
 
 		if (subarea)
 		{
@@ -489,7 +491,6 @@ drop_compressed_image(fz_context *ctx, fz_image *image_)
 {
 	fz_compressed_image *image = (fz_compressed_image *)image_;
 
-	fz_drop_pixmap(ctx, image->tile);
 	fz_drop_compressed_buffer(ctx, image->buffer);
 }
 
@@ -678,29 +679,6 @@ fz_find_image_tile(fz_context *ctx, fz_image *image, fz_image_key *key, fz_matri
 	return NULL;
 }
 
-/*
-	Called to get a handle to a pixmap from an image.
-
-	image: The image to retrieve a pixmap from.
-
-	color_params: The color parameters (or NULL for defaults).
-
-	subarea: The subarea of the image that we actually care about (or NULL
-	to indicate the whole image).
-
-	trans: Optional, unless subarea is given. If given, then on entry this is
-	the transform that will be applied to the complete image. It should be
-	updated on exit to the transform to apply to the given subarea of the
-	image. This is used to calculate the desired width/height for subsampling.
-
-	w: If non-NULL, a pointer to an int to be updated on exit to the
-	width (in pixels) that the scaled output will cover.
-
-	h: If non-NULL, a pointer to an int to be updated on exit to the
-	height (in pixels) that the scaled output will cover.
-
-	Returns a non NULL pixmap pointer. May throw exceptions.
-*/
 fz_pixmap *
 fz_get_pixmap_from_image(fz_context *ctx, fz_image *image, const fz_irect *subarea, fz_matrix *ctm, int *dw, int *dh)
 {
@@ -859,17 +837,6 @@ size_t fz_image_size(fz_context *ctx, fz_image *im)
 	return im->get_size(ctx, im);
 }
 
-/*
-	Create an image from the given
-	pixmap.
-
-	pixmap: The pixmap to base the image upon. A new reference
-	to this is taken.
-
-	mask: NULL, or another image to use as a mask for this one.
-	A new reference is taken to this image. Supplying a masked
-	image as a mask to another image is illegal!
-*/
 fz_image *
 fz_new_image_from_pixmap(fz_context *ctx, fz_pixmap *pixmap, fz_image *mask)
 {
@@ -887,55 +854,10 @@ fz_new_image_from_pixmap(fz_context *ctx, fz_pixmap *pixmap, fz_image *mask)
 	return &image->super;
 }
 
-/*
-	Internal function to make a new fz_image structure
-	for a derived class.
-
-	w,h: Width and height of the created image.
-
-	bpc: Bits per component.
-
-	colorspace: The colorspace (determines the number of components,
-	and any color conversions required while decoding).
-
-	xres, yres: The X and Y resolutions respectively.
-
-	interpolate: 1 if interpolation should be used when decoding
-	this image, 0 otherwise.
-
-	imagemask: 1 if this is an imagemask (i.e. transparent), 0
-	otherwise.
-
-	decode: NULL, or a pointer to to a decode array. The default
-	decode array is [0 1] (repeated n times, for n color components).
-
-	colorkey: NULL, or a pointer to a colorkey array. The default
-	colorkey array is [0 255] (repeatd n times, for n color
-	components).
-
-	mask: NULL, or another image to use as a mask for this one.
-	A new reference is taken to this image. Supplying a masked
-	image as a mask to another image is illegal!
-
-	size: The size of the required allocated structure (the size of
-	the derived structure).
-
-	get: The function to be called to obtain a decoded pixmap.
-
-	get_size: The function to be called to return the storage size
-	used by this image.
-
-	drop: The function to be called to dispose of this image once
-	the last reference is dropped.
-
-	Returns a pointer to an allocated structure of the required size,
-	with the first sizeof(fz_image) bytes initialised as appropriate
-	given the supplied parameters, and the other bytes set to zero.
-*/
 fz_image *
 fz_new_image_of_size(fz_context *ctx, int w, int h, int bpc, fz_colorspace *colorspace,
 		int xres, int yres, int interpolate, int imagemask, float *decode,
-		int *colorkey, fz_image *mask, int size,
+		int *colorkey, fz_image *mask, size_t size,
 		fz_image_get_pixmap_fn *get_pixmap,
 		fz_image_get_size_fn *get_size,
 		fz_drop_image_fn *drop)
@@ -1011,41 +933,9 @@ compressed_image_get_size(fz_context *ctx, fz_image *image)
 	if (image == NULL)
 		return 0;
 
-	return sizeof(fz_pixmap_image) + fz_pixmap_size(ctx, im->tile) + (im->buffer && im->buffer->buffer ? im->buffer->buffer->cap : 0);
+	return sizeof(fz_pixmap_image) + (im->buffer && im->buffer->buffer ? im->buffer->buffer->cap : 0);
 }
 
-/*
-	Create an image based on
-	the data in the supplied compressed buffer.
-
-	w,h: Width and height of the created image.
-
-	bpc: Bits per component.
-
-	colorspace: The colorspace (determines the number of components,
-	and any color conversions required while decoding).
-
-	xres, yres: The X and Y resolutions respectively.
-
-	interpolate: 1 if interpolation should be used when decoding
-	this image, 0 otherwise.
-
-	imagemask: 1 if this is an imagemask (i.e. transparency bitmap mask), 0 otherwise.
-
-	decode: NULL, or a pointer to to a decode array. The default
-	decode array is [0 1] (repeated n times, for n color components).
-
-	colorkey: NULL, or a pointer to a colorkey array. The default
-	colorkey array is [0 255] (repeatd n times, for n color
-	components).
-
-	buffer: Buffer of compressed data and compression parameters.
-	Ownership of this reference is passed in.
-
-	mask: NULL, or another image to use as a mask for this one.
-	A new reference is taken to this image. Supplying a masked
-	image as a mask to another image is illegal!
-*/
 fz_image *
 fz_new_image_from_compressed_buffer(fz_context *ctx, int w, int h,
 	int bpc, fz_colorspace *colorspace,
@@ -1074,17 +964,6 @@ fz_new_image_from_compressed_buffer(fz_context *ctx, int w, int h,
 	return &image->super;
 }
 
-/*
-	Retrieve the underlying compressed
-	data for an image.
-
-	Returns a pointer to the underlying data buffer for an image,
-	or NULL if this image is not based upon a compressed data
-	buffer.
-
-	This is not a reference counted structure, so no reference is
-	returned. Lifespan is limited to that of the image itself.
-*/
 fz_compressed_buffer *fz_compressed_image_buffer(fz_context *ctx, fz_image *image)
 {
 	if (image == NULL || image->get_pixmap != compressed_image_get_pixmap)
@@ -1098,31 +977,6 @@ void fz_set_compressed_image_buffer(fz_context *ctx, fz_compressed_image *image,
 	((fz_compressed_image *)image)->buffer = buf; /* Note: compressed buffers are not reference counted */
 }
 
-fz_pixmap *fz_compressed_image_tile(fz_context *ctx, fz_compressed_image *image)
-{
-	if (image == NULL || image->super.get_pixmap != compressed_image_get_pixmap)
-		return NULL;
-	return ((fz_compressed_image *)image)->tile;
-}
-
-void fz_set_compressed_image_tile(fz_context *ctx, fz_compressed_image *image, fz_pixmap *pix)
-{
-	assert(image != NULL && image->super.get_pixmap == compressed_image_get_pixmap);
-	fz_drop_pixmap(ctx, ((fz_compressed_image *)image)->tile);
-	((fz_compressed_image *)image)->tile = fz_keep_pixmap(ctx, pix);
-}
-
-/*
-	Retried the underlying fz_pixmap
-	for an image.
-
-	Returns a pointer to the underlying fz_pixmap for an image,
-	or NULL if this image is not based upon an fz_pixmap.
-
-	No reference is returned. Lifespan is limited to that of
-	the image itself. If required, use fz_keep_pixmap to take
-	a reference to keep it longer.
-*/
 fz_pixmap *fz_pixmap_image_tile(fz_context *ctx, fz_pixmap_image *image)
 {
 	if (image == NULL || image->super.get_pixmap != pixmap_image_get_pixmap)
@@ -1167,11 +1021,6 @@ fz_recognize_image_format(fz_context *ctx, unsigned char p[8])
 	return FZ_IMAGE_UNKNOWN;
 }
 
-/*
-	Create a new image from a
-	buffer of data, inferring its type from the format
-	of the data.
-*/
 fz_image *
 fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer)
 {
@@ -1182,11 +1031,13 @@ fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer)
 	unsigned char *buf = buffer->data;
 	fz_image *image = NULL;
 	int type;
+	int bpc;
 
 	if (len < 8)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "unknown image file format");
 
 	type = fz_recognize_image_format(ctx, buf);
+	bpc = 8;
 	switch (type)
 	{
 	case FZ_IMAGE_PNM:
@@ -1215,6 +1066,7 @@ fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer)
 		break;
 	case FZ_IMAGE_JBIG2:
 		fz_load_jbig2_info(ctx, buf, len, &w, &h, &xres, &yres, &cspace);
+		bpc = 1;
 		break;
 	default:
 		fz_throw(ctx, FZ_ERROR_GENERIC, "unknown image file format");
@@ -1227,7 +1079,7 @@ fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer)
 		bc->params.type = type;
 		if (type == FZ_IMAGE_JPEG)
 			bc->params.u.jpeg.color_transform = -1;
-		image = fz_new_image_from_compressed_buffer(ctx, w, h, 8, cspace, xres, yres, 0, 0, NULL, NULL, bc, NULL);
+		image = fz_new_image_from_compressed_buffer(ctx, w, h, bpc, cspace, xres, yres, 0, 0, NULL, NULL, bc, NULL);
 	}
 	fz_always(ctx)
 		fz_drop_colorspace(ctx, cspace);
@@ -1237,11 +1089,6 @@ fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer)
 	return image;
 }
 
-/*
-	Create a new image from the contents
-	of a file, inferring its type from the format of the
-	data.
-*/
 fz_image *
 fz_new_image_from_file(fz_context *ctx, const char *path)
 {
@@ -1259,14 +1106,6 @@ fz_new_image_from_file(fz_context *ctx, const char *path)
 	return image;
 }
 
-/*
-	Request the natural resolution
-	of an image.
-
-	xres, yres: Pointers to ints to be updated with the
-	natural resolution of an image (or a sensible default
-	if not encoded).
-*/
 void
 fz_image_resolution(fz_image *image, int *xres, int *yres)
 {
@@ -1289,12 +1128,7 @@ fz_image_resolution(fz_image *image, int *xres, int *yres)
 	/* Scale xres and yres up until we get believable values */
 	if (*xres < SANE_DPI || *yres < SANE_DPI || *xres > INSANE_DPI || *yres > INSANE_DPI)
 	{
-		if (*xres == *yres)
-		{
-			*xres = SANE_DPI;
-			*yres = SANE_DPI;
-		}
-		else if (*xres < *yres)
+		if (*xres < *yres)
 		{
 			*yres = *yres * SANE_DPI / *xres;
 			*xres = SANE_DPI;
@@ -1302,6 +1136,12 @@ fz_image_resolution(fz_image *image, int *xres, int *yres)
 		else
 		{
 			*xres = *xres * SANE_DPI / *yres;
+			*yres = SANE_DPI;
+		}
+
+		if (*xres == *yres || *xres < SANE_DPI || *yres < SANE_DPI || *xres > INSANE_DPI || *yres > INSANE_DPI)
+		{
+			*xres = SANE_DPI;
 			*yres = SANE_DPI;
 		}
 	}
@@ -1388,16 +1228,6 @@ display_list_image_get_size(fz_context *ctx, fz_image *image_)
 	return sizeof(fz_display_list_image) + 4096; /* FIXME */
 }
 
-/*
-	Create a new image from a display list.
-
-	w, h: The conceptual width/height of the image.
-
-	transform: The matrix that needs to be applied to the given
-	list to make it render to the unit square.
-
-	list: The display list.
-*/
 fz_image *fz_new_image_from_display_list(fz_context *ctx, float w, float h, fz_display_list *list)
 {
 	fz_display_list_image *image;
