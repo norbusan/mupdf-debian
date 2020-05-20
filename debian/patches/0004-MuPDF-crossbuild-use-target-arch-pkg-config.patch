@@ -5,11 +5,9 @@ Subject: MuPDF crossbuild use target arch pkg-config
 mupdf fails to cross build, because it uses the build architecture
 pkg-config and thus fails to find a pile of .pc files.
 ---
- Makerules | 52 ++++++++++++++++++++++++++++------------------------
- 1 file changed, 28 insertions(+), 24 deletions(-)
+ Makerules |   62 +++++++++++++++++++++++++++++++++-----------------------------
+ 1 file changed, 33 insertions(+), 29 deletions(-)
 
-diff --git a/Makerules b/Makerules
-index c343ec5..2171c5b 100644
 --- a/Makerules
 +++ b/Makerules
 @@ -6,6 +6,10 @@ OS := $(OS:MSYS%=MINGW)
@@ -23,55 +21,60 @@ index c343ec5..2171c5b 100644
  ifeq ($(findstring -fembed-bitcode,$(XCFLAGS)),)
    # clang does not support these in combination with -fembed-bitcode
    CFLAGS += -ffunction-sections -fdata-sections
-@@ -91,29 +95,29 @@ else ifeq ($(OS),MACOS)
+@@ -97,29 +101,29 @@ else ifeq ($(OS),MACOS)
  else ifeq ($(OS),Linux)
    HAVE_OBJCOPY := yes
  
 -  ifeq ($(shell pkg-config --exists freetype2 && echo yes),yes)
 -	SYS_FREETYPE_CFLAGS := $(shell pkg-config --cflags freetype2)
 -	SYS_FREETYPE_LIBS := $(shell pkg-config --libs freetype2)
-+  ifeq ($(shell $(PKG_CONFIG) --exists freetype2 && echo yes),yes)
-+	SYS_FREETYPE_CFLAGS := $(shell $(PKG_CONFIG) --cflags freetype2)
-+	SYS_FREETYPE_LIBS := $(shell $(PKG_CONFIG) --libs freetype2)
-   endif
+-  endif
 -  ifeq ($(shell pkg-config --exists harfbuzz && echo yes),yes)
 -	SYS_HARFBUZZ_CFLAGS := $(shell pkg-config --cflags harfbuzz)
 -	SYS_HARFBUZZ_LIBS := $(shell pkg-config --libs harfbuzz)
-+  ifeq ($(shell $(PKG_CONFIG) --exists harfbuzz && echo yes),yes)
-+	SYS_HARFBUZZ_CFLAGS := $(shell $(PKG_CONFIG) --cflags harfbuzz)
-+	SYS_HARFBUZZ_LIBS := $(shell $(PKG_CONFIG) --libs harfbuzz)
-   endif
+-  endif
 -  ifeq ($(shell pkg-config --exists lcms2 && echo yes),yes)
 -	SYS_LCMS2_CFLAGS := $(shell pkg-config --cflags lcms2)
 -	SYS_LCMS2_LIBS := $(shell pkg-config --libs lcms2)
-+  ifeq ($(shell $(PKG_CONFIG) --exists lcms2 && echo yes),yes)
-+	SYS_LCMS2_CFLAGS := $(shell $(PKG_CONFIG) --cflags lcms2)
-+	SYS_LCMS2_LIBS := $(shell $(PKG_CONFIG) --libs lcms2)
-   endif
+-  endif
 -  ifeq ($(shell pkg-config --exists libjpeg && echo yes),yes)
 -	SYS_LIBJPEG_CFLAGS := $(shell pkg-config --cflags libjpeg)
 -	SYS_LIBJPEG_LIBS := $(shell pkg-config --libs libjpeg)
-+  ifeq ($(shell $(PKG_CONFIG) --exists libjpeg && echo yes),yes)
-+	SYS_LIBJPEG_CFLAGS := $(shell $(PKG_CONFIG) --cflags libjpeg)
-+	SYS_LIBJPEG_LIBS := $(shell $(PKG_CONFIG) --libs libjpeg)
-   endif
+-  endif
 -  ifeq ($(shell pkg-config --exists libopenjp2 && echo yes),yes)
 -	SYS_OPENJPEG_CFLAGS := $(shell pkg-config --cflags libopenjp2)
 -	SYS_OPENJPEG_LIBS := $(shell pkg-config --libs libopenjp2)
-+  ifeq ($(shell $(PKG_CONFIG) --exists libopenjp2 && echo yes),yes)
-+	SYS_OPENJPEG_CFLAGS := $(shell $(PKG_CONFIG) --cflags libopenjp2)
-+	SYS_OPENJPEG_LIBS := $(shell $(PKG_CONFIG) --libs libopenjp2)
-   endif
+-  endif
 -  ifeq ($(shell pkg-config --exists zlib && echo yes),yes)
 -	SYS_ZLIB_CFLAGS := $(shell pkg-config --cflags zlib)
 -	SYS_ZLIB_LIBS := $(shell pkg-config --libs zlib)
++  ifeq ($(shell $(PKG_CONFIG) --exists freetype2 && echo yes),yes)
++	SYS_FREETYPE_CFLAGS := $(shell $(PKG_CONFIG) --cflags freetype2)
++	SYS_FREETYPE_LIBS := $(shell $(PKG_CONFIG) --libs freetype2)
++  endif
++  ifeq ($(shell $(PKG_CONFIG) --exists harfbuzz && echo yes),yes)
++	SYS_HARFBUZZ_CFLAGS := $(shell $(PKG_CONFIG) --cflags harfbuzz)
++	SYS_HARFBUZZ_LIBS := $(shell $(PKG_CONFIG) --libs harfbuzz)
++  endif
++  ifeq ($(shell $(PKG_CONFIG) --exists lcms2 && echo yes),yes)
++	SYS_LCMS2_CFLAGS := $(shell $(PKG_CONFIG) --cflags lcms2)
++	SYS_LCMS2_LIBS := $(shell $(PKG_CONFIG) --libs lcms2)
++  endif
++  ifeq ($(shell $(PKG_CONFIG) --exists libjpeg && echo yes),yes)
++	SYS_LIBJPEG_CFLAGS := $(shell $(PKG_CONFIG) --cflags libjpeg)
++	SYS_LIBJPEG_LIBS := $(shell $(PKG_CONFIG) --libs libjpeg)
++  endif
++  ifeq ($(shell $(PKG_CONFIG) --exists libopenjp2 && echo yes),yes)
++	SYS_OPENJPEG_CFLAGS := $(shell $(PKG_CONFIG) --cflags libopenjp2)
++	SYS_OPENJPEG_LIBS := $(shell $(PKG_CONFIG) --libs libopenjp2)
++  endif
 +  ifeq ($(shell $(PKG_CONFIG) --exists zlib && echo yes),yes)
 +	SYS_ZLIB_CFLAGS := $(shell $(PKG_CONFIG) --cflags zlib)
 +	SYS_ZLIB_LIBS := $(shell $(PKG_CONFIG) --libs zlib)
    endif
  
    HAVE_SYS_CURL := $(shell pkg-config --exists libcurl && echo yes)
-@@ -128,16 +132,16 @@ else ifeq ($(OS),Linux)
+@@ -134,16 +138,16 @@ else ifeq ($(OS),Linux)
  	SYS_GLUT_LIBS := -lglut -lGL
    endif
  

@@ -5,16 +5,14 @@ Subject: Build mupdf without executable stack
 Fixes: #944817
 Thanks: Christopher Wellons
 ---
- Makefile | 2 +-
+ Makefile |    2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
-diff --git a/Makefile b/Makefile
-index 67c8097..6986e43 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -60,7 +60,7 @@ endif
  LINK_CMD = $(QUIET_LINK) $(MKTGTDIR) ; $(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
- TAGS_CMD = $(QUIET_TAGS) ctags -R
+ TAGS_CMD = $(QUIET_TAGS) ctags -R --c-kinds=+p
  WINDRES_CMD = $(QUIET_WINDRES) $(MKTGTDIR) ; $(WINDRES) $< $@
 -OBJCOPY_CMD = $(QUIET_OBJCOPY) $(MKTGTDIR) ; $(LD) -r -b binary -o $@ $<
 +OBJCOPY_CMD = $(QUIET_OBJCOPY) $(MKTGTDIR) ; $(LD) -r -b binary -z noexecstack -o $@ $<

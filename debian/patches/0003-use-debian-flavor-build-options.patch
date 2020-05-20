@@ -6,11 +6,13 @@ Do not strip binaries by default and use Debian LDFLAGS
 ---
  Makerules                | 5 ++++-
 
-diff --git a/Makerules b/Makerules
-index f688c5b..c343ec5 100644
+---
+ Makerules |    5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
 --- a/Makerules
 +++ b/Makerules
-@@ -22,7 +22,10 @@ SANITIZE_FLAGS += -fsanitize=leak
+@@ -24,7 +24,10 @@ SANITIZE_FLAGS += -fsanitize=leak
  
  ifeq ($(build),debug)
    CFLAGS += -pipe -g

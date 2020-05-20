@@ -2,14 +2,12 @@ From: Bastian Germann <bastiangermann@fishpost.de>
 Date: Fri, 10 Apr 2020 18:05:55 +0200
 Subject: Prevent thirdparty archive build
 ---
- Makefile | 1 -
+ Makefile |    1 -
  1 file changed, 1 deletion(-)
 
-diff --git a/Makefile b/Makefile
-index c5bc541a..7ea71e57 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -190,7 +190,6 @@ generate: source/pdf/js/util.js.h
+@@ -192,7 +192,6 @@ generate: source/pdf/js/util.js.h
  # --- Library ---
  
  MUPDF_LIB = $(OUT)/libmupdf.a
