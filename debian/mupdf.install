@@ -2,5 +2,7 @@ debian/mupdf.xpm usr/share/pixmaps
 debian/mupdf.png usr/share/pixmaps
 debian/mupdf.desktop usr/share/applications
 debian/mupdf.applications usr/share/application-registry
+debian/tmp/usr/share/doc/mupdf/* usr/share/doc/mupdf/
 debian/tmp/usr/bin/mupdf-x11 usr/lib/mupdf/
+debian/tmp/usr/bin/mupdf-gl usr/lib/mupdf/
 debian/tmp/usr/bin/mupdf
