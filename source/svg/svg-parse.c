@@ -62,7 +62,6 @@ svg_parse_number(const char *str, float min, float max, float inherit)
 	return x;
 }
 
-/* Return length/coordinate in points */
 float
 svg_parse_length(const char *str, float percent, float font_size)
 {
@@ -140,7 +139,7 @@ svg_parse_transform(fz_context *ctx, svg_document *doc, const char *str, fz_matr
 		 */
 
 		keywordlen = 0;
-		while (svg_is_alpha(*str) && keywordlen < sizeof(keyword) - 1)
+		while (svg_is_alpha(*str) && keywordlen < (int)sizeof(keyword) - 1)
 			keyword[keywordlen++] = *str++;
 		keyword[keywordlen] = 0;
 

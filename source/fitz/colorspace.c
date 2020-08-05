@@ -1,6 +1,6 @@
 #include "mupdf/fitz.h"
 
-#include "fitz-imp.h"
+#include "color-imp.h"
 
 #include <assert.h>
 #include <math.h>
@@ -156,7 +156,7 @@ static const char *fz_intent_names[] =
 int fz_lookup_rendering_intent(const char *name)
 {
 	int i;
-	for (i = 0; i < nelem(fz_intent_names); i++)
+	for (i = 0; i < (int)nelem(fz_intent_names); i++)
 		if (!strcmp(name, fz_intent_names[i]))
 			return i;
 	return FZ_RI_RELATIVE_COLORIMETRIC;
@@ -164,7 +164,7 @@ int fz_lookup_rendering_intent(const char *name)
 
 const char *fz_rendering_intent_name(int ri)
 {
-	if (ri >= 0 && ri < nelem(fz_intent_names))
+	if (ri >= 0 && ri < (int)nelem(fz_intent_names))
 		return fz_intent_names[ri];
 	return "RelativeColorimetric";
 }
@@ -216,7 +216,6 @@ int fz_colorspace_is_device_n(fz_context *ctx, fz_colorspace *cs)
 	return cs && (cs->type == FZ_COLORSPACE_SEPARATION);
 }
 
-/* True for CMYK, Separation and DeviceN colorspaces. */
 int fz_colorspace_is_subtractive(fz_context *ctx, fz_colorspace *cs)
 {
 	return cs && (cs->type == FZ_COLORSPACE_CMYK || cs->type == FZ_COLORSPACE_SEPARATION);
@@ -242,13 +241,11 @@ int fz_colorspace_is_device_cmyk(fz_context *ctx, fz_colorspace *cs)
 	return fz_colorspace_is_device(ctx, cs) && fz_colorspace_is_cmyk(ctx, cs);
 }
 
-/* True if DeviceN color space has only colorants from the CMYK set. */
 int fz_colorspace_device_n_has_only_cmyk(fz_context *ctx, fz_colorspace *cs)
 {
 	return cs && ((cs->flags & FZ_COLORSPACE_HAS_CMYK_AND_SPOTS) == FZ_COLORSPACE_HAS_CMYK);
 }
 
-/* True if DeviceN color space has cyan magenta yellow or black as one of its colorants. */
 int fz_colorspace_device_n_has_cmyk(fz_context *ctx, fz_colorspace *cs)
 {
 	return cs && (cs->flags & FZ_COLORSPACE_HAS_CMYK);
@@ -327,7 +324,7 @@ fz_new_colorspace(fz_context *ctx, enum fz_colorspace_type type, int flags, int 
 		cs->type = type;
 		cs->flags = flags;
 		cs->n = n;
-		cs->name = fz_strdup(ctx, name ? name : "UNKNOWN");
+		cs->name = Memento_label(fz_strdup(ctx, name ? name : "UNKNOWN"), "cs_name");
 	}
 	fz_catch(ctx)
 	{
@@ -569,10 +566,6 @@ fz_clamp_color(fz_context *ctx, fz_colorspace *cs, const float *in, float *out)
 
 const fz_color_params fz_default_color_params = { FZ_RI_RELATIVE_COLORIMETRIC, 1, 0, 0 };
 
-/* Handle page specific default colorspace settings that PDF holds in its page resources.
- * Also track the output intent.
- */
-
 fz_default_colorspaces *fz_new_default_colorspaces(fz_context *ctx)
 {
 	fz_default_colorspaces *default_cs = fz_malloc_struct(ctx, fz_default_colorspaces);
@@ -696,9 +689,7 @@ void fz_set_default_output_intent(fz_context *ctx, fz_default_colorspaces *defau
 
 #if FZ_ENABLE_ICC
 
-typedef struct fz_link_key_s fz_link_key;
-
-struct fz_link_key_s {
+typedef struct {
 	int refs;
 	unsigned char src_md5[16];
 	unsigned char dst_md5[16];
@@ -709,7 +700,7 @@ struct fz_link_key_s {
 	unsigned char format;
 	unsigned char proof;
 	unsigned char bgr;
-};
+} fz_link_key;
 
 static void *
 fz_keep_link_key(fz_context *ctx, void *key_)
@@ -745,7 +736,7 @@ fz_cmp_link_key(fz_context *ctx, void *k0_, void *k1_)
 }
 
 static void
-fz_format_link_key(fz_context *ctx, char *s, int n, void *key_)
+fz_format_link_key(fz_context *ctx, char *s, size_t n, void *key_)
 {
 	static const char *hex = "0123456789abcdef";
 	fz_link_key *key = (fz_link_key *)key_;
@@ -819,7 +810,7 @@ fz_find_icc_link(fz_context *ctx,
 	link = fz_find_item(ctx, fz_drop_icc_link_imp, &key, &fz_link_store_type);
 	if (!link)
 	{
-		new_key = fz_malloc(ctx, sizeof (fz_link_key));
+		new_key = fz_malloc_struct(ctx, fz_link_key);
 		memcpy(new_key, &key, sizeof (fz_link_key));
 		fz_try(ctx)
 		{
@@ -1010,7 +1001,7 @@ static void fz_cached_color_convert(fz_context *ctx, fz_color_converter *cc_, co
 
 	cc->base.convert(ctx, &cc->base, ss, ds);
 
-	val = fz_malloc(ctx, n);
+	val = Memento_label(fz_malloc_array(ctx, cc->base.ds->n, float), "cached_color_convert");
 	memcpy(val, ds, n);
 	fz_try(ctx)
 		fz_hash_insert(ctx, cc->hash, ss, val);

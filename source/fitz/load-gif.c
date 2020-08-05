@@ -1,4 +1,6 @@
-#include "fitz-imp.h"
+#include "mupdf/fitz.h"
+
+#include "pixmap-imp.h"
 
 #include <string.h>
 #include <limits.h>
@@ -176,7 +178,7 @@ gif_read_gct(fz_context *ctx, struct info *info, const unsigned char *p, const u
 	if (end - p < info->gct_entries * 3)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end in global color table in gif image");
 
-	info->gct = fz_malloc(ctx, info->gct_entries * 3);
+	info->gct = Memento_label(fz_malloc(ctx, info->gct_entries * 3), "gif_gct");
 	memmove(info->gct, p, info->gct_entries * 3);
 
 	return p + info->gct_entries * 3;
@@ -207,7 +209,7 @@ gif_read_lct(fz_context *ctx, struct info *info, const unsigned char *p, const u
 	if (end - p < info->lct_entries * 3)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end in local color table in gif image");
 
-	info->lct = fz_malloc(ctx, info->lct_entries * 3);
+	info->lct = Memento_label(fz_malloc(ctx, info->lct_entries * 3), "gif_lct");
 	memmove(info->lct, p, info->lct_entries * 3);
 
 	return p + info->lct_entries * 3;
@@ -423,7 +425,7 @@ gif_read_ae(fz_context *ctx, struct info *info, const unsigned char *p, const un
 		fz_throw(ctx, FZ_ERROR_GENERIC, "out of range application extension block size in gif image");
 
 	ignored = 0;
-	for (i = 0; i < nelem(ignorable); i++)
+	for (i = 0; i < (int)nelem(ignorable); i++)
 		ignored |= memcmp(&p[3], ignorable[i], 8 + 3);
 	if (!ignored)
 	{

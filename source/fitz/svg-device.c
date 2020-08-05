@@ -1,46 +1,39 @@
-#include "fitz-imp.h"
+#include "mupdf/fitz.h"
 
 #include <string.h>
 #include <float.h>
 #include <math.h>
 
-typedef struct svg_device_s svg_device;
-
-typedef struct tile_s tile;
-typedef struct font_s font;
-typedef struct glyph_s glyph;
-typedef struct image_s image;
-
-struct tile_s
+typedef struct
 {
 	int pattern;
 	fz_matrix ctm;
 	fz_rect view;
 	fz_rect area;
 	fz_point step;
-};
+} tile;
 
-struct glyph_s
+typedef struct glyph
 {
 	float x_off;
 	float y_off;
-};
+} glyph;
 
-struct font_s
+typedef struct
 {
 	int id;
 	fz_font *font;
 	int max_sentlist;
 	glyph *sentlist;
-};
+} font;
 
-struct image_s
+typedef struct
 {
 	int id;
 	fz_image *image;
-};
+} image;
 
-struct svg_device_s
+typedef struct
 {
 	fz_device super;
 
@@ -71,7 +64,7 @@ struct svg_device_s
 	image *images;
 
 	int layers;
-};
+} svg_device;
 
 /* SVG is awkward about letting us define things within symbol definitions
  * so we have to delay definitions until after the symbol definition ends. */
@@ -1273,22 +1266,6 @@ svg_dev_drop_device(fz_context *ctx, fz_device *dev)
 	fz_free(ctx, sdev->images);
 }
 
-/*
-	Create a device that outputs (single page)
-		SVG files to the given output stream.
-
-	output: The output stream to send the constructed SVG page to.
-
-	page_width, page_height: The page dimensions to use (in points).
-
-	text_format: How to emit text. One of the following values:
-		FZ_SVG_TEXT_AS_TEXT: As <text> elements with possible layout errors and mismatching fonts.
-		FZ_SVG_TEXT_AS_PATH: As <path> elements with exact visual appearance.
-
-	reuse_images: Share image resources using <symbol> definitions.
-
-	id: ID parameter to keep generated IDs unique across SVG files.
-*/
 fz_device *fz_new_svg_device_with_id(fz_context *ctx, fz_output *out, float page_width, float page_height, int text_format, int reuse_images, int *id)
 {
 	svg_device *dev = fz_new_derived_device(ctx, svg_device);

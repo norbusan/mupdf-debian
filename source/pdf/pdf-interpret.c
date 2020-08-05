@@ -893,7 +893,7 @@ pdf_process_stream(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream
 					break;
 
 				case PDF_TOK_INT:
-					if (csi->top < nelem(csi->stack)) {
+					if (csi->top < (int)nelem(csi->stack)) {
 						csi->stack[csi->top] = buf->i;
 						csi->top ++;
 					}
@@ -902,7 +902,7 @@ pdf_process_stream(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream
 					break;
 
 				case PDF_TOK_REAL:
-					if (csi->top < nelem(csi->stack)) {
+					if (csi->top < (int)nelem(csi->stack)) {
 						csi->stack[csi->top] = buf->f;
 						csi->top ++;
 					}
@@ -1003,7 +1003,6 @@ pdf_process_stream(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream
 	while (tok != PDF_TOK_EOF);
 }
 
-/* Functions to actually process annotations, glyphs and general stream objects */
 void
 pdf_process_contents(fz_context *ctx, pdf_processor *proc, pdf_document *doc, pdf_obj *rdb, pdf_obj *stmobj, fz_cookie *cookie)
 {

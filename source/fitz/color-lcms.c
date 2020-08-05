@@ -1,5 +1,7 @@
 #include "mupdf/fitz.h"
 
+#include "color-imp.h"
+
 #if FZ_ENABLE_ICC
 
 #ifndef LCMS_USE_FLOAT
@@ -50,7 +52,7 @@ static void fz_unmultiply_row(fz_context *ctx, int n, int c, int w, unsigned cha
 	}
 }
 
-struct fz_icc_link_s
+struct fz_icc_link
 {
 	fz_storable storable;
 	void *handle;
@@ -67,13 +69,13 @@ static void fz_lcms_log_error(cmsContext id, cmsUInt32Number error_code, const c
 static void *fz_lcms_malloc(cmsContext id, unsigned int size)
 {
 	fz_context *ctx = cmsGetContextUserData(id);
-	return fz_malloc_no_throw(ctx, size);
+	return Memento_label(fz_malloc_no_throw(ctx, size), "lcms");
 }
 
 static void *fz_lcms_realloc(cmsContext id, void *ptr, unsigned int size)
 {
 	fz_context *ctx = cmsGetContextUserData(id);
-	return fz_realloc_no_throw(ctx, ptr, size);
+	return Memento_label(fz_realloc_no_throw(ctx, ptr, size), "lcms");
 }
 
 static void fz_lcms_free(cmsContext id, void *ptr)
@@ -171,7 +173,7 @@ void fz_icc_profile_name(fz_context *ctx, fz_icc_profile *profile, char *name, s
 	cmsMLU *descMLU;
 	descMLU = cmsReadTag(GLO profile, cmsSigProfileDescriptionTag);
 	name[0] = 0;
-	cmsMLUgetASCII(GLO descMLU, "en", "US", name, size);
+	cmsMLUgetASCII(GLO descMLU, "en", "US", name, (cmsUInt32Number)size);
 }
 
 int fz_icc_profile_components(fz_context *ctx, fz_icc_profile *profile)

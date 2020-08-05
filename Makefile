@@ -58,7 +58,7 @@ ifdef RANLIB
   RANLIB_CMD = $(QUIET_RANLIB) $(RANLIB) $@
 endif
 LINK_CMD = $(QUIET_LINK) $(MKTGTDIR) ; $(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
-TAGS_CMD = $(QUIET_TAGS) ctags -R
+TAGS_CMD = $(QUIET_TAGS) ctags -R --c-kinds=+p
 WINDRES_CMD = $(QUIET_WINDRES) $(MKTGTDIR) ; $(WINDRES) $< $@
 OBJCOPY_CMD = $(QUIET_OBJCOPY) $(MKTGTDIR) ; $(LD) -r -b binary -o $@ $<
 
@@ -176,7 +176,7 @@ CMAP_GEN := $(notdir $(sort $(wildcard resources/cmaps/*)))
 CMAP_GEN := $(CMAP_GEN:%=source/pdf/cmaps/%.h)
 
 source/pdf/cmaps/%.h: resources/cmaps/% scripts/cmapdump.py
-	$(QUIET_GEN) python scripts/cmapdump.py > $@ $<
+	$(QUIET_GEN) python3 scripts/cmapdump.py > $@ $<
 
 generate: $(CMAP_GEN)
 
@@ -218,8 +218,8 @@ TOOL_APPS += $(MUTOOL_EXE)
 
 MURASTER_OBJ := $(OUT)/source/tools/muraster.o
 MURASTER_EXE := $(OUT)/muraster
-$(MURASTER_EXE) : $(MURASTER_OBJ) $(MUPDF_LIB) $(THIRD_LIB) $(THREAD_LIB)
-	$(LINK_CMD) $(THIRD_LIBS) $(THREADING_LIBS)
+$(MURASTER_EXE) : $(MURASTER_OBJ) $(MUPDF_LIB) $(THIRD_LIB) $(PKCS7_LIB) $(THREAD_LIB)
+	$(LINK_CMD) $(THIRD_LIBS) $(THREADING_LIBS) $(LIBCRYPTO_LIBS)
 TOOL_APPS += $(MURASTER_EXE)
 
 ifeq ($(HAVE_GLUT),yes)
@@ -284,6 +284,8 @@ endif
 -include $(MUVIEW_X11_CURL_OBJ:%.o=%.d)
 
 # --- Examples ---
+
+examples: $(OUT)/example $(OUT)/multi-threaded
 
 $(OUT)/example: docs/examples/example.c $(MUPDF_LIB) $(THIRD_LIB)
 	$(LINK_CMD) $(CFLAGS) $(THIRD_LIBS)
@@ -393,4 +395,4 @@ android: generate
 		APP_PLATFORM=android-16 \
 		APP_OPTIM=$(build)
 
-.PHONY: all clean nuke install third libs apps generate tags
+.PHONY: all clean nuke install third libs apps generate tags wasm

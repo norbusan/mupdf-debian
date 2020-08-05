@@ -12,6 +12,9 @@ load_icc_based(fz_context *ctx, pdf_obj *dict, int allow_alt)
 	fz_colorspace *cs = NULL;
 	pdf_obj *obj;
 
+	fz_var(alt);
+	fz_var(cs);
+
 	/* Look at Alternate to detect type (especially Lab). */
 	if (allow_alt)
 	{
@@ -36,8 +39,16 @@ load_icc_based(fz_context *ctx, pdf_obj *dict, int allow_alt)
 		{
 			buf = pdf_load_stream(ctx, dict);
 			cs = fz_new_icc_colorspace(ctx, alt ? alt->type : FZ_COLORSPACE_NONE, 0, NULL, buf);
-			if (cs->n != n)
-				fz_warn(ctx, "ICC colorspace N=%d does not match profile N=%d", n, cs->n);
+			if (cs->n > n)
+			{
+				fz_warn(ctx, "ICC colorspace N=%d does not match profile N=%d (ignoring profile)", n, cs->n);
+				fz_drop_colorspace(ctx, cs);
+				cs = NULL;
+			}
+			else if (cs->n < n)
+			{
+				fz_warn(ctx, "ICC colorspace N=%d does not match profile N=%d (using profile)", n, cs->n);
+			}
 		}
 		fz_always(ctx)
 			fz_drop_buffer(ctx, buf);
@@ -158,7 +169,8 @@ load_indexed(fz_context *ctx, pdf_obj *array)
 	pdf_obj *lookupobj = pdf_array_get(ctx, array, 3);
 	fz_colorspace *base = NULL;
 	fz_colorspace *cs;
-	int i, n, high;
+	size_t i, n;
+	int high;
 	unsigned char *lookup = NULL;
 
 	fz_var(base);
@@ -171,11 +183,11 @@ load_indexed(fz_context *ctx, pdf_obj *array)
 		high = pdf_to_int(ctx, highobj);
 		high = fz_clampi(high, 0, 255);
 		n = base->n * (high + 1);
-		lookup = fz_malloc(ctx, n);
+		lookup = Memento_label(fz_malloc(ctx, n), "cs_lookup");
 
 		if (pdf_is_string(ctx, lookupobj))
 		{
-			int sn = fz_mini(n, pdf_to_str_len(ctx, lookupobj));
+			size_t sn = fz_minz(n, pdf_to_str_len(ctx, lookupobj));
 			unsigned char *buf = (unsigned char *) pdf_to_str_buf(ctx, lookupobj);
 			for (i = 0; i < sn; ++i)
 				lookup[i] = buf[i];
@@ -191,7 +203,7 @@ load_indexed(fz_context *ctx, pdf_obj *array)
 			fz_try(ctx)
 			{
 				file = pdf_open_stream(ctx, lookupobj);
-				i = (int)fz_read(ctx, file, lookup, n);
+				i = fz_read(ctx, file, lookup, n);
 				if (i < n)
 					memset(lookup+i, 0, n-i);
 			}

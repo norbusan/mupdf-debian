@@ -1,20 +1,6 @@
 #include "mupdf/fitz.h"
 
-#include <zlib.h>
-
-/*
-	Compression and other filtering outputs.
-
-	These outputs write encoded data to another output. Create a filter
-	output with the destination, write to the filter, then close and drop
-	it when you're done. These can also be chained together, for example to
-	write ASCII Hex encoded, Deflate compressed, and RC4 encrypted data to
-	a buffer output.
-
-	Output streams don't use reference counting, so make sure to close all
-	of the filters in the reverse order of creation so that data is flushed
-	properly.
-*/
+#include "z-imp.h"
 
 struct ahx
 {
@@ -330,7 +316,7 @@ static void deflate_write(fz_context *ctx, void *opaque, const void *data, size_
 	int err;
 
 	state->z.next_in = (Bytef*)data;
-	state->z.avail_in = n;
+	state->z.avail_in = (uInt)n;
 	do
 	{
 		state->z.next_out = buffer;

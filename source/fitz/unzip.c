@@ -1,9 +1,9 @@
 #include "mupdf/fitz.h"
-#include "fitz-imp.h"
 
 #include <string.h>
+#include <limits.h>
 
-#include <zlib.h>
+#include "z-imp.h"
 
 #if !defined (INT32_MAX)
 #define INT32_MAX 2147483647L
@@ -20,22 +20,19 @@
 
 #define ZIP_ENCRYPTED_FLAG 0x1
 
-typedef struct zip_entry_s zip_entry;
-typedef struct fz_zip_archive_s fz_zip_archive;
-
-struct zip_entry_s
+typedef struct
 {
 	char *name;
 	uint64_t offset, csize, usize;
-};
+} zip_entry;
 
-struct fz_zip_archive_s
+typedef struct
 {
 	fz_archive super;
 
-	uint64_t count;
+	int count;
 	zip_entry *entries;
-};
+} fz_zip_archive;
 
 static void drop_zip_archive(fz_context *ctx, fz_archive *arch)
 {
@@ -118,7 +115,9 @@ static void read_zip_dir_imp(fz_context *ctx, fz_zip_archive *zip, int64_t start
 
 	fz_try(ctx)
 	{
-		for (i = 0; i < count; i++)
+		if (count > INT_MAX)
+			count = INT_MAX;
+		for (i = 0; i < (int)count; i++)
 		{
 			sig = fz_read_uint32_le(ctx, file);
 			if (sig != ZIP_CENTRAL_DIRECTORY_SIG)
@@ -144,7 +143,7 @@ static void read_zip_dir_imp(fz_context *ctx, fz_zip_archive *zip, int64_t start
 			if (namesize < 0 || metasize < 0 || commentsize < 0)
 				fz_throw(ctx, FZ_ERROR_GENERIC, "invalid size in zip entry");
 
-			name = fz_malloc(ctx, namesize + 1);
+			name = Memento_label(fz_malloc(ctx, namesize + 1), "zip_name");
 
 			n = fz_read(ctx, file, (unsigned char*)name, namesize);
 			if (n < (size_t)namesize)
@@ -185,7 +184,7 @@ static void read_zip_dir_imp(fz_context *ctx, fz_zip_archive *zip, int64_t start
 
 			fz_seek(ctx, file, commentsize, 1);
 
-			zip->entries = fz_realloc_array(ctx, zip->entries, zip->count + 1, zip_entry);
+			zip->entries = Memento_label(fz_realloc_array(ctx, zip->entries, zip->count + 1, zip_entry), "zip_entries");
 
 			zip->entries[zip->count].offset = offset;
 			zip->entries[zip->count].csize = csize;
@@ -303,7 +302,7 @@ static fz_buffer *read_zip_entry(fz_context *ctx, fz_archive *arch, const char *
 	int method;
 	z_stream z;
 	int code;
-	int len;
+	uint64_t len;
 	zip_entry *ent;
 
 	fz_var(cbuf);
@@ -405,11 +404,6 @@ static int count_zip_entries(fz_context *ctx, fz_archive *arch)
 	return zip->count;
 }
 
-/*
-	Detect if stream object is a zip archive.
-
-	Assumes that the stream object is seekable.
-*/
 int
 fz_is_zip_archive(fz_context *ctx, fz_stream *file)
 {
@@ -427,16 +421,6 @@ fz_is_zip_archive(fz_context *ctx, fz_stream *file)
 	return 1;
 }
 
-/*
-	Open a zip archive stream.
-
-	Open an archive using a seekable stream object rather than
-	opening a file or directory on disk.
-
-	An exception is throw if the stream is not a zip archive as
-	indicated by the presence of a zip signature.
-
-*/
 fz_archive *
 fz_open_zip_archive_with_stream(fz_context *ctx, fz_stream *file)
 {
@@ -467,15 +451,6 @@ fz_open_zip_archive_with_stream(fz_context *ctx, fz_stream *file)
 	return &zip->super;
 }
 
-/*
-	Open a zip archive file.
-
-	An exception is throw if the file is not a zip archive as
-	indicated by the presence of a zip signature.
-
-	filename: a path to a zip archive file as it would be given to
-	open(2).
-*/
 fz_archive *
 fz_open_zip_archive(fz_context *ctx, const char *filename)
 {

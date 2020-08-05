@@ -1,5 +1,7 @@
 #include "mupdf/fitz.h"
-#include "fitz-imp.h"
+
+#include "color-imp.h"
+#include "pixmap-imp.h"
 
 #include <assert.h>
 #include <string.h>
@@ -9,7 +11,7 @@ enum
 	FZ_SEPARATION_DISABLED_RENDER = 3
 };
 
-struct fz_separations_s
+struct fz_separations
 {
 	int refs;
 	int num_separations;
@@ -22,7 +24,6 @@ struct fz_separations_s
 	char *name[FZ_MAX_SEPARATIONS];
 };
 
-/* Create a new separations structure (initially empty) */
 fz_separations *fz_new_separations(fz_context *ctx, int controllable)
 {
 	fz_separations *sep;
@@ -53,7 +54,6 @@ void fz_drop_separations(fz_context *ctx, fz_separations *sep)
 	}
 }
 
-/* Add a separation (null terminated name, colorspace) */
 void fz_add_separation(fz_context *ctx, fz_separations *sep, const char *name, fz_colorspace *cs, int colorant)
 {
 	int n;
@@ -72,7 +72,6 @@ void fz_add_separation(fz_context *ctx, fz_separations *sep, const char *name, f
 	sep->num_separations++;
 }
 
-/* Add a separation with equivalents (null terminated name, colorspace) (old, deprecated) */
 void fz_add_separation_equivalents(fz_context *ctx, fz_separations *sep, uint32_t rgba, uint32_t cmyk, const char *name)
 {
 	int n;
@@ -91,7 +90,6 @@ void fz_add_separation_equivalents(fz_context *ctx, fz_separations *sep, uint32_
 	sep->num_separations++;
 }
 
-/* Control the rendering of a given separation */
 void fz_set_separation_behavior(fz_context *ctx, fz_separations *sep, int separation, fz_separation_behavior beh)
 {
 	int shift;
@@ -136,7 +134,6 @@ fz_separation_behavior fz_separation_current_behavior_internal(fz_context *ctx, 
 	return sep_state(sep, separation);
 }
 
-/* Test for the current behavior of a separation */
 fz_separation_behavior fz_separation_current_behavior(fz_context *ctx, const fz_separations *sep, int separation)
 {
 	int beh = fz_separation_current_behavior_internal(ctx, sep, separation);
@@ -161,7 +158,6 @@ int fz_count_separations(fz_context *ctx, const fz_separations *sep)
 	return sep->num_separations;
 }
 
-/* Return the number of active separations. */
 int fz_count_active_separations(fz_context *ctx, const fz_separations *sep)
 {
 	int i, n, c;
@@ -176,11 +172,6 @@ int fz_count_active_separations(fz_context *ctx, const fz_separations *sep)
 	return c;
 }
 
-/* Return a separations object with all the spots in the input
- * separations object that are set to composite, reset to be
- * enabled. If there ARE no spots in the object, this returns
- * NULL. If the object already has all its spots enabled, then
- * just returns another handle on the same object. */
 fz_separations *fz_clone_separations_for_overprint(fz_context *ctx, fz_separations *sep)
 {
 	int i, j, n, c;
@@ -236,10 +227,6 @@ fz_separations *fz_clone_separations_for_overprint(fz_context *ctx, fz_separatio
 	return clone;
 }
 
-/*
-	Convert between
-	different separation results.
-*/
 fz_pixmap *
 fz_clone_pixmap_area_with_different_seps(fz_context *ctx, fz_pixmap *src, const fz_irect *bbox, fz_colorspace *dcs, fz_separations *dseps, fz_color_params color_params, fz_default_colorspaces *default_cs)
 {
@@ -272,9 +259,6 @@ fz_clone_pixmap_area_with_different_seps(fz_context *ctx, fz_pixmap *src, const 
 	return pix;
 }
 
-/*
-	We assume that we never map from a DeviceN space to another DeviceN space here.
- */
 fz_pixmap *
 fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *src, fz_pixmap *dst, fz_colorspace *prf, fz_color_params color_params, fz_default_colorspaces *default_cs)
 {
@@ -963,8 +947,6 @@ fz_copy_pixmap_area_converting_seps(fz_context *ctx, fz_pixmap *src, fz_pixmap *
 	return dst;
 }
 
-/* Convert a color given in terms of one colorspace,
- * to a color in terms of another colorspace/separations. */
 void
 fz_convert_separation_colors(fz_context *ctx,
 	fz_colorspace *src_cs, const float *src_color,
@@ -1060,7 +1042,6 @@ found_process:
 	}
 }
 
-/* Get the equivalent separation color in a given colorspace. */
 void
 fz_separation_equivalent(fz_context *ctx,
 	const fz_separations *seps,

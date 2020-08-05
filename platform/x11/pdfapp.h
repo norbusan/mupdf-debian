@@ -36,20 +36,19 @@ extern int winchoiceinput(pdfapp_t*, int nopts, const char *opts[], int *nvals, 
 extern void winopenuri(pdfapp_t*, char *s);
 extern void wincursor(pdfapp_t*, int curs);
 extern void windocopy(pdfapp_t*);
-extern void windrawrect(pdfapp_t*, int x0, int y0, int x1, int y1);
 extern void windrawstring(pdfapp_t*, int x, int y, char *s);
 extern void winclose(pdfapp_t*);
 extern void winhelp(pdfapp_t*);
 extern void winfullscreen(pdfapp_t*, int state);
 extern int winsavequery(pdfapp_t*);
 extern int winquery(pdfapp_t*, const char*);
-extern int wingetcertpath(char *buf, int len);
+extern int wingetcertpath(pdfapp_t *, char *buf, int len);
 extern int wingetsavepath(pdfapp_t*, char *buf, int len);
 extern void winalert(pdfapp_t *, pdf_alert_event *alert);
 extern void winprint(pdfapp_t *);
 extern void winadvancetimer(pdfapp_t *, float duration);
-extern void winreplacefile(char *source, char *target);
-extern void wincopyfile(char *source, char *target);
+extern void winreplacefile(pdfapp_t *, char *source, char *target);
+extern void wincopyfile(pdfapp_t *, char *source, char *target);
 extern void winreloadpage(pdfapp_t *);
 
 struct pdfapp_s
@@ -180,5 +179,8 @@ void pdfapp_invert(pdfapp_t *app, fz_rect rect);
 void pdfapp_inverthit(pdfapp_t *app);
 
 void pdfapp_postblit(pdfapp_t *app);
+
+void pdfapp_warn(pdfapp_t *app, const char *fmt, ...);
+void pdfapp_error(pdfapp_t *app, char *msg);
 
 #endif

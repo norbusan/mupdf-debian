@@ -65,8 +65,8 @@ extern void ximage_blit(Drawable d, GC gc, int dstx, int dsty,
 	unsigned char *srcdata,
 	int srcx, int srcy, int srcw, int srch, int srcstride);
 
-void windrawstringxor(pdfapp_t *app, int x, int y, char *s);
-void cleanup(pdfapp_t *app);
+static void windrawstringxor(pdfapp_t *app, int x, int y, char *s);
+static void cleanup(pdfapp_t *app);
 
 static Display *xdpy;
 static Atom XA_CLIPBOARD;
@@ -309,27 +309,28 @@ int wingetsavepath(pdfapp_t *app, char *buf, int len)
 	return 0;
 }
 
-void winreplacefile(char *source, char *target)
+void winreplacefile(pdfapp_t *app, char *source, char *target)
 {
-	rename(source, target);
+	if (rename(source, target) == -1)
+		pdfapp_warn(app, "unable to rename file");
 }
 
-void wincopyfile(char *source, char *target)
+void wincopyfile(pdfapp_t *app, char *source, char *target)
 {
 	FILE *in, *out;
 	char buf[32 << 10];
-	int n;
+	size_t n;
 
 	in = fopen(source, "rb");
 	if (!in)
 	{
-		winerror(&gapp, "cannot open source file for copying");
+		pdfapp_error(app, "cannot open source file for copying");
 		return;
 	}
 	out = fopen(target, "wb");
 	if (!out)
 	{
-		winerror(&gapp, "cannot open target file for copying");
+		pdfapp_error(app, "cannot open target file for copying");
 		fclose(in);
 		return;
 	}
@@ -341,7 +342,7 @@ void wincopyfile(char *source, char *target)
 		if (n < sizeof buf)
 		{
 			if (ferror(in))
-				winerror(&gapp, "cannot read data from source file");
+				pdfapp_error(app, "cannot read data from source file");
 			break;
 		}
 	}
@@ -350,7 +351,7 @@ void wincopyfile(char *source, char *target)
 	fclose(in);
 }
 
-void cleanup(pdfapp_t *app)
+static void cleanup(pdfapp_t *app)
 {
 	fz_context *ctx = app->ctx;
 
@@ -617,7 +618,7 @@ void winadvancetimer(pdfapp_t *app, float duration)
 	advance_scheduled = 1;
 }
 
-void windrawstringxor(pdfapp_t *app, int x, int y, char *s)
+static void windrawstringxor(pdfapp_t *app, int x, int y, char *s)
 {
 	int prevfunction;
 	XGCValues xgcv;
@@ -643,7 +644,7 @@ void windrawstring(pdfapp_t *app, int x, int y, char *s)
 	XDrawString(xdpy, xwin, xgc, x, y, s, strlen(s));
 }
 
-void docopy(pdfapp_t *app, Atom copy_target)
+static void docopy(pdfapp_t *app, Atom copy_target)
 {
 	unsigned short copyucs2[16 * 1024];
 	char *latin1 = copylatin1;
@@ -678,7 +679,7 @@ void windocopy(pdfapp_t *app)
 	docopy(app, XA_PRIMARY);
 }
 
-void onselreq(Window requestor, Atom selection, Atom target, Atom property, Time time)
+static void onselreq(Window requestor, Atom selection, Atom target, Atom property, Time time)
 {
 	XEvent nevt;
 
@@ -783,7 +784,7 @@ int winquery(pdfapp_t *app, const char *query)
 	return QUERY_NO;
 }
 
-int wingetcertpath(char *buf, int len)
+int wingetcertpath(pdfapp_t *app, char *buf, int len)
 {
 	return 0;
 }
@@ -1042,7 +1043,7 @@ int main(int argc, char **argv)
 			case ClientMessage:
 				if (xevt.xclient.message_type == WM_RELOAD_PAGE)
 					pdfapp_reloadpage(&gapp);
-				else if (xevt.xclient.format == 32 && xevt.xclient.data.l[0] == WM_DELETE_WINDOW)
+				else if (xevt.xclient.format == 32 && ((Atom) xevt.xclient.data.l[0]) == WM_DELETE_WINDOW)
 					closing = 1;
 				break;
 			}

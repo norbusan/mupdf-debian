@@ -1,5 +1,8 @@
 #include "mupdf/fitz.h"
+
+#include "color-imp.h"
 #include "draw-imp.h"
+#include "pixmap-imp.h"
 
 #include <assert.h>
 #include <math.h>
@@ -59,14 +62,12 @@ static void paint_scan(fz_pixmap *FZ_RESTRICT pix, int y, int fx0, int fx1, int 
 	while (--w);
 }
 
-typedef struct edge_data_s edge_data;
-
-struct edge_data_s
+typedef struct
 {
 	float x;
 	float dx;
 	int v[2*MAXN];
-};
+} edge_data;
 
 static inline void prepare_edge(const float *FZ_RESTRICT vtop, const float *FZ_RESTRICT vbot, edge_data *FZ_RESTRICT edge, float y, int n)
 {
@@ -211,25 +212,6 @@ do_paint_tri(fz_context *ctx, void *arg, fz_vertex *av, fz_vertex *bv, fz_vertex
 	fz_paint_triangle(dest, vertices, 2 + dest->n - dest->alpha, ptd->bbox);
 }
 
-/*
-	Render a shade to a given pixmap.
-
-	shade: The shade to paint.
-
-	override_cs: NULL, or colorspace to override the shades
-	inbuilt colorspace.
-
-	ctm: The transform to apply.
-
-	dest: The pixmap to render into.
-
-	color_params: The color rendering settings
-
-	bbox: Pointer to a bounding box to limit the rendering
-	of the shade.
-
-	op: NULL, or pointer to overprint bitmap.
-*/
 void
 fz_paint_shade(fz_context *ctx, fz_shade *shade, fz_colorspace *colorspace, fz_matrix ctm, fz_pixmap *dest, fz_color_params color_params, fz_irect bbox, const fz_overprint *eop)
 {

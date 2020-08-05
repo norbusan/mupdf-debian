@@ -11,9 +11,7 @@
 
 #define MAX_USE_DEPTH 100
 
-typedef struct svg_state_s svg_state;
-
-struct svg_state_s
+typedef struct svg_state
 {
 	fz_matrix transform;
 	fz_stroke_state stroke;
@@ -33,7 +31,7 @@ struct svg_state_s
 	int stroke_is_set;
 	float stroke_color[3];
 	float stroke_opacity;
-};
+} svg_state;
 
 static void svg_parse_common(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *state);
 static void svg_run_element(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *root, const svg_state *state);
@@ -839,7 +837,7 @@ svg_run_path(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *node, c
 }
 
 /* svg, symbol, image, foreignObject establish new viewports */
-void
+static void
 svg_parse_viewport(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *state)
 {
 	char *w_att = fz_xml_att(node, "width");
@@ -880,7 +878,7 @@ svg_parse_preserve_aspect_ratio(const char *att, int *x, int *y)
 }
 
 /* svg, symbol, image, foreignObject plus marker, pattern, view can use viewBox to set the transform */
-void
+static void
 svg_parse_viewbox(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *state)
 {
 	char *viewbox_att = fz_xml_att(node, "viewBox");
@@ -916,7 +914,7 @@ svg_parse_viewbox(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *s
 }
 
 /* parse transform and presentation attributes */
-void
+static void
 svg_parse_common(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *state)
 {
 	fz_stroke_state *stroke = &state->stroke;

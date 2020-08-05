@@ -1,8 +1,8 @@
 #include "mupdf/fitz.h"
 
-#include <string.h>
+#include "z-imp.h"
 
-#include <zlib.h>
+#include <string.h>
 
 static inline void big32(unsigned char *buf, unsigned int v)
 {
@@ -12,15 +12,19 @@ static inline void big32(unsigned char *buf, unsigned int v)
 	buf[3] = (v) & 0xff;
 }
 
-static void putchunk(fz_context *ctx, fz_output *out, char *tag, unsigned char *data, int size)
+static void putchunk(fz_context *ctx, fz_output *out, char *tag, unsigned char *data, size_t size)
 {
 	unsigned int sum;
-	fz_write_int32_be(ctx, out, size);
+
+	if ((uint32_t)size != size)
+		fz_throw(ctx, FZ_ERROR_GENERIC, "PNG chunk too large");
+
+	fz_write_int32_be(ctx, out, (int)size);
 	fz_write_data(ctx, out, tag, 4);
 	fz_write_data(ctx, out, data, size);
 	sum = crc32(0, NULL, 0);
 	sum = crc32(sum, (unsigned char*)tag, 4);
-	sum = crc32(sum, data, size);
+	sum = crc32(sum, data, (unsigned int)size);
 	fz_write_int32_be(ctx, out, sum);
 }
 
@@ -199,8 +203,8 @@ png_write_band(fz_context *ctx, fz_band_writer *writer_, int stride, int band_st
 		 * larger than compressBound outputted in one go, even if you
 		 * take all the data out each time. */
 		writer->csize = compressBound(writer->usize);
-		writer->udata = fz_malloc(ctx, writer->usize);
-		writer->cdata = fz_malloc(ctx, writer->csize);
+		writer->udata = Memento_label(fz_malloc(ctx, writer->usize), "png_write_udata");
+		writer->cdata = Memento_label(fz_malloc(ctx, writer->csize), "png_write_cdata");
 		writer->stream.opaque = ctx;
 		writer->stream.zalloc = fz_zlib_alloc;
 		writer->stream.zfree = fz_zlib_free;

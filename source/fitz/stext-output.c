@@ -1,4 +1,4 @@
-#include "fitz-imp.h"
+#include "mupdf/fitz.h"
 
 #define SUBSCRIPT_OFFSET 0.2f
 #define SUPERSCRIPT_OFFSET -0.2f
@@ -145,9 +145,6 @@ fz_print_stext_block_as_html(fz_context *ctx, fz_output *out, fz_stext_block *bl
 	}
 }
 
-/*
-	Output a page to a file in HTML (visual) format.
-*/
 void
 fz_print_stext_page_as_html(fz_context *ctx, fz_output *out, fz_stext_page *page, int id)
 {
@@ -326,9 +323,6 @@ static void fz_print_stext_block_as_xhtml(fz_context *ctx, fz_output *out, fz_st
 	fz_write_printf(ctx, out, "</%s>\n", tag);
 }
 
-/*
-	Output a page to a file in XHTML (semantic) format.
-*/
 void
 fz_print_stext_page_as_xhtml(fz_context *ctx, fz_output *out, fz_stext_page *page, int id)
 {
@@ -372,9 +366,6 @@ fz_print_stext_trailer_as_xhtml(fz_context *ctx, fz_output *out)
 
 /* Detailed XML dump of the entire structured text data */
 
-/*
-	Output a page to a file in XML format.
-*/
 void
 fz_print_stext_page_as_xml(fz_context *ctx, fz_output *out, fz_stext_page *page, int id)
 {
@@ -458,9 +449,6 @@ fz_print_stext_page_as_xml(fz_context *ctx, fz_output *out, fz_stext_page *page,
 
 /* Plain text */
 
-/*
-	Output a page to a file in UTF-8 format.
-*/
 void
 fz_print_stext_page_as_text(fz_context *ctx, fz_output *out, fz_stext_page *page)
 {
@@ -498,9 +486,7 @@ enum {
 	FZ_FORMAT_STEXT,
 };
 
-typedef struct fz_text_writer_s fz_text_writer;
-
-struct fz_text_writer_s
+typedef struct
 {
 	fz_document_writer super;
 	int format;
@@ -508,7 +494,7 @@ struct fz_text_writer_s
 	fz_stext_options opts;
 	fz_stext_page *page;
 	fz_output *out;
-};
+} fz_text_writer;
 
 static fz_device *
 text_begin_page(fz_context *ctx, fz_document_writer *wri_, fz_rect mediabox)
@@ -590,14 +576,14 @@ text_drop_writer(fz_context *ctx, fz_document_writer *wri_)
 }
 
 fz_document_writer *
-fz_new_text_writer(fz_context *ctx, const char *format, const char *path, const char *args)
+fz_new_text_writer_with_output(fz_context *ctx, const char *format, fz_output *out, const char *options)
 {
 	fz_text_writer *wri;
 
 	wri = fz_new_derived_document_writer(ctx, fz_text_writer, text_begin_page, text_end_page, text_close_writer, text_drop_writer);
 	fz_try(ctx)
 	{
-		fz_parse_stext_options(ctx, &wri->opts, args);
+		fz_parse_stext_options(ctx, &wri->opts, options);
 
 		wri->format = FZ_FORMAT_TEXT;
 		if (!strcmp(format, "text"))
@@ -609,7 +595,7 @@ fz_new_text_writer(fz_context *ctx, const char *format, const char *path, const 
 		else if (!strcmp(format, "stext"))
 			wri->format = FZ_FORMAT_STEXT;
 
-		wri->out = fz_new_output_with_path(ctx, path ? path : "out.txt", 0);
+		wri->out = out;
 
 		switch (wri->format)
 		{
@@ -627,10 +613,24 @@ fz_new_text_writer(fz_context *ctx, const char *format, const char *path, const 
 	}
 	fz_catch(ctx)
 	{
-		fz_drop_output(ctx, wri->out);
 		fz_free(ctx, wri);
 		fz_rethrow(ctx);
 	}
 
 	return (fz_document_writer*)wri;
+}
+
+fz_document_writer *
+fz_new_text_writer(fz_context *ctx, const char *format, const char *path, const char *options)
+{
+	fz_output *out = fz_new_output_with_path(ctx, path ? path : "out.txt", 0);
+	fz_document_writer *wri = NULL;
+	fz_try(ctx)
+		wri = fz_new_text_writer_with_output(ctx, format, out, options);
+	fz_catch(ctx)
+	{
+		fz_drop_output(ctx, out);
+		fz_rethrow(ctx);
+	}
+	return wri;
 }

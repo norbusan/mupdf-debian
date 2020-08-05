@@ -1,6 +1,6 @@
 #include "mupdf/fitz.h"
 
-#include <zlib.h>
+#include "z-imp.h"
 
 typedef struct ps_band_writer_s
 {
@@ -219,7 +219,7 @@ ps_write_band(fz_context *ctx, fz_band_writer *writer_, int stride, int band_sta
 	{
 		fz_free(ctx, writer->input);
 		writer->input = NULL;
-		writer->input = fz_malloc(ctx, required_input);
+		writer->input = Memento_label(fz_malloc(ctx, required_input), "pswriter_input");
 		writer->input_size = required_input;
 	}
 
@@ -227,7 +227,7 @@ ps_write_band(fz_context *ctx, fz_band_writer *writer_, int stride, int band_sta
 	{
 		fz_free(ctx, writer->output);
 		writer->output = NULL;
-		writer->output = fz_malloc(ctx, required_output);
+		writer->output = Memento_label(fz_malloc(ctx, required_output), "pswriter_output");
 		writer->output_size = required_output;
 	}
 
@@ -268,16 +268,14 @@ fz_band_writer *fz_new_ps_band_writer(fz_context *ctx, fz_output *out)
 
 /* High-level document writer interface */
 
-typedef struct fz_ps_writer_s fz_ps_writer;
-
-struct fz_ps_writer_s
+typedef struct
 {
 	fz_document_writer super;
 	fz_draw_options draw;
 	fz_pixmap *pixmap;
 	fz_output *out;
 	int count;
-};
+} fz_ps_writer;
 
 static fz_device *
 ps_begin_page(fz_context *ctx, fz_document_writer *wri_, fz_rect mediabox)
@@ -329,22 +327,36 @@ ps_drop_writer(fz_context *ctx, fz_document_writer *wri_)
 }
 
 fz_document_writer *
-fz_new_ps_writer(fz_context *ctx, const char *path, const char *options)
+fz_new_ps_writer_with_output(fz_context *ctx, fz_output *out, const char *options)
 {
 	fz_ps_writer *wri = fz_new_derived_document_writer(ctx, fz_ps_writer, ps_begin_page, ps_end_page, ps_close_writer, ps_drop_writer);
 
 	fz_try(ctx)
 	{
 		fz_parse_draw_options(ctx, &wri->draw, options);
-		wri->out = fz_new_output_with_path(ctx, path ? path : "out.ps", 0);
+		wri->out = out;
 		fz_write_ps_file_header(ctx, wri->out);
 	}
 	fz_catch(ctx)
 	{
-		fz_drop_output(ctx, wri->out);
 		fz_free(ctx, wri);
 		fz_rethrow(ctx);
 	}
 
 	return (fz_document_writer*)wri;
+}
+
+fz_document_writer *
+fz_new_ps_writer(fz_context *ctx, const char *path, const char *options)
+{
+	fz_output *out = fz_new_output_with_path(ctx, path ? path : "out.ps", 0);
+	fz_document_writer *wri = NULL;
+	fz_try(ctx)
+		wri = fz_new_ps_writer_with_output(ctx, out, options);
+	fz_catch(ctx)
+	{
+		fz_drop_output(ctx, out);
+		fz_rethrow(ctx);
+	}
+	return wri;
 }
