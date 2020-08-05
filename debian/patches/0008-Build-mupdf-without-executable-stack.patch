@@ -9,7 +9,7 @@ Thanks: Christopher Wellons
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/Makefile b/Makefile
-index 67c8097..6986e43 100644
+index dabe17c..430f35b 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -60,7 +60,7 @@ endif

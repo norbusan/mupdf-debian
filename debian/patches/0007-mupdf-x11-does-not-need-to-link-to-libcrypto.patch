@@ -7,7 +7,7 @@ Subject: mupdf-x11 does not need to link to libcrypto
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/Makefile b/Makefile
-index 20e0b1a..67c8097 100644
+index c616f17..dabe17c 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -239,7 +239,7 @@ ifeq ($(HAVE_X11),yes)

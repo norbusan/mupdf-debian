@@ -9,7 +9,7 @@ pkg-config and thus fails to find a pile of .pc files.
  1 file changed, 28 insertions(+), 24 deletions(-)
 
 diff --git a/Makerules b/Makerules
-index c343ec5..2171c5b 100644
+index 44d1bd1..63a81ab 100644
 --- a/Makerules
 +++ b/Makerules
 @@ -6,6 +6,10 @@ OS := $(OS:MSYS%=MINGW)
@@ -23,7 +23,7 @@ index c343ec5..2171c5b 100644
  ifeq ($(findstring -fembed-bitcode,$(XCFLAGS)),)
    # clang does not support these in combination with -fembed-bitcode
    CFLAGS += -ffunction-sections -fdata-sections
-@@ -91,29 +95,29 @@ else ifeq ($(OS),MACOS)
+@@ -97,29 +101,29 @@ else ifeq ($(OS),MACOS)
  else ifeq ($(OS),Linux)
    HAVE_OBJCOPY := yes
  
@@ -71,7 +71,7 @@ index c343ec5..2171c5b 100644
    endif
  
    HAVE_SYS_CURL := $(shell pkg-config --exists libcurl && echo yes)
-@@ -128,16 +132,16 @@ else ifeq ($(OS),Linux)
+@@ -134,16 +138,16 @@ else ifeq ($(OS),Linux)
  	SYS_GLUT_LIBS := -lglut -lGL
    endif
  

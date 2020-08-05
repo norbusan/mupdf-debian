@@ -7,7 +7,7 @@ Subject: Sort files in static library to make the build reproducible
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/Makefile b/Makefile
-index c5bc541..2b15921 100644
+index 814a592..58698dc 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -53,7 +53,7 @@ endif

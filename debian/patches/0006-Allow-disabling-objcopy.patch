@@ -7,10 +7,10 @@ Subject: Allow disabling objcopy
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/Makerules b/Makerules
-index 95acc1d..7bc2334 100644
+index 2476295..e77c7fe 100644
 --- a/Makerules
 +++ b/Makerules
-@@ -94,7 +94,7 @@ else ifeq ($(OS),MACOS)
+@@ -100,7 +100,7 @@ else ifeq ($(OS),MACOS)
    RANLIB = xcrun ranlib
  
  else ifeq ($(OS),Linux)
