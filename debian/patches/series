@@ -6,5 +6,4 @@
 0006-Allow-disabling-objcopy.patch
 0007-mupdf-x11-does-not-need-to-link-to-libcrypto.patch
 0008-Build-mupdf-without-executable-stack.patch
-0009-Bug-701402-x11-Allow-smart-scroll-to-advance-to-last.patch
 0010-Prevent-thirdparty-archive-build.patch
