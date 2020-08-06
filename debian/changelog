@@ -1,3 +1,21 @@
+mupdf (1.17.0+ds1-1) unstable; urgency=medium
+
+  [ Bastian Germann ]
+  * Use system mujs (Closes: #949636)
+  * Patch: Prevent thirdparty archive build
+  * Exclude all thirdparty files
+  * Remove thirdparty files
+  * Build-Depend on python3 (Closes: #937093)
+  * d/copyright: Prepare for 1.17
+  * Refresh patches for 1.17.0
+
+  [ Kan-Ru Chen ]
+  * New upstream version 1.17.0+ds1
+  * Bump standards-version to 4.5.0
+  * Refresh patches
+
+ -- Kan-Ru Chen (陳侃如) <koster@debian.org>  Thu, 06 Aug 2020 21:48:09 +0900
+
 mupdf (1.16.1+ds1-2) unstable; urgency=medium
 
   [ Kan-Ru Chen ]
