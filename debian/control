@@ -6,7 +6,6 @@ Uploaders: Quoc-Viet Nguyen <afelion@gmail.com>
 Build-Depends: debhelper (>= 12), dh-exec, dpkg-dev (>= 1.16.1.1~),
  libfreetype6-dev, pkg-config, libjpeg-dev, libjbig2dec-dev,
  libmujs-dev, libopenjp2-7-dev, libx11-dev, libxext-dev, zlib1g-dev,
- libtesseract-dev,
  libharfbuzz-dev, freeglut3-dev, liblcms2-dev, python3:any
 Build-Conflicts: libssl-dev
 Standards-Version: 4.5.0
