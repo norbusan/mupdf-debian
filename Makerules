@@ -13,14 +13,28 @@ endif
 
 ifeq ($(OS),MACOS)
   LDREMOVEUNREACH := -Wl,-dead_strip
+  SO := dylib
 else
   LDREMOVEUNREACH := -Wl,--gc-sections
+  SO := so
 endif
 
 CFLAGS += -Wsign-compare
 
 SANITIZE_FLAGS += -fsanitize=address
 SANITIZE_FLAGS += -fsanitize=leak
+
+ifeq ($(shared),yes)
+  LIB_CFLAGS = -fPIC
+  ifeq ($(OS),MACOS)
+    LIB_LDFLAGS = -dynamiclib
+  else
+    LIB_LDFLAGS = -shared
+  endif
+else
+  LIB_CFLAGS =
+  LIB_LDFLAGS =
+endif
 
 ifeq ($(build),debug)
   CFLAGS += -pipe -g
@@ -54,7 +68,11 @@ else ifeq ($(build),memento)
   LDFLAGS += -g -rdynamic
   ifneq ($(HAVE_LIBDL),no)
     CFLAGS += -DHAVE_LIBDL
-    LIBS += -ldl
+    ifeq ($(OS),OpenBSD)
+      LIBS += -L /usr/local/lib -l execinfo
+    else
+      LIBS += -ldl
+    endif
   endif
 else ifeq ($(build),gperf)
   CFLAGS += -pipe -O2 -DNDEBUG -fomit-frame-pointer -DGPERF
@@ -63,16 +81,22 @@ else
   $(error unknown build setting: '$(build)')
 endif
 
+ifeq ($(OS),OpenBSD)
+  LDFLAGS += -pthread
+endif
+
 # Default system libraries
 SYS_FREETYPE_LIBS := -lfreetype2
 SYS_HARFBUZZ_LIBS := -lharfbuzz
 SYS_JBIG2DEC_LIBS := -ljbig2dec
 SYS_JPEGXR_LIBS := -ljpegxr
-SYS_LCMS2_LIBS := -llcms2-art
+SYS_LCMS2_LIBS := -llcms2
 SYS_LIBJPEG_LIBS := -ljpeg
 SYS_MUJS_LIBS := -lmujs
 SYS_OPENJPEG_LIBS := -lopenjp2
 SYS_ZLIB_LIBS := -lz
+SYS_TESSERACT_LIBS := -ltesseract
+SYS_LEPTONICA_LIBS := -llept
 
 ifneq "$(CLUSTER)" ""
   CFLAGS += -DCLUSTER
@@ -98,6 +122,10 @@ else ifeq ($(OS),Linux)
 	SYS_FREETYPE_CFLAGS := $(shell pkg-config --cflags freetype2)
 	SYS_FREETYPE_LIBS := $(shell pkg-config --libs freetype2)
   endif
+  ifeq ($(shell pkg-config --exists gumbo && echo yes),yes)
+	SYS_GUMBO_CFLAGS := $(shell pkg-config --cflags gumbo)
+	SYS_GUMBO_LIBS := $(shell pkg-config --libs gumbo)
+  endif
   ifeq ($(shell pkg-config --exists harfbuzz && echo yes),yes)
 	SYS_HARFBUZZ_CFLAGS := $(shell pkg-config --cflags harfbuzz)
 	SYS_HARFBUZZ_LIBS := $(shell pkg-config --libs harfbuzz)
@@ -117,6 +145,18 @@ else ifeq ($(OS),Linux)
   ifeq ($(shell pkg-config --exists zlib && echo yes),yes)
 	SYS_ZLIB_CFLAGS := $(shell pkg-config --cflags zlib)
 	SYS_ZLIB_LIBS := $(shell pkg-config --libs zlib)
+  endif
+
+  HAVE_LEPTONICA := $(shell pkg-config --exists 'lept >= 1.7.4' && echo yes)
+  ifeq ($(HAVE_LEPTONICA),yes)
+	SYS_LEPTONICA_CFLAGS := $(shell pkg-config --cflags lept)
+	SYS_LEPTONICA_LIBS := $(shell pkg-config --libs lept)
+  endif
+
+  HAVE_TESSERACT := $(shell pkg-config --exists 'tesseract-ocr >= 4.0.0' && echo yes)
+  ifeq ($(HAVE_TESSERACT),yes)
+	SYS_TESSERACT_CFLAGS := $(shell pkg-config --cflags tesseract)
+	SYS_TESSERACT_LIBS := $(shell pkg-config --libs tesseract)
   endif
 
   HAVE_SYS_CURL := $(shell pkg-config --exists libcurl && echo yes)

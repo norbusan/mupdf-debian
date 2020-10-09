@@ -997,11 +997,19 @@ mark_all(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, pdf_obj *val
 
 		if (pdf_is_dict(ctx, val))
 		{
-			int i, n = pdf_dict_len(ctx, val);
+			int i, n;
+			n = pdf_dict_len(ctx, val);
 
 			for (i = 0; i < n; i++)
 			{
-				mark_all(ctx, doc, opts, pdf_dict_get_val(ctx, val, i), flag, page);
+				pdf_obj *v = pdf_dict_get_val(ctx, val, i);
+				pdf_obj *type = pdf_dict_get(ctx, v, PDF_NAME(Type));
+
+				/* Don't walk through the Page tree, or direct to a page. */
+				if (pdf_name_eq(ctx, PDF_NAME(Pages), type) || pdf_name_eq(ctx, PDF_NAME(Page), type))
+					continue;
+
+				mark_all(ctx, doc, opts, v, flag, page);
 			}
 		}
 		else if (pdf_is_array(ctx, val))
@@ -1010,7 +1018,14 @@ mark_all(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, pdf_obj *val
 
 			for (i = 0; i < n; i++)
 			{
-				mark_all(ctx, doc, opts, pdf_array_get(ctx, val, i), flag, page);
+				pdf_obj *v = pdf_array_get(ctx, val, i);
+				pdf_obj *type = pdf_dict_get(ctx, v, PDF_NAME(Type));
+
+				/* Don't walk through the Page tree, or direct to a page. */
+				if (pdf_name_eq(ctx, PDF_NAME(Pages), type) || pdf_name_eq(ctx, PDF_NAME(Page), type))
+					continue;
+
+				mark_all(ctx, doc, opts, v, flag, page);
 			}
 		}
 	}
@@ -1567,21 +1582,22 @@ static int is_bitmap_stream(fz_context *ctx, pdf_obj *obj, size_t len, int *w, i
 	stride = (*w + 7) >> 3;
 	if ((size_t)stride * (*h) != len)
 		return 0;
-	bpc = pdf_dict_get(ctx, obj, PDF_NAME(BitsPerComponent));
-	if (pdf_is_int(ctx, bpc))
+	if (pdf_dict_get_bool(ctx, obj, PDF_NAME(ImageMask)))
 	{
+		return 1;
+	}
+	else
+	{
+		bpc = pdf_dict_get(ctx, obj, PDF_NAME(BitsPerComponent));
+		if (!pdf_is_int(ctx, bpc))
+			return 0;
 		if (pdf_to_int(ctx, bpc) != 1)
 			return 0;
 		cs = pdf_dict_get(ctx, obj, PDF_NAME(ColorSpace));
 		if (!pdf_name_eq(ctx, cs, PDF_NAME(DeviceGray)))
 			return 0;
+		return 1;
 	}
-	else
-	{
-		if (pdf_dict_get_bool(ctx, obj, PDF_NAME(ImageMask)) != 1)
-			return 0;
-	}
-	return 1;
 }
 
 static inline int isbinary(int c)
@@ -2432,14 +2448,15 @@ static int
 my_log2(int x)
 {
 	int i = 0;
+	const int sign_bit = sizeof(int)*8-1;
 
 	if (x <= 0)
 		return 0;
 
-	while ((1<<i) <= x && (1<<i) > 0)
+	while ((1<<i) <= x && i < sign_bit)
 		i++;
 
-	if ((1<<i) <= 0)
+	if (i >= sign_bit)
 		return 0;
 
 	return i;

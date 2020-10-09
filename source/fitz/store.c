@@ -170,6 +170,7 @@ void fz_drop_key_storable(fz_context *ctx, const fz_key_storable *sc)
 		return;
 
 	fz_lock(ctx, FZ_LOCK_ALLOC);
+	assert(s->storable.refs != 0);
 	if (s->storable.refs > 0)
 	{
 		(void)Memento_dropRef(s);
@@ -476,6 +477,7 @@ fz_store_item(fz_context *ctx, void *key, void *val_, size_t itemsize, const fz_
 		{
 			/* There was one there already! Take a new reference
 			 * to the existing one, and drop our current one. */
+			fz_warn(ctx, "found duplicate %s in the store", type->name);
 			touch(store, existing);
 			if (existing->val->refs > 0)
 			{

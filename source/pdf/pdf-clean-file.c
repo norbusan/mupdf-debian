@@ -66,7 +66,7 @@ static int dest_is_valid(fz_context *ctx, pdf_obj *o, int page_count, int *page_
 
 	p = pdf_dict_get(ctx, o, PDF_NAME(Dest));
 	if (p == NULL)
-	{}
+		return 1; /* A name with no dest counts as valid. */
 	else if (pdf_is_string(ctx, p))
 		return string_in_names_list(ctx, p, names_list);
 	else if (!dest_is_valid_page(ctx, pdf_array_get(ctx, p, 0), page_object_nums, page_count))
@@ -313,7 +313,7 @@ static void retainpages(fz_context *ctx, globals *glo, int argc, char **argv)
 	pdf_drop_obj(ctx, root);
 }
 
-void pdf_clean_file(fz_context *ctx, char *infile, char *outfile, char *password, pdf_write_options *opts, char *argv[], int argc)
+void pdf_clean_file(fz_context *ctx, char *infile, char *outfile, char *password, pdf_write_options *opts, int argc, char *argv[])
 {
 	globals glo = { 0 };
 

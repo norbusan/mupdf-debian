@@ -126,7 +126,7 @@ parse_inline_image(fz_context *ctx, pdf_csi *csi, fz_stream *stm, char *csname, 
 				if (ch == 'I')
 				{
 					ch = fz_peek_byte(ctx, stm);
-					if (ch == ' ' || ch <= 32 || ch == EOF || ch == '<' || ch == '/')
+					if (ch == ' ' || ch <= 32 || ch == '<' || ch == '/')
 					{
 						found = 1;
 						break;
@@ -547,6 +547,18 @@ pdf_process_end(fz_context *ctx, pdf_processor *proc, pdf_csi *csi)
 		proc->op_END(ctx, proc);
 }
 
+static int is_known_bad_word(const char *word)
+{
+	switch (*word)
+	{
+	case 'I': return !strcmp(word, "Infinity");
+	case 'N': return !strcmp(word, "NaN");
+	case 'i': return !strcmp(word, "inf");
+	case 'n': return !strcmp(word, "nan");
+	}
+	return 0;
+}
+
 #define A(a) (a)
 #define B(a,b) (a | b << 8)
 #define C(a,b,c) (a | b << 8 | c << 16)
@@ -574,7 +586,12 @@ pdf_process_keyword(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_strea
 	{
 	default:
 		if (!csi->xbalance)
-			fz_throw(ctx, FZ_ERROR_SYNTAX, "unknown keyword: '%s'", word);
+		{
+			if (is_known_bad_word(word))
+				fz_throw(ctx, FZ_ERROR_MINOR, "unknown keyword: '%s'", word);
+			else
+				fz_throw(ctx, FZ_ERROR_SYNTAX, "unknown keyword: '%s'", word);
+		}
 		break;
 
 	/* general graphics state */
@@ -1039,6 +1056,20 @@ pdf_process_contents(fz_context *ctx, pdf_processor *proc, pdf_document *doc, pd
 	}
 }
 
+/* Bug 702543: It looks like certain types of annotation are never
+ * printed. */
+static int
+pdf_should_print_annot(fz_context *ctx, pdf_annot *annot)
+{
+	enum pdf_annot_type type = pdf_annot_type(ctx, annot);
+
+	/* We may need to add more types here. */
+	if (type == PDF_ANNOT_FILE_ATTACHMENT)
+		return 0;
+
+	return 1;
+}
+
 void
 pdf_process_annot(fz_context *ctx, pdf_processor *proc, pdf_document *doc, pdf_page *page, pdf_annot *annot, fz_cookie *cookie)
 {
@@ -1053,8 +1084,13 @@ pdf_process_annot(fz_context *ctx, pdf_processor *proc, pdf_document *doc, pdf_p
 
 	if (proc->usage)
 	{
-		if (!strcmp(proc->usage, "Print") && !(flags & PDF_ANNOT_IS_PRINT))
-			return;
+		if (!strcmp(proc->usage, "Print"))
+		{
+			if (!(flags & PDF_ANNOT_IS_PRINT))
+				return;
+			if (!pdf_should_print_annot(ctx, annot))
+				return;
+		}
 		if (!strcmp(proc->usage, "View") && (flags & PDF_ANNOT_IS_NO_VIEW))
 			return;
 	}

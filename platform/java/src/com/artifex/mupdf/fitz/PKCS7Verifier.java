@@ -5,6 +5,10 @@ import java.util.Map;
 
 public abstract class PKCS7Verifier
 {
+	static {
+		Context.init();
+	}
+
 	// Define possible values for signature verification results
 	public final static int PKCS7VerifierOK                = 0;
 	public final static int PKCS7VerifierNoSignature       = 1;
@@ -20,6 +24,12 @@ public abstract class PKCS7Verifier
 	}
 
 	private long pointer;
+
+	protected native void finalize();
+
+	public void destroy() {
+		finalize();
+	}
 
 	private native long newNative(PKCS7Verifier verifier);
 

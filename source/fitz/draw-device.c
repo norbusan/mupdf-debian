@@ -502,10 +502,11 @@ resolve_color(fz_context *ctx,
 	if (color_params.op == 0 || !fz_colorspace_is_subtractive(ctx, dest->colorspace))
 		op = NULL;
 
-	/* Device Gray is additive, but seems to still be counted for overprint
-	 * (see Ghent_V3.0/030_Gray_K_black_OP_x1a.pdf 030.pdf). */
 	else if (devgray)
 	{
+		/* Device Gray is additive, but seems to still be
+		 * counted for overprint (see
+		 * Ghent_V3.0/030_Gray_K_black_OP_x1a.pdf 030.pdf). */
 	}
 
 	/* If we are in a CMYK space (i.e. not a devn one, given we know we are subtractive at this point),
@@ -1105,13 +1106,24 @@ fz_draw_stroke_text(fz_context *ctx, fz_device *devp, const fz_text *text, const
 			glyph = fz_render_stroked_glyph(ctx, span->font, gid, &trm, ctm, stroke, &state->scissor, aa);
 			if (glyph)
 			{
+				fz_pixmap *pixmap = glyph->pixmap;
 				int x = (int)trm.e;
 				int y = (int)trm.f;
-				draw_glyph(colorbv, state->dest, glyph, x, y, &state->scissor, eop);
-				if (state->shape)
-					draw_glyph(&solid, state->shape, glyph, x, y, &state->scissor, 0);
-				if (state->group_alpha)
-					draw_glyph(&alpha_byte, state->group_alpha, glyph, x, y, &state->scissor, 0);
+				if (pixmap == NULL || pixmap->n == 1)
+				{
+					draw_glyph(colorbv, state->dest, glyph, x, y, &state->scissor, eop);
+					if (state->shape)
+						draw_glyph(&solid, state->shape, glyph, x, y, &state->scissor, 0);
+					if (state->group_alpha)
+						draw_glyph(&alpha_byte, state->group_alpha, glyph, x, y, &state->scissor, 0);
+				}
+				else
+				{
+					fz_matrix mat;
+					mat.a = pixmap->w; mat.b = mat.c = 0; mat.d = pixmap->h;
+					mat.e = x + pixmap->x; mat.f = y + pixmap->y;
+					fz_paint_image(ctx, state->dest, &state->scissor, state->shape, state->group_alpha, pixmap, mat, alpha * 255, !(devp->hints & FZ_DONT_INTERPOLATE_IMAGES), devp->flags & FZ_DEVFLAG_GRIDFIT_AS_TILED, eop);
+				}
 				fz_drop_glyph(ctx, glyph);
 			}
 			else
@@ -2491,6 +2503,7 @@ fz_format_tile_key(fz_context *ctx, char *s, size_t n, void *key_)
 
 static const fz_store_type fz_tile_store_type =
 {
+	"struct tile_record",
 	fz_make_hash_tile_key,
 	fz_keep_tile_key,
 	fz_drop_tile_key,
@@ -2723,13 +2736,14 @@ fz_draw_end_tile(fz_context *ctx, fz_device *devp)
 	if (state[0].group_alpha)
 		fz_dump_blend(ctx, "/GA=", state[0].group_alpha);
 #endif
-	dest = fz_new_pixmap_from_pixmap(ctx, state[1].dest, NULL);
-
+	fz_var(dest);
 	fz_var(shape);
 	fz_var(group_alpha);
 
 	fz_try(ctx)
 	{
+		dest = fz_new_pixmap_from_pixmap(ctx, state[1].dest, NULL);
+
 		shape = fz_new_pixmap_from_pixmap(ctx, state[1].shape, NULL);
 		group_alpha = fz_new_pixmap_from_pixmap(ctx, state[1].group_alpha, NULL);
 
@@ -2762,66 +2776,65 @@ fz_draw_end_tile(fz_context *ctx, fz_device *devp)
 				}
 			}
 		}
+
+		/* Now we try to cache the tiles. Any failure here will just result in us not caching. */
+		if (state[1].encache && state[1].id != 0)
+		{
+			tile_record *tile = NULL;
+			tile_key *key = NULL;
+			fz_var(tile);
+			fz_var(key);
+			fz_try(ctx)
+			{
+				tile_record *existing_tile;
+
+				tile = fz_new_tile_record(ctx, state[1].dest, state[1].shape, state[1].group_alpha);
+
+				key = fz_malloc_struct(ctx, tile_key);
+				key->refs = 1;
+				key->id = state[1].id;
+				key->ctm[0] = ctm.a;
+				key->ctm[1] = ctm.b;
+				key->ctm[2] = ctm.c;
+				key->ctm[3] = ctm.d;
+				key->cs = fz_keep_colorspace_store_key(ctx, state[1].dest->colorspace);
+				key->has_shape = (state[1].shape != NULL);
+				key->has_group_alpha = (state[1].group_alpha != NULL);
+				existing_tile = fz_store_item(ctx, key, tile, fz_tile_size(ctx, tile), &fz_tile_store_type);
+				if (existing_tile)
+				{
+					/* We already have a tile. This will either have been
+					 * produced by a racing thread, or there is already
+					 * an entry for this one in the store. */
+					fz_drop_tile_record(ctx, tile);
+					tile = existing_tile;
+				}
+			}
+			fz_always(ctx)
+			{
+				fz_drop_tile_key(ctx, key);
+				fz_drop_tile_record(ctx, tile);
+			}
+			fz_catch(ctx)
+			{
+				/* Do nothing */
+			}
+		}
 	}
 	fz_always(ctx)
 	{
 		fz_drop_pixmap(ctx, dest);
 		fz_drop_pixmap(ctx, shape);
 		fz_drop_pixmap(ctx, group_alpha);
+		fz_drop_pixmap(ctx, state[1].dest);
+		state[1].dest = NULL;
+		fz_drop_pixmap(ctx, state[1].shape);
+		state[1].shape = NULL;
+		fz_drop_pixmap(ctx, state[1].group_alpha);
+		state[1].group_alpha = NULL;
 	}
 	fz_catch(ctx)
 		fz_rethrow(ctx);
-
-	/* Now we try to cache the tiles. Any failure here will just result in us not caching. */
-	if (state[1].encache && state[1].id != 0)
-	{
-		tile_record *tile = NULL;
-		tile_key *key = NULL;
-		fz_var(tile);
-		fz_var(key);
-		fz_try(ctx)
-		{
-			tile_record *existing_tile;
-
-			tile = fz_new_tile_record(ctx, state[1].dest, state[1].shape, state[1].group_alpha);
-
-			key = fz_malloc_struct(ctx, tile_key);
-			key->refs = 1;
-			key->id = state[1].id;
-			key->ctm[0] = ctm.a;
-			key->ctm[1] = ctm.b;
-			key->ctm[2] = ctm.c;
-			key->ctm[3] = ctm.d;
-			key->cs = fz_keep_colorspace_store_key(ctx, state[1].dest->colorspace);
-			key->has_shape = (state[1].shape != NULL);
-			key->has_group_alpha = (state[1].group_alpha != NULL);
-			existing_tile = fz_store_item(ctx, key, tile, fz_tile_size(ctx, tile), &fz_tile_store_type);
-			if (existing_tile)
-			{
-				/* We already have a tile. This will either have been
-				 * produced by a racing thread, or there is already
-				 * an entry for this one in the store. */
-				fz_drop_tile_record(ctx, tile);
-				tile = existing_tile;
-			}
-		}
-		fz_always(ctx)
-		{
-			fz_drop_tile_key(ctx, key);
-			fz_drop_tile_record(ctx, tile);
-		}
-		fz_catch(ctx)
-		{
-			/* Do nothing */
-		}
-	}
-
-	fz_drop_pixmap(ctx, state[1].dest);
-	state[1].dest = NULL;
-	fz_drop_pixmap(ctx, state[1].shape);
-	state[1].shape = NULL;
-	fz_drop_pixmap(ctx, state[1].group_alpha);
-	state[1].group_alpha = NULL;
 
 #ifdef DUMP_GROUP_BLENDS
 	fz_dump_blend(ctx, " to get ", state[0].dest);
@@ -2915,7 +2928,7 @@ fz_draw_drop_device(fz_context *ctx, fz_device *devp)
 	fz_drop_rasterizer(ctx, rast);
 }
 
-fz_device *
+static fz_device *
 new_draw_device(fz_context *ctx, fz_matrix transform, fz_pixmap *dest, const fz_aa_context *aa, const fz_irect *clip, fz_colorspace *proof_cs)
 {
 	fz_draw_device *dev = fz_new_derived_device(ctx, fz_draw_device);

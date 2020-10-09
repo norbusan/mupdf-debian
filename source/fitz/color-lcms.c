@@ -314,7 +314,7 @@ fz_new_icc_link(fz_context *ctx,
 	}
 	fz_catch(ctx)
 	{
-		cmsDeleteTransform(GLO link);
+		cmsDeleteTransform(GLO transform);
 		fz_rethrow(ctx);
 	}
 	return link;
@@ -350,7 +350,7 @@ fz_icc_transform_color(fz_context *ctx, fz_color_converter *cc, const float *src
 }
 
 void
-fz_icc_transform_pixmap(fz_context *ctx, fz_icc_link *link, fz_pixmap *src, fz_pixmap *dst, int copy_spots)
+fz_icc_transform_pixmap(fz_context *ctx, fz_icc_link *link, const fz_pixmap *src, fz_pixmap *dst, int copy_spots)
 {
 	GLOINIT
 	int cmm_num_src, cmm_num_dst, cmm_extras;

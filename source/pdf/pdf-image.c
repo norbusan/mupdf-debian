@@ -305,9 +305,7 @@ pdf_add_image(fz_context *ctx, pdf_document *doc, fz_image *image)
 	pdf_obj *imobj = NULL;
 	pdf_obj *dp;
 	fz_buffer *buffer = NULL;
-	pdf_obj *imref = NULL;
 	fz_compressed_buffer *cbuffer;
-	unsigned char digest[16];
 	int i, n;
 
 	/* If we can maintain compression, do so */
@@ -316,12 +314,6 @@ pdf_add_image(fz_context *ctx, pdf_document *doc, fz_image *image)
 	fz_var(pixmap);
 	fz_var(buffer);
 	fz_var(imobj);
-	fz_var(imref);
-
-	/* Check if the same image already exists in this doc. */
-	imref = pdf_find_image_resource(ctx, doc, image, digest);
-	if (imref)
-		return imref;
 
 	imobj = pdf_add_new_dict(ctx, doc, 3);
 	fz_try(ctx)
@@ -432,7 +424,7 @@ unknown_compression:
 				int w = pixmap->w;
 				unsigned char *s = pixmap->samples;
 				unsigned char *d = fz_calloc(ctx, h, stride);
-				buffer = fz_new_buffer_from_data(ctx, d, h * stride);
+				buffer = fz_new_buffer_from_data(ctx, d, (size_t)h * stride);
 
 				pdf_dict_put_int(ctx, imobj, PDF_NAME(BitsPerComponent), 1);
 
@@ -448,7 +440,7 @@ unknown_compression:
 			}
 			else
 			{
-				unsigned int size = pixmap->w * n;
+				size_t size = (size_t)pixmap->w * n;
 				int h = pixmap->h;
 				unsigned char *s = pixmap->samples;
 				unsigned char *d = Memento_label(fz_malloc(ctx, size * h), "pdf_image_samples");
@@ -535,7 +527,7 @@ unknown_compression:
 					}
 
 					pdf_array_push_int(ctx, arr, high);
-					pdf_array_push_string(ctx, arr, (char *) lookup, basen * (high + 1));
+					pdf_array_push_string(ctx, arr, (char *) lookup, (size_t)basen * (high + 1));
 				}
 				break;
 			case FZ_COLORSPACE_NONE:
@@ -557,21 +549,23 @@ unknown_compression:
 
 		if (image->mask)
 		{
-			pdf_dict_put_drop(ctx, imobj, PDF_NAME(SMask), pdf_add_image(ctx, doc, image->mask));
+			if (image->mask->imagemask)
+				pdf_dict_put_drop(ctx, imobj, PDF_NAME(Mask), pdf_add_image(ctx, doc, image->mask));
+			else
+				pdf_dict_put_drop(ctx, imobj, PDF_NAME(SMask), pdf_add_image(ctx, doc, image->mask));
 		}
 
 		pdf_update_stream(ctx, doc, imobj, buffer, 1);
-
-		/* Add ref to our image resource hash table. */
-		imref = pdf_insert_image_resource(ctx, doc, digest, imobj);
 	}
 	fz_always(ctx)
 	{
 		fz_drop_pixmap(ctx, pixmap);
 		fz_drop_buffer(ctx, buffer);
-		pdf_drop_obj(ctx, imobj);
 	}
 	fz_catch(ctx)
+	{
+		pdf_drop_obj(ctx, imobj);
 		fz_rethrow(ctx);
-	return imref;
+	}
+	return imobj;
 }

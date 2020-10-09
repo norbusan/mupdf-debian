@@ -192,6 +192,8 @@ void pdf_sign_signature(fz_context *ctx, pdf_widget *widget, pdf_pkcs7_signer *s
 		memset(tm, 0, sizeof(*tm));
 #endif
 
+		pdf_dirty_annot(ctx, widget);
+
 		/* Ensure that all fields that will be locked by this signature
 		 * are marked as ReadOnly. */
 		enact_sig_locking(ctx, doc, wobj);
@@ -227,13 +229,13 @@ void pdf_sign_signature(fz_context *ctx, pdf_widget *widget, pdf_pkcs7_signer *s
 			pdf_update_signature_appearance(ctx, (pdf_annot *)widget, dn->cn, dn_str, len?now_str:NULL);
 		}
 
-		pdf_signature_set_value(ctx, doc, wobj, signer, now);
-
 		/* Update the SigFlags for the document if required */
 		form = pdf_dict_getp(ctx, pdf_trailer(ctx, doc), "Root/AcroForm");
 		sf = pdf_to_int(ctx, pdf_dict_get(ctx, form, PDF_NAME(SigFlags)));
 		if ((sf & (PDF_SIGFLAGS_SIGSEXIST | PDF_SIGFLAGS_APPENDONLY)) != (PDF_SIGFLAGS_SIGSEXIST | PDF_SIGFLAGS_APPENDONLY))
 			pdf_dict_put_drop(ctx, form, PDF_NAME(SigFlags), pdf_new_int(ctx, sf | PDF_SIGFLAGS_SIGSEXIST | PDF_SIGFLAGS_APPENDONLY));
+
+		pdf_signature_set_value(ctx, doc, wobj, signer, now);
 	}
 	fz_always(ctx)
 	{
@@ -249,6 +251,8 @@ void pdf_sign_signature(fz_context *ctx, pdf_widget *widget, pdf_pkcs7_signer *s
 void pdf_clear_signature(fz_context *ctx, pdf_widget *widget)
 {
 	int flags;
+
+	pdf_dirty_annot(ctx, widget);
 
 	flags = pdf_dict_get_int(ctx, ((pdf_annot *) widget)->obj, PDF_NAME(F));
 	flags &= ~PDF_ANNOT_IS_LOCKED;
@@ -319,7 +323,7 @@ char *pdf_signature_format_designated_name(fz_context *ctx, pdf_pkcs7_designated
 		", OU=", name->ou,
 		", emailAddress=", name->email,
 		", C=", name->c};
-	int len = 1;
+	size_t len = 1;
 	char *s;
 	int i;
 
@@ -340,7 +344,7 @@ char *pdf_signature_format_designated_name(fz_context *ctx, pdf_pkcs7_designated
 pdf_pkcs7_designated_name *pdf_signature_get_signatory(fz_context *ctx, pdf_pkcs7_verifier *verifier, pdf_document *doc, pdf_obj *signature)
 {
 	char *contents = NULL;
-	int contents_len = 0;
+	size_t contents_len = 0;
 	pdf_pkcs7_designated_name *dn;
 
 	contents_len = pdf_signature_contents(ctx, doc, signature, &contents);
@@ -360,7 +364,7 @@ pdf_signature_error pdf_check_digest(fz_context *ctx, pdf_pkcs7_verifier *verifi
 	pdf_signature_error result = PDF_SIGNATURE_ERROR_UNKNOWN;
 	fz_stream *bytes = NULL;
 	char *contents = NULL;
-	int contents_len = pdf_signature_contents(ctx, doc, signature, &contents);
+	size_t contents_len = pdf_signature_contents(ctx, doc, signature, &contents);
 	fz_var(bytes);
 	fz_try(ctx)
 	{

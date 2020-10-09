@@ -480,6 +480,11 @@ int pdf_has_unsaved_changes(fz_context *ctx, pdf_document *doc)
 	return doc->dirty;
 }
 
+int pdf_was_repaired(fz_context *ctx, pdf_document *doc)
+{
+	return doc->repair_attempted;
+}
+
 int pdf_toggle_widget(fz_context *ctx, pdf_widget *widget)
 {
 	switch (pdf_widget_type(ctx, widget))
@@ -857,6 +862,44 @@ pdf_drop_widgets(fz_context *ctx, pdf_widget *widget)
 	}
 }
 
+pdf_widget *
+pdf_create_signature_widget(fz_context *ctx, pdf_page *page, char *name)
+{
+	fz_rect rect = { 12, 12, 12+100, 12+50 };
+	pdf_annot *annot = pdf_create_annot_raw(ctx, page, PDF_ANNOT_WIDGET);
+	fz_try(ctx)
+	{
+		pdf_obj *obj = annot->obj;
+		pdf_obj *root = pdf_dict_get(ctx, pdf_trailer(ctx, page->doc), PDF_NAME(Root));
+		pdf_obj *acroform = pdf_dict_get(ctx, root, PDF_NAME(AcroForm));
+		pdf_obj *fields, *lock;
+		if (!acroform)
+		{
+			acroform = pdf_new_dict(ctx, page->doc, 1);
+			pdf_dict_put_drop(ctx, root, PDF_NAME(AcroForm), acroform);
+		}
+		fields = pdf_dict_get(ctx, acroform, PDF_NAME(Fields));
+		if (!fields)
+		{
+			fields = pdf_new_array(ctx, page->doc, 1);
+			pdf_dict_put_drop(ctx, acroform, PDF_NAME(Fields), fields);
+		}
+		pdf_set_annot_rect(ctx, annot, rect);
+		pdf_dict_put(ctx, obj, PDF_NAME(FT), PDF_NAME(Sig));
+		pdf_dict_put_int(ctx, obj, PDF_NAME(F), PDF_ANNOT_IS_PRINT);
+		pdf_dict_put_text_string(ctx, obj, PDF_NAME(DA), "/Helv 0 Tf 0 g");
+		pdf_dict_put_text_string(ctx, obj, PDF_NAME(T), name);
+		pdf_array_push(ctx, fields, obj);
+		lock = pdf_dict_put_dict(ctx, obj, PDF_NAME(Lock), 1);
+		pdf_dict_put(ctx, lock, PDF_NAME(Action), PDF_NAME(All));
+	}
+	fz_catch(ctx)
+	{
+		pdf_delete_annot(ctx, page, annot);
+	}
+	return (pdf_widget *)annot;
+}
+
 fz_rect
 pdf_bound_widget(fz_context *ctx, pdf_widget *widget)
 {
@@ -915,7 +958,7 @@ int pdf_set_text_field_value(fz_context *ctx, pdf_widget *widget, const char *ne
 			event.value = pdf_field_value(ctx, widget->obj);
 			event.change = new_value;
 			event.selStart = 0;
-			event.selEnd = strlen(event.value);
+			event.selEnd = (int)strlen(event.value);
 			event.willCommit = 0;
 			rc = pdf_field_event_keystroke(ctx, doc, widget->obj, &event);
 			if (rc)
@@ -1343,7 +1386,7 @@ pdf_parse_xml(fz_context *ctx, pdf_obj *obj)
 	fz_xml_doc *xml = NULL;
 
 	fz_try(ctx)
-		xml = fz_parse_xml(ctx, buf, 0, 0);
+		xml = fz_parse_xml(ctx, buf, 0);
 	fz_always(ctx)
 		fz_drop_buffer(ctx, buf);
 	fz_catch(ctx)
@@ -1485,6 +1528,8 @@ get_locked_fields_from_xfa(fz_context *ctx, pdf_document *doc, pdf_obj *field)
 	node = fz_xml_find_down(node, "manifest");
 
 	use = fz_xml_att(node, "use");
+	if (use == NULL)
+		return NULL;
 	if (*use == '#')
 		use++;
 
@@ -1569,7 +1614,6 @@ void pdf_signature_set_value(fz_context *ctx, pdf_document *doc, pdf_obj *field,
 	int vnum;
 	size_t max_digest_size;
 	char *buf = NULL;
-	char date_string[40];
 
 	vnum = pdf_create_object(ctx, doc);
 	indv = pdf_new_indirect(ctx, doc, vnum, 0);
@@ -1601,8 +1645,7 @@ void pdf_signature_set_value(fz_context *ctx, pdf_document *doc, pdf_obj *field,
 		pdf_dict_put(ctx, v, PDF_NAME(Filter), PDF_NAME(Adobe_PPKLite));
 		pdf_dict_put(ctx, v, PDF_NAME(SubFilter), PDF_NAME(adbe_pkcs7_detached));
 		pdf_dict_put(ctx, v, PDF_NAME(Type), PDF_NAME(Sig));
-		pdf_format_date(ctx, date_string, sizeof date_string, stime);
-		pdf_dict_put_text_string(ctx, v, PDF_NAME(M), date_string);
+		pdf_dict_put_date(ctx, v, PDF_NAME(M), stime);
 
 		o = pdf_new_array(ctx, doc, 1);
 		pdf_dict_put(ctx, v, PDF_NAME(Reference), o);

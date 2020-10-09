@@ -716,7 +716,7 @@ static int dodrawpage(fz_context *ctx, int pagenum, fz_cookie *cookie, render_de
 }
 
 /* This functions tries to render a page, falling back repeatedly to try and make it work. */
-static int try_render_page(fz_context *ctx, int pagenum, fz_cookie *cookie, int start, int interptime, char *filename, int bg, int solo, render_details *render)
+static int try_render_page(fz_context *ctx, int pagenum, fz_cookie *cookie, int start, int interptime, char *fname, int bg, int solo, render_details *render)
 {
 	int status;
 
@@ -796,14 +796,14 @@ static int try_render_page(fz_context *ctx, int pagenum, fz_cookie *cookie, int 
 				timing.min = diff + interptime;
 				timing.mininterp = interptime;
 				timing.minpage = pagenum;
-				timing.minfilename = filename;
+				timing.minfilename = fname;
 			}
 			if (diff + interptime > timing.max)
 			{
 				timing.max = diff + interptime;
 				timing.maxinterp = interptime;
 				timing.maxpage = pagenum;
-				timing.maxfilename = filename;
+				timing.maxfilename = fname;
 			}
 			timing.total += diff + interptime;
 			timing.count ++;
@@ -816,13 +816,13 @@ static int try_render_page(fz_context *ctx, int pagenum, fz_cookie *cookie, int 
 			{
 				timing.min = diff;
 				timing.minpage = pagenum;
-				timing.minfilename = filename;
+				timing.minfilename = fname;
 			}
 			if (diff > timing.max)
 			{
 				timing.max = diff;
 				timing.maxpage = pagenum;
-				timing.maxfilename = filename;
+				timing.maxfilename = fname;
 			}
 			timing.total += diff;
 			timing.count ++;
@@ -977,7 +977,7 @@ initialise_banding(fz_context *ctx, render_details *render, int color)
 	}
 
 	w = render->ibounds.x1 - render->ibounds.x0;
-	min_band_mem = bpp * w * min_band_height;
+	min_band_mem = (size_t)bpp * w * min_band_height;
 	reps = (int)(max_band_memory / min_band_mem);
 	if (reps < 1)
 		reps = 1;
@@ -1333,19 +1333,21 @@ trace_realloc(void *arg, void *p_, size_t size)
 static void worker_thread(void *arg)
 {
 	worker_t *me = (worker_t *)arg;
+	int band_start;
 
 	do
 	{
 		DEBUG_THREADS(("Worker %d waiting\n", me->num));
 		mu_wait_semaphore(&me->start);
+		band_start = me->band_start;
 		DEBUG_THREADS(("Worker %d woken for band_start %d\n", me->num, me->band_start));
 		me->status = RENDER_OK;
-		if (me->band_start >= 0)
-			me->status = drawband(me->ctx, NULL, me->list, me->ctm, me->tbounds, &me->cookie, me->band_start, me->pix, &me->bit);
-		DEBUG_THREADS(("Worker %d completed band_start %d (status=%d)\n", me->num, me->band_start, me->status));
+		if (band_start >= 0)
+			me->status = drawband(me->ctx, NULL, me->list, me->ctm, me->tbounds, &me->cookie, band_start, me->pix, &me->bit);
+		DEBUG_THREADS(("Worker %d completed band_start %d (status=%d)\n", me->num, band_start, me->status));
 		mu_trigger_semaphore(&me->stop);
 	}
-	while (me->band_start >= 0);
+	while (band_start >= 0);
 }
 
 static void bgprint_worker(void *arg)

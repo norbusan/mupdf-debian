@@ -194,16 +194,14 @@ fz_drop_font(fz_context *ctx, fz_font *font)
 	if (!fz_drop_imp(ctx, font, &font->refs))
 		return;
 
+	free_resources(ctx, font);
 	if (font->t3lists)
-	{
-		free_resources(ctx, font);
 		for (i = 0; i < 256; i++)
 			fz_drop_display_list(ctx, font->t3lists[i]);
-		fz_free(ctx, font->t3procs);
-		fz_free(ctx, font->t3lists);
-		fz_free(ctx, font->t3widths);
-		fz_free(ctx, font->t3flags);
-	}
+	fz_free(ctx, font->t3procs);
+	fz_free(ctx, font->t3lists);
+	fz_free(ctx, font->t3widths);
+	fz_free(ctx, font->t3flags);
 
 	if (font->ft_face)
 	{
@@ -1606,10 +1604,7 @@ fz_render_t3_glyph_direct(fz_context *ctx, fz_device *dev, fz_font *font, int gi
 		if (font->t3flags[gid] & FZ_DEVFLAG_COLOR)
 			fz_warn(ctx, "type3 glyph claims to be both masked and colored");
 	}
-	else if (font->t3flags[gid] & FZ_DEVFLAG_COLOR)
-	{
-	}
-	else
+	else if (!(font->t3flags[gid] & FZ_DEVFLAG_COLOR))
 	{
 		fz_warn(ctx, "type3 glyph doesn't specify masked or colored");
 	}

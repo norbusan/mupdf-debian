@@ -170,7 +170,7 @@ void winprint(pdfapp_t *app)
 	fprintf(stderr, "The MuPDF library supports printing, but this application currently does not\n");
 }
 
-char *winpassword(pdfapp_t *app, char *filename)
+char *winpassword(pdfapp_t *app, char *fname)
 {
 	char *r = password;
 	password = NULL;
@@ -774,7 +774,7 @@ void winopenuri(pdfapp_t *app, char *buf)
 			execlp(browser, browser, buf, (char*)0);
 			fprintf(stderr, "cannot exec '%s'\n", browser);
 		}
-		exit(0);
+		_exit(0);
 	}
 	waitpid(pid, NULL, 0);
 }
@@ -802,11 +802,11 @@ static void onkey(int c, int modifiers)
 	if (!gapp.issearching && c == 'P')
 	{
 		struct timeval now;
-		struct timeval tmo;
-		tmo.tv_sec = 2;
-		tmo.tv_usec = 0;
+		struct timeval t;
+		t.tv_sec = 2;
+		t.tv_usec = 0;
 		gettimeofday(&now, NULL);
-		timeradd(&now, &tmo, &tmo_at);
+		timeradd(&now, &t, &tmo_at);
 		showingpage = 1;
 		winrepaint(&gapp);
 		return;

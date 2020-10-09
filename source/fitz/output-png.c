@@ -171,6 +171,11 @@ png_write_header(fz_context *ctx, fz_band_writer *writer_, fz_colorspace *cs)
 	fz_write_data(ctx, out, pngsig, 8);
 	putchunk(ctx, out, "IHDR", head, 13);
 
+	big32(head+0, writer->super.xres * 100/2.54f + 0.5f);
+	big32(head+4, writer->super.yres * 100/2.54f + 0.5f);
+	head[8] = 1; /* metre */
+	putchunk(ctx, out, "pHYs", head, 9);
+
 	png_write_icc(ctx, writer, cs);
 }
 
@@ -196,7 +201,7 @@ png_write_band(fz_context *ctx, fz_band_writer *writer_, int stride, int band_st
 
 	if (writer->udata == NULL)
 	{
-		writer->usize = (w * n + 1) * band_height;
+		writer->usize = ((uLong)w * n + 1) * band_height;
 		/* Sadly the bound returned by compressBound is just for a
 		 * single usize chunk; if you compress a sequence of them
 		 * the buffering can result in you suddenly getting a block
@@ -282,6 +287,14 @@ png_write_band(fz_context *ctx, fz_band_writer *writer_, int stride, int band_st
 		else
 		{
 			err = deflate(&writer->stream, Z_FINISH);
+			if (err == Z_OK)
+			{
+				/* more output space needed, try again */
+				writer->cdata = Memento_label(fz_realloc(ctx, writer->cdata, writer->csize << 2), "realloc png_write_cdata");
+				writer->csize <<= 2;
+				continue;
+			}
+
 			if (err != Z_STREAM_END)
 				fz_throw(ctx, FZ_ERROR_GENERIC, "compression error %d", err);
 		}

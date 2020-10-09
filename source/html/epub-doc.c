@@ -323,11 +323,11 @@ accelerate_chapter(fz_context *ctx, epub_document *doc, epub_chapter *ch, fz_htm
 
 	if (ch->number >= acc->max_chapters)
 	{
-		int n  = acc->max_chapters * 2;
+		int n = acc->max_chapters;
 		int i;
 		if (n == 0)
 			n = 4;
-		while (n < ch->number)
+		while (n <= ch->number)
 			n *= 2;
 
 		acc->pages_in_chapter = fz_realloc_array(ctx, acc->pages_in_chapter, n, int);
@@ -385,7 +385,7 @@ epub_parse_chapter(fz_context *ctx, epub_document *doc, epub_chapter *ch)
 
 	buf = fz_read_archive_entry(ctx, zip, ch->path);
 	fz_try(ctx)
-		html = fz_parse_html(ctx, doc->set, zip, base_uri, buf, fz_user_css(ctx));
+		html = fz_parse_xhtml(ctx, doc->set, zip, base_uri, buf, fz_user_css(ctx));
 	fz_always(ctx)
 		fz_drop_buffer(ctx, buf);
 	fz_catch(ctx)
@@ -637,7 +637,7 @@ epub_parse_ncx(fz_context *ctx, epub_document *doc, const char *path)
 	{
 		fz_dirname(base_uri, path, sizeof base_uri);
 		buf = fz_read_archive_entry(ctx, zip, path);
-		ncx = fz_parse_xml(ctx, buf, 0, 0);
+		ncx = fz_parse_xml(ctx, buf, 0);
 		doc->outline = epub_parse_ncx_imp(ctx, doc, fz_xml_find_down(fz_xml_root(ncx), "navMap"), base_uri);
 	}
 	fz_always(ctx)
@@ -688,7 +688,7 @@ epub_parse_header(fz_context *ctx, epub_document *doc)
 		/* parse META-INF/container.xml to find OPF */
 
 		buf = fz_read_archive_entry(ctx, zip, "META-INF/container.xml");
-		container_xml = fz_parse_xml(ctx, buf, 0, 0);
+		container_xml = fz_parse_xml(ctx, buf, 0);
 		fz_drop_buffer(ctx, buf);
 		buf = NULL;
 
@@ -704,7 +704,7 @@ epub_parse_header(fz_context *ctx, epub_document *doc)
 		/* parse OPF to find NCX and spine */
 
 		buf = fz_read_archive_entry(ctx, zip, full_path);
-		content_opf = fz_parse_xml(ctx, buf, 0, 0);
+		content_opf = fz_parse_xml(ctx, buf, 0);
 		fz_drop_buffer(ctx, buf);
 		buf = NULL;
 
@@ -773,11 +773,11 @@ epub_lookup_metadata(fz_context *ctx, fz_document *doc_, const char *key, char *
 {
 	epub_document *doc = (epub_document*)doc_;
 	if (!strcmp(key, FZ_META_FORMAT))
-		return (int)fz_strlcpy(buf, "EPUB", size);
+		return 1 + (int)fz_strlcpy(buf, "EPUB", size);
 	if (!strcmp(key, FZ_META_INFO_TITLE) && doc->dc_title)
-		return (int)fz_strlcpy(buf, doc->dc_title, size);
+		return 1 + (int)fz_strlcpy(buf, doc->dc_title, size);
 	if (!strcmp(key, FZ_META_INFO_AUTHOR) && doc->dc_creator)
-		return (int)fz_strlcpy(buf, doc->dc_creator, size);
+		return 1 + (int)fz_strlcpy(buf, doc->dc_creator, size);
 	return -1;
 }
 
@@ -815,26 +815,29 @@ epub_output_accelerator(fz_context *ctx, fz_document *doc_, fz_output *out)
 static fz_document *
 epub_init(fz_context *ctx, fz_archive *zip, fz_stream *accel)
 {
-	epub_document *doc;
+	epub_document *doc = NULL;
 
-	doc = fz_new_derived_document(ctx, epub_document);
-	doc->zip = zip;
-
-	doc->super.drop_document = epub_drop_document;
-	doc->super.layout = epub_layout;
-	doc->super.load_outline = epub_load_outline;
-	doc->super.resolve_link = epub_resolve_link;
-	doc->super.make_bookmark = epub_make_bookmark;
-	doc->super.lookup_bookmark = epub_lookup_bookmark;
-	doc->super.count_chapters = epub_count_chapters;
-	doc->super.count_pages = epub_count_pages;
-	doc->super.load_page = epub_load_page;
-	doc->super.lookup_metadata = epub_lookup_metadata;
-	doc->super.output_accelerator = epub_output_accelerator;
-	doc->super.is_reflowable = 1;
+	fz_var(doc);
 
 	fz_try(ctx)
 	{
+		doc = fz_new_derived_document(ctx, epub_document);
+		doc->zip = zip;
+		zip = NULL;
+
+		doc->super.drop_document = epub_drop_document;
+		doc->super.layout = epub_layout;
+		doc->super.load_outline = epub_load_outline;
+		doc->super.resolve_link = epub_resolve_link;
+		doc->super.make_bookmark = epub_make_bookmark;
+		doc->super.lookup_bookmark = epub_lookup_bookmark;
+		doc->super.count_chapters = epub_count_chapters;
+		doc->super.count_pages = epub_count_pages;
+		doc->super.load_page = epub_load_page;
+		doc->super.lookup_metadata = epub_lookup_metadata;
+		doc->super.output_accelerator = epub_output_accelerator;
+		doc->super.is_reflowable = 1;
+
 		doc->set = fz_new_html_font_set(ctx);
 		doc->css_sum = user_css_sum(ctx);
 		epub_load_accelerator(ctx, doc, accel);
@@ -842,6 +845,7 @@ epub_init(fz_context *ctx, fz_archive *zip, fz_stream *accel)
 	}
 	fz_catch(ctx)
 	{
+		fz_drop_archive(ctx, zip);
 		fz_drop_document(ctx, &doc->super);
 		fz_rethrow(ctx);
 	}

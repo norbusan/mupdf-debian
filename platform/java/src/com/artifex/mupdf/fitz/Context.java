@@ -41,4 +41,17 @@ public class Context
 
 	//  empty the store
 	public native static void emptyStore();
+
+	public native static void enableICC();
+	public native static void disableICC();
+	public native static void setAntiAliasLevel(int level);
+
+	public native static Version getVersion();
+
+	public class Version {
+		public String version;
+		public int major;
+		public int minor;
+		public int patch;
+	}
 }
