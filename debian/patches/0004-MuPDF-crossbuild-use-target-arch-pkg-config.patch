@@ -5,11 +5,9 @@ Subject: MuPDF crossbuild use target arch pkg-config
 mupdf fails to cross build, because it uses the build architecture
 pkg-config and thus fails to find a pile of .pc files.
 ---
- Makerules | 52 ++++++++++++++++++++++++++++------------------------
- 1 file changed, 28 insertions(+), 24 deletions(-)
+ Makerules |   76 ++++++++++++++++++++++++++++++++------------------------------
+ 1 file changed, 40 insertions(+), 36 deletions(-)
 
-diff --git a/Makerules b/Makerules
-index 44d1bd1..63a81ab 100644
 --- a/Makerules
 +++ b/Makerules
 @@ -6,6 +6,10 @@ OS := $(OS:MSYS%=MINGW)
@@ -23,7 +21,7 @@ index 44d1bd1..63a81ab 100644
  ifeq ($(findstring -fembed-bitcode,$(XCFLAGS)),)
    # clang does not support these in combination with -fembed-bitcode
    CFLAGS += -ffunction-sections -fdata-sections
-@@ -97,29 +101,29 @@ else ifeq ($(OS),MACOS)
+@@ -121,51 +125,51 @@ else ifeq ($(OS),MACOS)
  else ifeq ($(OS),Linux)
    HAVE_OBJCOPY := yes
  
@@ -33,6 +31,13 @@ index 44d1bd1..63a81ab 100644
 +  ifeq ($(shell $(PKG_CONFIG) --exists freetype2 && echo yes),yes)
 +	SYS_FREETYPE_CFLAGS := $(shell $(PKG_CONFIG) --cflags freetype2)
 +	SYS_FREETYPE_LIBS := $(shell $(PKG_CONFIG) --libs freetype2)
+   endif
+-  ifeq ($(shell pkg-config --exists gumbo && echo yes),yes)
+-	SYS_GUMBO_CFLAGS := $(shell pkg-config --cflags gumbo)
+-	SYS_GUMBO_LIBS := $(shell pkg-config --libs gumbo)
++  ifeq ($(shell $(PKG_CONFIG) --exists gumbo && echo yes),yes)
++	SYS_GUMBO_CFLAGS := $(shell $(PKG_CONFIG) --cflags gumbo)
++	SYS_GUMBO_LIBS := $(shell $(PKG_CONFIG) --libs gumbo)
    endif
 -  ifeq ($(shell pkg-config --exists harfbuzz && echo yes),yes)
 -	SYS_HARFBUZZ_CFLAGS := $(shell pkg-config --cflags harfbuzz)
@@ -70,8 +75,35 @@ index 44d1bd1..63a81ab 100644
 +	SYS_ZLIB_LIBS := $(shell $(PKG_CONFIG) --libs zlib)
    endif
  
-   HAVE_SYS_CURL := $(shell pkg-config --exists libcurl && echo yes)
-@@ -134,16 +138,16 @@ else ifeq ($(OS),Linux)
+-  HAVE_LEPTONICA := $(shell pkg-config --exists 'lept >= 1.7.4' && echo yes)
++  HAVE_LEPTONICA := $(shell $(PKG_CONFIG) --exists 'lept >= 1.7.4' && echo yes)
+   ifeq ($(HAVE_LEPTONICA),yes)
+-	SYS_LEPTONICA_CFLAGS := $(shell pkg-config --cflags lept)
+-	SYS_LEPTONICA_LIBS := $(shell pkg-config --libs lept)
++	SYS_LEPTONICA_CFLAGS := $(shell $(PKG_CONFIG) --cflags lept)
++	SYS_LEPTONICA_LIBS := $(shell $(PKG_CONFIG) --libs lept)
+   endif
+ 
+-  HAVE_TESSERACT := $(shell pkg-config --exists 'tesseract-ocr >= 4.0.0' && echo yes)
++  HAVE_TESSERACT := $(shell $(PKG_CONFIG) --exists 'tesseract-ocr >= 4.0.0' && echo yes)
+   ifeq ($(HAVE_TESSERACT),yes)
+-	SYS_TESSERACT_CFLAGS := $(shell pkg-config --cflags tesseract)
+-	SYS_TESSERACT_LIBS := $(shell pkg-config --libs tesseract)
++	SYS_TESSERACT_CFLAGS := $(shell $(PKG_CONFIG) --cflags tesseract)
++	SYS_TESSERACT_LIBS := $(shell $(PKG_CONFIG) --libs tesseract)
+   endif
+ 
+-  HAVE_SYS_CURL := $(shell pkg-config --exists libcurl && echo yes)
++  HAVE_SYS_CURL := $(shell $(PKG_CONFIG) --exists libcurl && echo yes)
+   ifeq ($(HAVE_SYS_CURL),yes)
+-	SYS_CURL_CFLAGS := $(shell pkg-config --cflags libcurl)
+-	SYS_CURL_LIBS := $(shell pkg-config --libs libcurl)
++	SYS_CURL_CFLAGS := $(shell $(PKG_CONFIG) --cflags libcurl)
++	SYS_CURL_LIBS := $(shell $(PKG_CONFIG) --libs libcurl)
+   endif
+ 
+   HAVE_GLUT := yes
+@@ -174,16 +178,16 @@ else ifeq ($(OS),Linux)
  	SYS_GLUT_LIBS := -lglut -lGL
    endif
  

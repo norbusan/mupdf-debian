@@ -3,16 +3,14 @@ Date: Fri, 10 Apr 2020 18:05:55 +0200
 Subject: Prevent thirdparty archive build
 
 ---
- Makefile | 1 -
+ Makefile |    1 -
  1 file changed, 1 deletion(-)
 
-diff --git a/Makefile b/Makefile
-index 430f35b..b6a7a4d 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -192,7 +192,6 @@ generate: source/pdf/js/util.js.h
- # --- Library ---
- 
+@@ -217,7 +217,6 @@ MUPDF_LIB = $(OUT)/libmupdf.$(SO)
+ $(MUPDF_LIB) : $(MUPDF_OBJ) $(THIRD_OBJ) $(THREAD_OBJ) $(PKCS7_OBJ)
+ else
  MUPDF_LIB = $(OUT)/libmupdf.a
 -THIRD_LIB = $(OUT)/libmupdf-third.a
  THREAD_LIB = $(OUT)/libmupdf-threads.a

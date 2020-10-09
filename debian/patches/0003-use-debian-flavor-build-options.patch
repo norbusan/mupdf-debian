@@ -4,14 +4,12 @@ Subject: use debian flavor build options
 
 Do not strip binaries by default and use Debian LDFLAGS
 ---
- Makerules | 5 ++++-
+ Makerules |    5 ++++-
  1 file changed, 4 insertions(+), 1 deletion(-)
 
-diff --git a/Makerules b/Makerules
-index b96fc71..44d1bd1 100644
 --- a/Makerules
 +++ b/Makerules
-@@ -24,7 +24,10 @@ SANITIZE_FLAGS += -fsanitize=leak
+@@ -38,7 +38,10 @@ endif
  
  ifeq ($(build),debug)
    CFLAGS += -pipe -g

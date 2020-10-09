@@ -3,15 +3,13 @@ Date: Mon, 3 Sep 2018 08:53:44 +0900
 Subject: MuPDF crossbuild use host cc for utils
 
 ---
- Makefile  | 2 ++
- Makerules | 1 +
+ Makefile  |    2 ++
+ Makerules |    1 +
  2 files changed, 3 insertions(+)
 
-diff --git a/Makefile b/Makefile
-index 58698dc..c616f17 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -133,6 +133,8 @@ PKCS7_OBJ := $(PKCS7_SRC:%.c=$(OUT)/%.o)
+@@ -146,6 +146,8 @@ PKCS7_OBJ := $(PKCS7_SRC:%.c=$(OUT)/%.o)
  # --- Generated embedded font files ---
  
  HEXDUMP_EXE := $(OUT)/scripts/hexdump.exe
@@ -20,8 +18,6 @@ index 58698dc..c616f17 100644
  
  FONT_BIN := $(sort $(wildcard resources/fonts/urw/*.cff))
  FONT_BIN += $(sort $(wildcard resources/fonts/han/*.ttc))
-diff --git a/Makerules b/Makerules
-index 63a81ab..2476295 100644
 --- a/Makerules
 +++ b/Makerules
 @@ -7,6 +7,7 @@ OS := $(OS:Windows_NT=MINGW)

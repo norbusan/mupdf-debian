@@ -3,14 +3,12 @@ Date: Sat, 3 Nov 2018 14:41:25 +0000
 Subject: Allow disabling objcopy
 
 ---
- Makerules | 2 +-
+ Makerules |    2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
-diff --git a/Makerules b/Makerules
-index 2476295..e77c7fe 100644
 --- a/Makerules
 +++ b/Makerules
-@@ -100,7 +100,7 @@ else ifeq ($(OS),MACOS)
+@@ -124,7 +124,7 @@ else ifeq ($(OS),MACOS)
    RANLIB = xcrun ranlib
  
  else ifeq ($(OS),Linux)
