@@ -2,8 +2,9 @@ mupdf (1.18.0+ds1-1~np1) unstable; urgency=medium
 
   * New upstream version 1.18.0+ds1
   * update patches
+  * add libgumbo-dev to B-D
 
- -- Norbert Preining <norbert@preining.info>  Fri, 09 Oct 2020 23:39:12 +0900
+ -- Norbert Preining <norbert@preining.info>  Fri, 09 Oct 2020 23:51:41 +0900
 
 mupdf (1.17.0+ds1-1) unstable; urgency=medium
 
