@@ -10,9 +10,9 @@
 /* input options */
 static const char *password = "";
 static int alphabits = 8;
-static float layout_w = 450;
-static float layout_h = 600;
-static float layout_em = 12;
+static float layout_w = FZ_DEFAULT_LAYOUT_W;
+static float layout_h = FZ_DEFAULT_LAYOUT_H;
+static float layout_em = FZ_DEFAULT_LAYOUT_EM;
 static char *layout_css = NULL;
 static int layout_use_doc_css = 1;
 
@@ -42,7 +42,7 @@ static void usage(void)
 		"\n"
 		"\t-o -\toutput file name (%%d for page number)\n"
 		"\t-F -\toutput format (default inferred from output file name)\n"
-		"\t\t\traster: cbz, png, pnm, pgm, ppm, pam, tga, pbm, pkm.\n"
+		"\t\t\traster: cbz, png, pnm, pgm, ppm, pam, pbm, pkm.\n"
 		"\t\t\tprint-raster: pcl, pclm, ps, pwg.\n"
 		"\t\t\tvector: pdf, svg.\n"
 		"\t\t\ttext: html, xhtml, text, stext.\n"
@@ -78,11 +78,10 @@ static void runpage(int number)
 		mediabox = fz_bound_page(ctx, page);
 		dev = fz_begin_page(ctx, out, mediabox);
 		fz_run_page(ctx, page, dev, fz_identity, NULL);
+		fz_end_page(ctx, out);
 	}
 	fz_always(ctx)
 	{
-		if (dev)
-			fz_end_page(ctx, out);
 		fz_drop_page(ctx, page);
 	}
 	fz_catch(ctx)
@@ -107,6 +106,7 @@ static void runrange(const char *range)
 int muconvert_main(int argc, char **argv)
 {
 	int i, c;
+	int retval = EXIT_SUCCESS;
 
 	while ((c = fz_getopt(argc, argv, "p:A:W:H:S:U:Xo:F:O:")) != -1)
 	{
@@ -170,26 +170,34 @@ int muconvert_main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	for (i = fz_optind; i < argc; ++i)
+	fz_try(ctx)
 	{
-		doc = fz_open_document(ctx, argv[i]);
-		if (fz_needs_password(ctx, doc))
-			if (!fz_authenticate_password(ctx, doc, password))
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cannot authenticate password: %s", argv[i]);
-		fz_layout_document(ctx, doc, layout_w, layout_h, layout_em);
-		count = fz_count_pages(ctx, doc);
+		for (i = fz_optind; i < argc; ++i)
+		{
+			doc = fz_open_document(ctx, argv[i]);
+			if (fz_needs_password(ctx, doc))
+				if (!fz_authenticate_password(ctx, doc, password))
+					fz_throw(ctx, FZ_ERROR_GENERIC, "cannot authenticate password: %s", argv[i]);
+			fz_layout_document(ctx, doc, layout_w, layout_h, layout_em);
+			count = fz_count_pages(ctx, doc);
 
-		if (i+1 < argc && fz_is_page_range(ctx, argv[i+1]))
-			runrange(argv[++i]);
-		else
-			runrange("1-N");
+			if (i+1 < argc && fz_is_page_range(ctx, argv[i+1]))
+				runrange(argv[++i]);
+			else
+				runrange("1-N");
 
-		fz_drop_document(ctx, doc);
+			fz_drop_document(ctx, doc);
+			doc = NULL;
+		}
 	}
+	fz_always(ctx)
+		fz_drop_document(ctx, doc);
+	fz_catch(ctx)
+		retval = EXIT_FAILURE;
 
 	fz_close_document_writer(ctx, out);
 
 	fz_drop_document_writer(ctx, out);
 	fz_drop_context(ctx);
-	return EXIT_SUCCESS;
+	return retval;
 }

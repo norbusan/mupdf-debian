@@ -1,25 +1,23 @@
 #include "mupdf/fitz.h"
-#include "fitz-imp.h"
 
 #include <assert.h>
 #include <limits.h>
 #include <stdio.h>
+#include <string.h>
 
-typedef struct fz_item_s fz_item;
-
-struct fz_item_s
+typedef struct fz_item
 {
 	void *key;
 	fz_storable *val;
 	size_t size;
-	fz_item *next;
-	fz_item *prev;
+	struct fz_item *next;
+	struct fz_item *prev;
 	fz_store *store;
 	const fz_store_type *type;
-};
+} fz_item;
 
 /* Every entry in fz_store is protected by the alloc lock */
-struct fz_store_s
+struct fz_store
 {
 	int refs;
 
@@ -38,6 +36,7 @@ struct fz_store_s
 
 	int defer_reap_count;
 	int needs_reaping;
+	int scavenging;
 };
 
 void
@@ -74,24 +73,6 @@ fz_keep_storable(fz_context *ctx, const fz_storable *sc)
 	return fz_keep_imp(ctx, s, &s->refs);
 }
 
-void
-fz_drop_storable(fz_context *ctx, const fz_storable *sc)
-{
-	/* Explicitly drop const to allow us to use const
-	 * sanely throughout the code. */
-	fz_storable *s = (fz_storable *)sc;
-
-	/*
-		If we are dropping the last reference to an object, then
-		it cannot possibly be in the store (as the store always
-		keeps a ref to everything in it, and doesn't drop via
-		this method. So we can simply drop the storable object
-		itself without any operations on the fz_store.
-	 */
-	if (fz_drop_imp(ctx, s, &s->refs))
-		s->drop(ctx, s);
-}
-
 void *fz_keep_key_storable(fz_context *ctx, const fz_key_storable *sc)
 {
 	return fz_keep_storable(ctx, &sc->storable);
@@ -116,6 +97,8 @@ do_reap(fz_context *ctx)
 	fz_assert_lock_held(ctx, FZ_LOCK_ALLOC);
 
 	ctx->store->needs_reaping = 0;
+
+	FZ_LOG_DUMP_STORE(ctx, "Before reaping store:\n");
 
 	/* Reap the items */
 	remove = NULL;
@@ -172,6 +155,7 @@ do_reap(fz_context *ctx)
 		item->type->drop_key(ctx, item->key);
 		fz_free(ctx, item);
 	}
+	FZ_LOG_DUMP_STORE(ctx, "After reaping store:\n");
 }
 
 void fz_drop_key_storable(fz_context *ctx, const fz_key_storable *sc)
@@ -186,6 +170,7 @@ void fz_drop_key_storable(fz_context *ctx, const fz_key_storable *sc)
 		return;
 
 	fz_lock(ctx, FZ_LOCK_ALLOC);
+	assert(s->storable.refs != 0);
 	if (s->storable.refs > 0)
 	{
 		(void)Memento_dropRef(s);
@@ -439,19 +424,14 @@ fz_store_item(fz_context *ctx, void *key, void *val_, size_t itemsize, const fz_
 	if (!store)
 		return NULL;
 
-	fz_var(item);
-
 	/* If we fail for any reason, we swallow the exception and continue.
 	 * All that the above program will see is that we failed to store
 	 * the item. */
-	fz_try(ctx)
-	{
-		item = fz_malloc_struct(ctx, fz_item);
-	}
-	fz_catch(ctx)
-	{
+
+	item = Memento_label(fz_malloc_no_throw(ctx, sizeof (fz_item)), "fz_item");
+	if (!item)
 		return NULL;
-	}
+	memset(item, 0, sizeof (fz_item));
 
 	if (type->make_hash_key)
 	{
@@ -497,6 +477,7 @@ fz_store_item(fz_context *ctx, void *key, void *val_, size_t itemsize, const fz_
 		{
 			/* There was one there already! Take a new reference
 			 * to the existing one, and drop our current one. */
+			fz_warn(ctx, "found duplicate %s in the store", type->name);
 			touch(store, existing);
 			if (existing->val->refs > 0)
 			{
@@ -520,38 +501,45 @@ fz_store_item(fz_context *ctx, void *key, void *val_, size_t itemsize, const fz_
 	/* If we haven't got an infinite store, check for space within it */
 	if (store->max != FZ_STORE_UNLIMITED)
 	{
+		/* FIXME: Overflow? */
 		size = store->size + itemsize;
-		while (size > store->max)
+		if (size > store->max)
 		{
-			size_t saved;
-
-			/* First, do any outstanding reaping, even if defer_reap_count > 0 */
-			if (store->needs_reaping)
+			FZ_LOG_STORE(ctx, "Store size exceeded: item=%zu, size=%zu, max=%zu\n",
+				itemsize, store->size, store->max);
+			while (size > store->max)
 			{
-				do_reap(ctx); /* Drops alloc lock */
-				fz_lock(ctx, FZ_LOCK_ALLOC);
-			}
-			size = store->size + itemsize;
-			if (size <= store->max)
-				break;
+				size_t saved;
 
-			/* ensure_space may drop, then retake the lock */
-			saved = ensure_space(ctx, size - store->max);
-			size -= saved;
-			if (saved == 0)
-			{
-				/* Failed to free any space. */
-				/* We used to 'unstore' it here, but that's wrong.
-				 * If we've already spent the memory to malloc it
-				 * then not putting it in the store just means that
-				 * a resource used multiple times will just be malloced
-				 * again. Better to put it in the store, have the
-				 * store account for it, and for it to potentially be reused.
-				 * When the caller drops the reference to it, it can then
-				 * be dropped from the store on the next attempt to store
-				 * anything else. */
-				break;
+				/* First, do any outstanding reaping, even if defer_reap_count > 0 */
+				if (store->needs_reaping)
+				{
+					do_reap(ctx); /* Drops alloc lock */
+					fz_lock(ctx, FZ_LOCK_ALLOC);
+				}
+				size = store->size + itemsize;
+				if (size <= store->max)
+					break;
+
+				/* ensure_space may drop, then retake the lock */
+				saved = ensure_space(ctx, size - store->max);
+				size -= saved;
+				if (saved == 0)
+				{
+					/* Failed to free any space. */
+					/* We used to 'unstore' it here, but that's wrong.
+					 * If we've already spent the memory to malloc it
+					 * then not putting it in the store just means that
+					 * a resource used multiple times will just be malloced
+					 * again. Better to put it in the store, have the
+					 * store account for it, and for it to potentially be reused.
+					 * When the caller drops the reference to it, it can then
+					 * be dropped from the store on the next attempt to store
+					 * anything else. */
+					break;
+				}
 			}
+			FZ_LOG_DUMP_STORE(ctx, "After eviction:\n");
 		}
 	}
 	store->size += itemsize;
@@ -722,23 +710,25 @@ fz_debug_store_item(fz_context *ctx, void *state, void *key_, int keylen, void *
 	fz_item *item = item_;
 	int i;
 	char buf[256];
+	fz_output *out = (fz_output *)state;
 	fz_unlock(ctx, FZ_LOCK_ALLOC);
 	item->type->format_key(ctx, buf, sizeof buf, item->key);
 	fz_lock(ctx, FZ_LOCK_ALLOC);
-	printf("hash[");
+	fz_write_printf(ctx, out, "STORE\thash[");
 	for (i=0; i < keylen; ++i)
-		printf("%02x", key[i]);
-	printf("][refs=%d][size=%d] key=%s val=%p\n", item->val->refs, (int)item->size, buf, item->val);
+		fz_write_printf(ctx, out,"%02x", key[i]);
+	fz_write_printf(ctx, out, "][refs=%d][size=%d] key=%s val=%p\n", item->val->refs, (int)item->size, buf, (void *)item->val);
 }
 
 static void
-fz_debug_store_locked(fz_context *ctx)
+fz_debug_store_locked(fz_context *ctx, fz_output *out)
 {
 	fz_item *item, *next;
 	char buf[256];
 	fz_store *store = ctx->store;
+	size_t list_total = 0;
 
-	printf("-- resource store contents --\n");
+	fz_write_printf(ctx, out, "STORE\t-- resource store contents --\n");
 
 	for (item = store->head; item; item = next)
 	{
@@ -751,8 +741,9 @@ fz_debug_store_locked(fz_context *ctx)
 		fz_unlock(ctx, FZ_LOCK_ALLOC);
 		item->type->format_key(ctx, buf, sizeof buf, item->key);
 		fz_lock(ctx, FZ_LOCK_ALLOC);
-		printf("store[*][refs=%d][size=%d] key=%s val=%p\n",
-				item->val->refs, (int)item->size, buf, item->val);
+		fz_write_printf(ctx, out, "STORE\tstore[*][refs=%d][size=%d] key=%s val=%p\n",
+				item->val->refs, (int)item->size, buf, (void *)item->val);
+		list_total += item->size;
 		if (next)
 		{
 			(void)Memento_dropRef(next->val);
@@ -760,48 +751,137 @@ fz_debug_store_locked(fz_context *ctx)
 		}
 	}
 
-	printf("-- resource store hash contents --\n");
-	fz_hash_for_each(ctx, store->hash, NULL, fz_debug_store_item);
-	printf("-- end --\n");
+	fz_write_printf(ctx, out, "STORE\t-- resource store hash contents --\n");
+	fz_hash_for_each(ctx, store->hash, out, fz_debug_store_item);
+	fz_write_printf(ctx, out, "STORE\t-- end --\n");
+
+	fz_write_printf(ctx, out, "STORE\tmax=%zu, size=%zu, actual size=%zu\n", store->max, store->size, list_total);
 }
 
 void
-fz_debug_store(fz_context *ctx)
+fz_debug_store(fz_context *ctx, fz_output *out)
 {
 	fz_lock(ctx, FZ_LOCK_ALLOC);
-	fz_debug_store_locked(ctx);
+	fz_debug_store_locked(ctx, out);
 	fz_unlock(ctx, FZ_LOCK_ALLOC);
 }
 
-/* This is now an n^2 algorithm - not ideal, but it'll only be bad if we are
- * actually managing to scavenge lots of blocks back. */
+/*
+	Consider if we have blocks of the following sizes in the store, from oldest
+	to newest:
+
+	A 32
+	B 64
+	C 128
+	D 256
+
+	Further suppose we need to free 97 bytes. Naively freeing blocks until we have
+	freed enough would mean we'd free A, B and C, when we could have freed just C.
+
+	We are forced into an n^2 algorithm by the need to drop the lock as part of the
+	eviction, so we might as well embrace it and go for a solution that properly
+	drops just C.
+
+	The algorithm used is to scan the list of blocks from oldest to newest, counting
+	how many bytes we can free in the blocks we pass. We stop this scan when we have
+	found enough blocks. We then free the largest block. This releases the lock
+	momentarily, which means we have to start the scan process all over again, so
+	we repeat. This guarantees we only evict a minimum of blocks, but does mean we
+	scan more blocks than we'd ideally like.
+ */
 static int
 scavenge(fz_context *ctx, size_t tofree)
 {
 	fz_store *store = ctx->store;
-	size_t count = 0;
-	fz_item *item, *prev;
+	size_t freed = 0;
+	fz_item *item;
 
-	/* Free the items */
-	for (item = store->tail; item; item = prev)
+	if (store->scavenging)
+		return 0;
+
+	store->scavenging = 1;
+
+	do
 	{
-		prev = item->prev;
-		if (item->val->refs == 1)
+		/* Count through a suffix of objects in the store until
+		 * we find enough to give us what we need to evict. */
+		size_t suffix_size = 0;
+		fz_item *largest = NULL;
+
+		for (item = store->tail; item; item = item->prev)
 		{
-			/* Free this item */
-			count += item->size;
-			evict(ctx, item); /* Drops then retakes lock */
-
-			if (count >= tofree)
-				break;
-
-			/* Have to restart search again, as prev may no longer
-			 * be valid due to release of lock in evict. */
-			prev = store->tail;
+			if (item->val->refs == 1)
+			{
+				/* This one is evictable */
+				suffix_size += item->size;
+				if (largest == NULL || item->size > largest->size)
+					largest = item;
+				if (suffix_size >= tofree - freed)
+					break;
+			}
 		}
+
+		/* If there are no evictable blocks, we can't find anything to free. */
+		if (largest == NULL)
+			break;
+
+		/* Free largest. */
+		if (freed == 0) {
+			FZ_LOG_DUMP_STORE(ctx, "Before scavenge:\n");
+		}
+		freed += largest->size;
+		evict(ctx, largest); /* Drops then retakes lock */
 	}
+	while (freed < tofree);
+
+	if (freed != 0) {
+		FZ_LOG_DUMP_STORE(ctx, "After scavenge:\n");
+	}
+	store->scavenging = 0;
 	/* Success is managing to evict any blocks */
-	return count != 0;
+	return freed != 0;
+}
+
+void
+fz_drop_storable(fz_context *ctx, const fz_storable *sc)
+{
+	/* Explicitly drop const to allow us to use const
+	 * sanely throughout the code. */
+	fz_storable *s = (fz_storable *)sc;
+	int num;
+
+	if (s == NULL)
+		return;
+
+	fz_lock(ctx, FZ_LOCK_ALLOC);
+	/* Drop the ref, and leave num as being the number of
+	 * refs left (-1 meaning, "statically allocated"). */
+	if (s->refs > 0)
+	{
+		(void)Memento_dropIntRef(s);
+		num = --s->refs;
+	}
+	else
+		num = -1;
+
+	/* If we have just 1 ref left, it's possible that
+	 * this ref is held by the store. If the store is
+	 * oversized, we ought to throw any such references
+	 * away to try to bring the store down to a "legal"
+	 * size. Run a scavenge to check for this case. */
+	if (ctx->store->max != FZ_STORE_UNLIMITED)
+		if (num == 1 && ctx->store->size > ctx->store->max)
+			scavenge(ctx, ctx->store->size - ctx->store->max);
+	fz_unlock(ctx, FZ_LOCK_ALLOC);
+
+	/* If we have no references to an object left, then
+	 * it cannot possibly be in the store (as the store always
+	 * keeps a ref to everything in it, and doesn't drop via
+	 * this method). So we can simply drop the storable object
+	 * itself without any operations on the fz_store.
+	 */
+	if (num == 0)
+		s->drop(ctx, s);
 }
 
 int fz_store_scavenge_external(fz_context *ctx, size_t size, int *phase)
@@ -825,8 +905,8 @@ int fz_store_scavenge(fz_context *ctx, size_t size, int *phase)
 		return 0;
 
 #ifdef DEBUG_SCAVENGING
-	printf("Scavenging: store=" FZ_FMT_zu " size=" FZ_FMT_zu " phase=%d\n", store->size, size, *phase);
-	fz_debug_store_locked(ctx);
+	fz_write_printf(ctx, fz_stdout(ctx), "Scavenging: store=%zu size=%zu phase=%d\n", store->size, size, *phase);
+	fz_debug_store_locked(ctx, fz_stdout(ctx));
 	Memento_stats();
 #endif
 	do
@@ -853,8 +933,8 @@ int fz_store_scavenge(fz_context *ctx, size_t size, int *phase)
 		if (scavenge(ctx, tofree))
 		{
 #ifdef DEBUG_SCAVENGING
-			printf("scavenged: store=" FZ_FMT_zu "\n", store->size);
-			fz_debug_store(ctx);
+			fz_write_printf(ctx, fz_stdout(ctx), "scavenged: store=%zu\n", store->size);
+			fz_debug_store(ctx, fz_stdout(ctx));
 			Memento_stats();
 #endif
 			return 1;
@@ -863,8 +943,8 @@ int fz_store_scavenge(fz_context *ctx, size_t size, int *phase)
 	while (max > 0);
 
 #ifdef DEBUG_SCAVENGING
-	printf("scavenging failed\n");
-	fz_debug_store(ctx);
+	fz_write_printf(ctx, fz_stdout(ctx), "scavenging failed\n");
+	fz_debug_store(ctx, fz_stdout(ctx));
 	Memento_listBlocks();
 #endif
 	return 0;
@@ -885,7 +965,7 @@ fz_shrink_store(fz_context *ctx, unsigned int percent)
 		return 0;
 
 #ifdef DEBUG_SCAVENGING
-	printf("fz_shrink_store: " FZ_FMT_zu "\n", store->size/(1024*1024));
+	fz_write_printf(ctx, fz_stdout(ctx), "fz_shrink_store: %zu\n", store->size/(1024*1024));
 #endif
 	fz_lock(ctx, FZ_LOCK_ALLOC);
 
@@ -896,7 +976,7 @@ fz_shrink_store(fz_context *ctx, unsigned int percent)
 	success = (store->size <= new_size) ? 1 : 0;
 	fz_unlock(ctx, FZ_LOCK_ALLOC);
 #ifdef DEBUG_SCAVENGING
-	printf("fz_shrink_store after: " FZ_FMT_zu "\n", store->size/(1024*1024));
+	fz_write_printf(ctx, fz_stdout(ctx), "fz_shrink_store after: %zu\n", store->size/(1024*1024));
 #endif
 
 	return success;
@@ -997,3 +1077,21 @@ void fz_defer_reap_end(fz_context *ctx)
 	else
 		fz_unlock(ctx, FZ_LOCK_ALLOC);
 }
+
+#ifdef ENABLE_STORE_LOGGING
+
+void fz_log_dump_store(fz_context *ctx, const char *fmt, ...)
+{
+	fz_output *out;
+	va_list args;
+	va_start(args, fmt);
+	out = fz_new_log_for_module(ctx, "STORE");
+	fz_write_vprintf(ctx, out, fmt, args);
+	va_end(args);
+	fz_debug_store(ctx, out);
+	fz_write_printf(ctx, out, "STORE\tEND\n");
+	fz_close_output(ctx, out);
+	fz_drop_output(ctx, out);
+}
+
+#endif

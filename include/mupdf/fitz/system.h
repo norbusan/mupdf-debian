@@ -8,13 +8,14 @@
 #endif
 #endif
 
-/*
+/**
 	Include the standard libc headers.
 */
 
 #include <stddef.h> /* needed for size_t */
 #include <stdarg.h> /* needed for va_list vararg functions */
 #include <setjmp.h> /* needed for the try/catch macros */
+#include <stdio.h> /* useful for debug printfs */
 
 #if defined(_MSC_VER) && (_MSC_VER < 1700) /* MSVC older than VS2012 */
 typedef signed char int8_t;
@@ -43,7 +44,7 @@ typedef unsigned __int64 uint64_t;
 #define FZ_SQRT2 1.41421356f
 #define FZ_LN2 0.69314718f
 
-/*
+/**
 	Spot architectures where we have optimisations.
 */
 
@@ -53,27 +54,36 @@ typedef unsigned __int64 uint64_t;
 #endif
 #endif
 
-/*
+/**
 	Some differences in libc can be smoothed over
 */
 
 #ifndef __STRICT_ANSI__
 #if defined(__APPLE__)
-#define HAVE_SIGSETJMP
-#elif defined(__unix)
-#define HAVE_SIGSETJMP
+#ifndef HAVE_SIGSETJMP
+#define HAVE_SIGSETJMP 1
 #endif
+#elif defined(__unix)
+#ifndef __EMSCRIPTEN__
+#ifndef HAVE_SIGSETJMP
+#define HAVE_SIGSETJMP 1
+#endif
+#endif
+#endif
+#endif
+#ifndef HAVE_SIGSETJMP
+#define HAVE_SIGSETJMP 0
 #endif
 
-/*
-	Where possible (i.e. on platforms on which they are provided), use
-	sigsetjmp/siglongjmp in preference to setjmp/longjmp. We don't alter
-	signal handlers within mupdf, so there is no need for us to
-	store/restore them - hence we use the non-restoring variants. This
-	makes a large speed difference on MacOSX (and probably other
-	platforms too.
+/**
+	Where possible (i.e. on platforms on which they are provided),
+	use sigsetjmp/siglongjmp in preference to setjmp/longjmp. We
+	don't alter signal handlers within mupdf, so there is no need
+	for us to store/restore them - hence we use the non-restoring
+	variants. This makes a large speed difference on MacOSX (and
+	probably other platforms too.
 */
-#ifdef HAVE_SIGSETJMP
+#if HAVE_SIGSETJMP
 #define fz_setjmp(BUF) sigsetjmp(BUF, 0)
 #define fz_longjmp(BUF,VAL) siglongjmp(BUF, VAL)
 #define fz_jmp_buf sigjmp_buf
@@ -122,7 +132,9 @@ static __inline int signbit(double x)
 #define isinf(x) (!_finite(x))
 #endif
 
+#if _MSC_VER <= 1920 /* MSVC 2019 */
 #define hypotf _hypotf
+#endif
 #define atoll _atoi64
 
 #endif
@@ -146,7 +158,8 @@ void fz_free_argv(int argc, char **argv);
 #define S_ISDIR(mode) ((mode) & S_IFDIR)
 #endif
 
-/* inline is standard in C++. For some compilers we can enable it within C too. */
+/* inline is standard in C++. For some compilers we can enable it within
+ * C too. */
 
 #ifndef __cplusplus
 #if defined (__STDC_VERSION_) && (__STDC_VERSION__ >= 199901L) /* C99 */
@@ -181,7 +194,8 @@ void fz_free_argv(int argc, char **argv);
 #endif
 #endif
 
-/* Flag unused parameters, for use with 'static inline' functions in headers. */
+/* Flag unused parameters, for use with 'static inline' functions in
+ * headers. */
 #if defined(__GNUC__) && (__GNUC__ > 2 || __GNUC__ == 2 && __GNUC_MINOR__ >= 7)
 #define FZ_UNUSED __attribute__((__unused__))
 #else
@@ -205,8 +219,8 @@ void fz_free_argv(int argc, char **argv);
 
 /* If we're compiling as thumb code, then we need to tell the compiler
  * to enter and exit ARM mode around our assembly sections. If we move
- * the ARM functions to a separate file and arrange for it to be compiled
- * without thumb mode, we can save some time on entry.
+ * the ARM functions to a separate file and arrange for it to be
+ * compiled without thumb mode, we can save some time on entry.
  */
 /* This is slightly suboptimal; __thumb__ and __thumb2__ become defined
  * and undefined by #pragma arm/#pragma thumb - but we can't define a
@@ -222,9 +236,10 @@ void fz_free_argv(int argc, char **argv);
 #endif
 
 #ifdef CLUSTER
-/* Include this first so our defines don't clash with the system definitions */
+/* Include this first so our defines don't clash with the system
+ * definitions */
 #include <math.h>
-/*
+/**
  * Trig functions
  */
 static float
@@ -362,5 +377,10 @@ static inline float my_atan2f(float o, float a)
 #define cosf(x) my_sinf(FZ_PI / 2.0f + (x))
 #define atan2f(x,y) my_atan2f((x),(y))
 #endif
+
+static inline int fz_is_pow2(int a)
+{
+	return (a != 0) && (a & (a-1)) == 0;
+}
 
 #endif

@@ -1,9 +1,6 @@
 #ifndef MUPDF_PDF_RESOURCE_H
 #define MUPDF_PDF_RESOURCE_H
 
-/*
- * PDF interface to store
- */
 void pdf_store_item(fz_context *ctx, pdf_obj *key, void *val, size_t itemsize);
 void *pdf_find_item(fz_context *ctx, fz_store_drop_fn *drop, pdf_obj *key);
 void pdf_remove_item(fz_context *ctx, fz_store_drop_fn *drop, pdf_obj *key);
@@ -22,15 +19,9 @@ enum { PDF_SIMPLE_ENCODING_LATIN, PDF_SIMPLE_ENCODING_GREEK, PDF_SIMPLE_ENCODING
 
 pdf_obj *pdf_find_font_resource(fz_context *ctx, pdf_document *doc, int type, int encoding, fz_font *item, unsigned char md5[16]);
 pdf_obj *pdf_insert_font_resource(fz_context *ctx, pdf_document *doc, unsigned char md5[16], pdf_obj *obj);
-pdf_obj *pdf_find_image_resource(fz_context *ctx, pdf_document *doc, fz_image *item, unsigned char md5[16]);
-pdf_obj *pdf_insert_image_resource(fz_context *ctx, pdf_document *doc, unsigned char md5[16], pdf_obj *obj);
 void pdf_drop_resource_tables(fz_context *ctx, pdf_document *doc);
 
-/*
- * Functions, Colorspaces, Shadings and Images
- */
-
-typedef struct pdf_function_s pdf_function;
+typedef struct pdf_function pdf_function;
 
 void pdf_eval_function(fz_context *ctx, pdf_function *func, const float *in, int inlen, float *out, int outlen);
 pdf_function *pdf_keep_function(fz_context *ctx, pdf_function *func);
@@ -49,15 +40,9 @@ int pdf_is_jpx_image(fz_context *ctx, pdf_obj *dict);
 
 fz_image *pdf_load_image(fz_context *ctx, pdf_document *doc, pdf_obj *obj);
 
-pdf_obj *pdf_add_image(fz_context *ctx, pdf_document *doc, fz_image *image, int mask);
+pdf_obj *pdf_add_image(fz_context *ctx, pdf_document *doc, fz_image *image);
 
-/*
- * Pattern
- */
-
-typedef struct pdf_pattern_s pdf_pattern;
-
-struct pdf_pattern_s
+typedef struct
 {
 	fz_storable storable;
 	int ismask;
@@ -69,15 +54,11 @@ struct pdf_pattern_s
 	pdf_obj *resources;
 	pdf_obj *contents;
 	int id; /* unique ID for caching rendered tiles */
-};
+} pdf_pattern;
 
 pdf_pattern *pdf_load_pattern(fz_context *ctx, pdf_document *doc, pdf_obj *obj);
 pdf_pattern *pdf_keep_pattern(fz_context *ctx, pdf_pattern *pat);
 void pdf_drop_pattern(fz_context *ctx, pdf_pattern *pat);
-
-/*
- * XObject
- */
 
 pdf_obj *pdf_new_xobject(fz_context *ctx, pdf_document *doc, fz_rect bbox, fz_matrix matrix, pdf_obj *res, fz_buffer *buffer);
 void pdf_update_xobject(fz_context *ctx, pdf_document *doc, pdf_obj *xobj, fz_rect bbox, fz_matrix mat, pdf_obj *res, fz_buffer *buffer);

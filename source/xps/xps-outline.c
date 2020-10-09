@@ -35,9 +35,9 @@ xps_parse_document_outline(fz_context *ctx, xps_document *doc, fz_xml *root)
 				continue;
 
 			entry = fz_new_outline(ctx);
-			entry->title = fz_strdup(ctx, description);
-			entry->uri = fz_strdup(ctx, target);
-			entry->page = xps_lookup_link_target(ctx, (fz_document*)doc, target, NULL, NULL);
+			entry->title = Memento_label(fz_strdup(ctx, description), "outline_title");
+			entry->uri = Memento_label(fz_strdup(ctx, target), "outline_uri");
+			entry->page = xps_lookup_link_target(ctx, (fz_document*)doc, target, NULL, NULL).page;
 			entry->down = NULL;
 			entry->next = NULL;
 

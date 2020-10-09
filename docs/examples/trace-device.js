@@ -3,12 +3,16 @@ var Q = JSON.stringify
 var pathPrinter = {
 	moveTo: function (x,y) { print("moveTo", x, y) },
 	lineTo: function (x,y) { print("lineTo", x, y) },
-	curveTo: function (x1,y1,x2,y2,x3,y3) { print("curveTo", x1, y1, x2, y2, x3 ,y3) },
+	curveTo: function (x1,y1,x2,y2,x3,y3) { print("curveTo", x1, y1, x2, y2, x3, y3) },
 	closePath: function () { print("closePath") },
 }
 
 var textPrinter = {
+	beginSpan: function (f,m,wmode, bidi, dir, lang) {
+		print("beginSpan",f,m,wmode,bidi,dir,repr(lang));
+	},
 	showGlyph: function (f,m,g,u,v,b) { print("glyph",f,m,g,u,v,b) },
+	endSpan: function () { print("endSpan"); }
 }
 
 var traceDevice = {

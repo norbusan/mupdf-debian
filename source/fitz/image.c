@@ -1,4 +1,8 @@
-#include "fitz-imp.h"
+#include "mupdf/fitz.h"
+
+#include "context-imp.h"
+#include "image-imp.h"
+#include "pixmap-imp.h"
 
 #include <string.h>
 #include <math.h>
@@ -16,27 +20,25 @@ fz_key_storable_needs_reaping(fz_context *ctx, const fz_key_storable *ks)
 
 #define SCALABLE_IMAGE_DPI 96
 
-struct fz_compressed_image_s
+struct fz_compressed_image
 {
 	fz_image super;
-	fz_pixmap *tile;
 	fz_compressed_buffer *buffer;
 };
 
-struct fz_pixmap_image_s
+struct fz_pixmap_image
 {
 	fz_image super;
 	fz_pixmap *tile;
 };
 
-typedef struct fz_image_key_s fz_image_key;
-
-struct fz_image_key_s {
+typedef struct
+{
 	int refs;
 	fz_image *image;
 	int l2factor;
 	fz_irect rect;
-};
+} fz_image_key;
 
 fz_image *
 fz_keep_image(fz_context *ctx, fz_image *image)
@@ -93,7 +95,7 @@ fz_cmp_image_key(fz_context *ctx, void *k0_, void *k1_)
 }
 
 static void
-fz_format_image_key(fz_context *ctx, char *s, int n, void *key_)
+fz_format_image_key(fz_context *ctx, char *s, size_t n, void *key_)
 {
 	fz_image_key *key = (fz_image_key *)key_;
 	fz_snprintf(s, n, "(image %d x %d sf=%d)", key->image->w, key->image->h, key->l2factor);
@@ -109,6 +111,7 @@ fz_needs_reap_image_key(fz_context *ctx, void *key_)
 
 static const fz_store_type fz_image_store_type =
 {
+	"fz_image",
 	fz_make_hash_image_key,
 	fz_keep_image_key,
 	fz_drop_image_key,
@@ -153,29 +156,47 @@ fz_mask_color_key(fz_pixmap *pix, int n, const int *colorkey)
 }
 
 static void
-fz_unblend_masked_tile(fz_context *ctx, fz_pixmap *tile, fz_image *image)
+fz_unblend_masked_tile(fz_context *ctx, fz_pixmap *tile, fz_image *image, const fz_irect *isa)
 {
-	fz_pixmap *mask = fz_get_pixmap_from_image(ctx, image->mask, NULL, NULL, NULL, NULL);
-	unsigned char *s = mask->samples;
-	unsigned char *d = tile->samples;
+	fz_pixmap *mask;
+	unsigned char *s, *d = tile->samples;
 	int n = tile->n;
 	int k;
-	int sstride = mask->stride - mask->w * mask->n;
-	int dstride = tile->stride - tile->w * tile->n;
-	int h = mask->h;
+	int sstride, dstride = tile->stride - tile->w * tile->n;
+	int h;
+	fz_irect subarea;
 
-	if (tile->w != mask->w || tile->h != mask->h)
+	/* We need at least as much of the mask as there was of the tile. */
+	if (isa)
+		subarea = *isa;
+	else
 	{
-		fz_warn(ctx, "mask must be of same size as image for /Matte");
-		fz_drop_pixmap(ctx, mask);
-		return;
+		subarea.x0 = 0;
+		subarea.y0 = 0;
+		subarea.x1 = tile->w;
+		subarea.y1 = tile->h;
 	}
 
-	if (mask->w != 0)
+	mask = fz_get_pixmap_from_image(ctx, image->mask, &subarea, NULL, NULL, NULL);
+	s = mask->samples;
+	/* RJW: Urgh, bit of nastiness here. fz_pixmap_from_image will either return
+	 * an exact match for the subarea we asked for, or the full image, and the
+	 * normal way to know is that the matrix will be updated. That doesn't help
+	 * us here. */
+	if (image->mask->w == mask->w && image->mask->h == mask->h) {
+		subarea.x0 = 0;
+		subarea.y0 = 0;
+	}
+	if (isa)
+		s += (isa->x0 - subarea.x0) * mask->n + (isa->y0 - subarea.y0) * mask->stride;
+	sstride = mask->stride - tile->w * mask->n;
+	h = tile->h;
+
+	if (tile->w != 0)
 	{
 		while (h--)
 		{
-			int w = mask->w;
+			int w = tile->w;
 			do
 			{
 				if (*s == 0)
@@ -315,7 +336,18 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_compressed_image
 	int f = 1<<l2factor;
 	int w = image->w;
 	int h = image->h;
+	int matte = image->use_colorkey && image->mask;
 
+	if (matte)
+	{
+		/* Can't do l2factor decoding */
+		if (image->w != image->mask->w || image->h != image->mask->h)
+		{
+			fz_warn(ctx, "mask must be of same size as image for /Matte");
+			matte = 0;
+		}
+		assert(l2factor == 0);
+	}
 	if (subarea)
 	{
 		fz_adjust_image_subarea(ctx, image, subarea, l2factor);
@@ -340,8 +372,9 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_compressed_image
 			tile->flags &= ~FZ_PIXMAP_FLAG_INTERPOLATE;
 
 		stride = (w * image->n * image->bpc + 7) / 8;
-
-		samples = fz_malloc_array(ctx, h, stride);
+		if ((size_t)h > (size_t)(SIZE_MAX / stride))
+			fz_throw(ctx, FZ_ERROR_MEMORY, "image too large");
+		samples = Memento_label(fz_malloc(ctx, h * stride), "pixmap_samples");
 
 		if (subarea)
 		{
@@ -414,7 +447,7 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_compressed_image
 		{
 			fz_pixmap *conv;
 			fz_decode_indexed_tile(ctx, tile, image->decode, (1 << image->bpc) - 1);
-			conv = fz_expand_indexed_pixmap(ctx, tile, alpha);
+			conv = fz_convert_indexed_pixmap_to_base(ctx, tile);
 			fz_drop_pixmap(ctx, tile);
 			tile = conv;
 		}
@@ -424,8 +457,8 @@ fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_compressed_image
 		}
 
 		/* pre-blended matte color */
-		if (image->use_colorkey && image->mask)
-			fz_unblend_masked_tile(ctx, tile, image);
+		if (matte)
+			fz_unblend_masked_tile(ctx, tile, image, subarea);
 	}
 	fz_catch(ctx)
 	{
@@ -459,7 +492,6 @@ drop_compressed_image(fz_context *ctx, fz_image *image_)
 {
 	fz_compressed_image *image = (fz_compressed_image *)image_;
 
-	fz_drop_pixmap(ctx, image->tile);
 	fz_drop_compressed_buffer(ctx, image->buffer);
 }
 
@@ -480,6 +512,16 @@ compressed_image_get_pixmap(fz_context *ctx, fz_image *image_, fz_irect *subarea
 	int indexed;
 	fz_pixmap *tile;
 	int can_sub = 0;
+	int local_l2factor;
+
+	/* If we are using matte, then the decode code requires both image and tile sizes
+	 * to match. The simplest way to ensure this is to do no native l2factor decoding.
+	 */
+	if (image->super.use_colorkey && image->super.mask)
+	{
+		local_l2factor = 0;
+		l2factor = &local_l2factor;
+	}
 
 	/* We need to make a new one. */
 	/* First check for ones that we can't decode using streams */
@@ -644,9 +686,11 @@ fz_get_pixmap_from_image(fz_context *ctx, fz_image *image, const fz_irect *subar
 	fz_pixmap *tile;
 	int l2factor, l2factor_remaining;
 	fz_image_key key;
-	fz_image_key *keyp;
+	fz_image_key *keyp = NULL;
 	int w;
 	int h;
+
+	fz_var(keyp);
 
 	if (!image)
 		return NULL;
@@ -726,7 +770,8 @@ fz_get_pixmap_from_image(fz_context *ctx, fz_image *image, const fz_irect *subar
 	tile = image->get_pixmap(ctx, image, &key.rect, w, h, &l2factor_remaining);
 
 	/* Update the ctm to allow for subareas. */
-	update_ctm_for_subarea(ctm, &key.rect, image->w, image->h);
+	if (ctm)
+		update_ctm_for_subarea(ctm, &key.rect, image->w, image->h);
 
 	/* l2factor_remaining is updated to the amount of subscaling left to do */
 	assert(l2factor_remaining >= 0 && l2factor_remaining <= 6);
@@ -741,16 +786,19 @@ fz_get_pixmap_from_image(fz_context *ctx, fz_image *image, const fz_irect *subar
 		}
 	}
 
-	/* Now we try to cache the pixmap. Any failure here will just result
-	 * in us not caching. */
-	keyp = fz_malloc_struct(ctx, fz_image_key);
-	keyp->refs = 1;
-	keyp->image = fz_keep_image_store_key(ctx, image);
-	keyp->l2factor = l2factor;
-	keyp->rect = key.rect;
 	fz_try(ctx)
 	{
-		fz_pixmap *existing_tile = fz_store_item(ctx, keyp, tile, fz_pixmap_size(ctx, tile), &fz_image_store_type);
+		fz_pixmap *existing_tile;
+
+		/* Now we try to cache the pixmap. Any failure here will just result
+		 * in us not caching. */
+		keyp = fz_malloc_struct(ctx, fz_image_key);
+		keyp->refs = 1;
+		keyp->image = fz_keep_image_store_key(ctx, image);
+		keyp->l2factor = l2factor;
+		keyp->rect = key.rect;
+
+		existing_tile = fz_store_item(ctx, keyp, tile, fz_pixmap_size(ctx, tile), &fz_image_store_type);
 		if (existing_tile)
 		{
 			/* We already have a tile. This must have been produced by a
@@ -810,7 +858,7 @@ fz_new_image_from_pixmap(fz_context *ctx, fz_pixmap *pixmap, fz_image *mask)
 fz_image *
 fz_new_image_of_size(fz_context *ctx, int w, int h, int bpc, fz_colorspace *colorspace,
 		int xres, int yres, int interpolate, int imagemask, float *decode,
-		int *colorkey, fz_image *mask, int size,
+		int *colorkey, fz_image *mask, size_t size,
 		fz_image_get_pixmap_fn *get_pixmap,
 		fz_image_get_size_fn *get_size,
 		fz_drop_image_fn *drop)
@@ -886,7 +934,7 @@ compressed_image_get_size(fz_context *ctx, fz_image *image)
 	if (image == NULL)
 		return 0;
 
-	return sizeof(fz_pixmap_image) + fz_pixmap_size(ctx, im->tile) + (im->buffer && im->buffer->buffer ? im->buffer->buffer->cap : 0);
+	return sizeof(fz_pixmap_image) + (im->buffer && im->buffer->buffer ? im->buffer->buffer->cap : 0);
 }
 
 fz_image *
@@ -930,20 +978,6 @@ void fz_set_compressed_image_buffer(fz_context *ctx, fz_compressed_image *image,
 	((fz_compressed_image *)image)->buffer = buf; /* Note: compressed buffers are not reference counted */
 }
 
-fz_pixmap *fz_compressed_image_tile(fz_context *ctx, fz_compressed_image *image)
-{
-	if (image == NULL || image->super.get_pixmap != compressed_image_get_pixmap)
-		return NULL;
-	return ((fz_compressed_image *)image)->tile;
-}
-
-void fz_set_compressed_image_tile(fz_context *ctx, fz_compressed_image *image, fz_pixmap *pix)
-{
-	assert(image != NULL && image->super.get_pixmap == compressed_image_get_pixmap);
-	fz_drop_pixmap(ctx, ((fz_compressed_image *)image)->tile);
-	((fz_compressed_image *)image)->tile = fz_keep_pixmap(ctx, pix);
-}
-
 fz_pixmap *fz_pixmap_image_tile(fz_context *ctx, fz_pixmap_image *image)
 {
 	if (image == NULL || image->super.get_pixmap != pixmap_image_get_pixmap)
@@ -982,6 +1016,11 @@ fz_recognize_image_format(fz_context *ctx, unsigned char p[8])
 		return FZ_IMAGE_GIF;
 	if (p[0] == 'B' && p[1] == 'M')
 		return FZ_IMAGE_BMP;
+	if (p[0] == 'B' && p[1] == 'A')
+		return FZ_IMAGE_BMP;
+	if (p[0] == 0x97 && p[1] == 'J' && p[2] == 'B' && p[3] == '2' &&
+		p[4] == '\r' && p[5] == '\n'  && p[6] == 0x1a && p[7] == '\n')
+		return FZ_IMAGE_JBIG2;
 	return FZ_IMAGE_UNKNOWN;
 }
 
@@ -995,11 +1034,13 @@ fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer)
 	unsigned char *buf = buffer->data;
 	fz_image *image = NULL;
 	int type;
+	int bpc;
 
 	if (len < 8)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "unknown image file format");
 
 	type = fz_recognize_image_format(ctx, buf);
+	bpc = 8;
 	switch (type)
 	{
 	case FZ_IMAGE_PNM:
@@ -1026,6 +1067,10 @@ fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer)
 	case FZ_IMAGE_BMP:
 		fz_load_bmp_info(ctx, buf, len, &w, &h, &xres, &yres, &cspace);
 		break;
+	case FZ_IMAGE_JBIG2:
+		fz_load_jbig2_info(ctx, buf, len, &w, &h, &xres, &yres, &cspace);
+		bpc = 1;
+		break;
 	default:
 		fz_throw(ctx, FZ_ERROR_GENERIC, "unknown image file format");
 	}
@@ -1037,7 +1082,7 @@ fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer)
 		bc->params.type = type;
 		if (type == FZ_IMAGE_JPEG)
 			bc->params.u.jpeg.color_transform = -1;
-		image = fz_new_image_from_compressed_buffer(ctx, w, h, 8, cspace, xres, yres, 0, 0, NULL, NULL, bc, NULL);
+		image = fz_new_image_from_compressed_buffer(ctx, w, h, bpc, cspace, xres, yres, 0, 0, NULL, NULL, bc, NULL);
 	}
 	fz_always(ctx)
 		fz_drop_colorspace(ctx, cspace);
@@ -1086,12 +1131,7 @@ fz_image_resolution(fz_image *image, int *xres, int *yres)
 	/* Scale xres and yres up until we get believable values */
 	if (*xres < SANE_DPI || *yres < SANE_DPI || *xres > INSANE_DPI || *yres > INSANE_DPI)
 	{
-		if (*xres == *yres)
-		{
-			*xres = SANE_DPI;
-			*yres = SANE_DPI;
-		}
-		else if (*xres < *yres)
+		if (*xres < *yres)
 		{
 			*yres = *yres * SANE_DPI / *xres;
 			*xres = SANE_DPI;
@@ -1099,6 +1139,12 @@ fz_image_resolution(fz_image *image, int *xres, int *yres)
 		else
 		{
 			*xres = *xres * SANE_DPI / *yres;
+			*yres = SANE_DPI;
+		}
+
+		if (*xres == *yres || *xres < SANE_DPI || *yres < SANE_DPI || *xres > INSANE_DPI || *yres > INSANE_DPI)
+		{
+			*xres = SANE_DPI;
 			*yres = SANE_DPI;
 		}
 	}
@@ -1118,6 +1164,8 @@ display_list_image_get_pixmap(fz_context *ctx, fz_image *image_, fz_irect *subar
 	fz_matrix ctm;
 	fz_device *dev;
 	fz_pixmap *pix;
+
+	fz_var(dev);
 
 	if (subarea)
 	{
@@ -1142,16 +1190,19 @@ display_list_image_get_pixmap(fz_context *ctx, fz_image *image_, fz_irect *subar
 	ctm = fz_pre_scale(image->transform, w, h);
 
 	fz_clear_pixmap(ctx, pix); /* clear to transparent */
-	dev = fz_new_draw_device(ctx, ctm, pix);
 	fz_try(ctx)
 	{
+		dev = fz_new_draw_device(ctx, ctm, pix);
 		fz_run_display_list(ctx, image->list, dev, fz_identity, fz_infinite_rect, NULL);
 		fz_close_device(ctx, dev);
 	}
 	fz_always(ctx)
 		fz_drop_device(ctx, dev);
 	fz_catch(ctx)
+	{
+		fz_drop_pixmap(ctx, pix);
 		fz_rethrow(ctx);
+	}
 
 	/* Never do more subsampling, cos we've already given them the right size */
 	if (l2factor)

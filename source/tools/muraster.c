@@ -157,6 +157,21 @@ int gettimeofday(struct timeval *tv, struct timezone *tz);
 	these for configuration.
 */
 
+/* Unless we have specifically disabled threading, enable it. */
+#ifndef DISABLE_MUTHREADS
+#ifndef MURASTER_THREADS
+#define MURASTER_THREADS 1
+#endif
+#endif
+
+/* If we have threading, and we haven't already configured BGPRINT,
+ * enable it. */
+#if MURASTER_THREADS != 0
+#ifndef MURASTER_CONFIG_BGPRINT
+#define MURASTER_CONFIG_BGPRINT 1
+#endif
+#endif
+
 #ifdef MURASTER_CONFIG_X_RESOLUTION
 #define X_RESOLUTION MURASTER_CONFIG_X_RESOLUTION
 #else
@@ -366,9 +381,9 @@ static int width = 0;
 static int height = 0;
 static int fit = 0;
 
-static float layout_w = 450;
-static float layout_h = 600;
-static float layout_em = 12;
+static float layout_w = FZ_DEFAULT_LAYOUT_W;
+static float layout_h = FZ_DEFAULT_LAYOUT_H;
+static float layout_em = FZ_DEFAULT_LAYOUT_EM;
 static char *layout_css = NULL;
 static int layout_use_doc_css = 1;
 
@@ -559,6 +574,16 @@ static int dodrawpage(fz_context *ctx, int pagenum, fz_cookie *cookie, render_de
 	fz_pixmap *pix = NULL;
 	fz_bitmap *bit = NULL;
 	int errors_are_fatal = 0;
+	fz_irect ibounds = render->ibounds;
+	fz_rect tbounds = render->tbounds;
+	int total_height = ibounds.y1 - ibounds.y0;
+	int start_offset = min_band_height * render->bands_rendered;
+	int remaining_start = ibounds.y0 + start_offset;
+	int remaining_height = ibounds.y1 - remaining_start;
+	int band_height = min_band_height * render->band_height_multiple;
+	int bands = (remaining_height + band_height-1) / band_height;
+	fz_matrix ctm = render->ctm;
+	int band;
 
 	fz_var(pix);
 	fz_var(bit);
@@ -566,17 +591,6 @@ static int dodrawpage(fz_context *ctx, int pagenum, fz_cookie *cookie, render_de
 
 	fz_try(ctx)
 	{
-		fz_irect ibounds = render->ibounds;
-		fz_rect tbounds = render->tbounds;
-		int total_height = ibounds.y1 - ibounds.y0;
-		int start_offset = min_band_height * render->bands_rendered;
-		int remaining_start = ibounds.y0 + start_offset;
-		int remaining_height = ibounds.y1 - remaining_start;
-		int band_height = min_band_height * render->band_height_multiple;
-		int bands = (remaining_height + band_height-1) / band_height;
-		fz_matrix ctm = render->ctm;
-		int band;
-
 		/* Set up ibounds and tbounds for a single band_height band.
 		 * We will adjust ctm as we go. */
 		ibounds.y1 = ibounds.y0 + band_height;
@@ -612,7 +626,6 @@ static int dodrawpage(fz_context *ctx, int pagenum, fz_cookie *cookie, render_de
 			pix = fz_new_pixmap_with_bbox(ctx, colorspace, ibounds, NULL, 0);
 			fz_set_pixmap_resolution(ctx, pix, x_resolution, y_resolution);
 		}
-		fz_write_header(ctx, render->bander, pix->w, total_height, pix->n, pix->alpha, pix->xres, pix->yres, pagenum, pix->colorspace, pix->seps);
 
 		for (band = 0; band < bands; band++)
 		{
@@ -674,7 +687,7 @@ static int dodrawpage(fz_context *ctx, int pagenum, fz_cookie *cookie, render_de
 		if (render->num_workers > 0)
 		{
 			int band;
-			for (band = 0; band < render->num_workers; band++)
+			for (band = 0; band < fz_mini(render->num_workers, bands); band++)
 			{
 				worker_t *w = &workers[band];
 				w->cookie.abort = 1;
@@ -703,7 +716,7 @@ static int dodrawpage(fz_context *ctx, int pagenum, fz_cookie *cookie, render_de
 }
 
 /* This functions tries to render a page, falling back repeatedly to try and make it work. */
-static int try_render_page(fz_context *ctx, int pagenum, fz_cookie *cookie, int start, int interptime, char *filename, int bg, int solo, render_details *render)
+static int try_render_page(fz_context *ctx, int pagenum, fz_cookie *cookie, int start, int interptime, char *fname, int bg, int solo, render_details *render)
 {
 	int status;
 
@@ -715,7 +728,7 @@ static int try_render_page(fz_context *ctx, int pagenum, fz_cookie *cookie, int 
 		{
 			int w = render->ibounds.x1 - render->ibounds.x0;
 			int h = render->ibounds.y1 - render->ibounds.y0;
-			fz_write_header(ctx, render->bander, w, h, 0, render->n, 0, 0, 0, 0, NULL);
+			fz_write_header(ctx, render->bander, w, h, render->n, 0, 0, 0, 0, 0, NULL);
 		}
 		fz_catch(ctx)
 		{
@@ -783,14 +796,14 @@ static int try_render_page(fz_context *ctx, int pagenum, fz_cookie *cookie, int 
 				timing.min = diff + interptime;
 				timing.mininterp = interptime;
 				timing.minpage = pagenum;
-				timing.minfilename = filename;
+				timing.minfilename = fname;
 			}
 			if (diff + interptime > timing.max)
 			{
 				timing.max = diff + interptime;
 				timing.maxinterp = interptime;
 				timing.maxpage = pagenum;
-				timing.maxfilename = filename;
+				timing.maxfilename = fname;
 			}
 			timing.total += diff + interptime;
 			timing.count ++;
@@ -803,13 +816,13 @@ static int try_render_page(fz_context *ctx, int pagenum, fz_cookie *cookie, int 
 			{
 				timing.min = diff;
 				timing.minpage = pagenum;
-				timing.minfilename = filename;
+				timing.minfilename = fname;
 			}
 			if (diff > timing.max)
 			{
 				timing.max = diff;
 				timing.maxpage = pagenum;
-				timing.maxfilename = filename;
+				timing.maxfilename = fname;
 			}
 			timing.total += diff;
 			timing.count ++;
@@ -820,7 +833,7 @@ static int try_render_page(fz_context *ctx, int pagenum, fz_cookie *cookie, int 
 
 	if (showmemory)
 	{
-		fz_dump_glyph_cache_stats(ctx);
+		fz_dump_glyph_cache_stats(ctx, fz_stderr(ctx));
 	}
 
 	fz_flush_warnings(ctx);
@@ -964,7 +977,7 @@ initialise_banding(fz_context *ctx, render_details *render, int color)
 	}
 
 	w = render->ibounds.x1 - render->ibounds.x0;
-	min_band_mem = bpp * w * min_band_height;
+	min_band_mem = (size_t)bpp * w * min_band_height;
 	reps = (int)(max_band_memory / min_band_mem);
 	if (reps < 1)
 		reps = 1;
@@ -989,7 +1002,7 @@ initialise_banding(fz_context *ctx, render_details *render, int color)
 	if (output_format == OUT_PGM || output_format == OUT_PPM)
 	{
 		render->bander = fz_new_pnm_band_writer(ctx, out);
-		render->n = OUT_PGM ? 1 : 3;
+		render->n = output_format == OUT_PGM ? 1 : 3;
 	}
 	else if (output_format == OUT_PAM)
 	{
@@ -1076,7 +1089,7 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 			 * from file. */
 			fz_try(ctx)
 			{
-				test_dev = fz_new_test_device(ctx, &is_color, 0.01f, 0, test_dev);
+				test_dev = fz_new_test_device(ctx, &is_color, 0.01f, 0, NULL);
 				fz_run_page(ctx, page, test_dev, fz_identity, &cookie);
 				fz_close_device(ctx, test_dev);
 			}
@@ -1320,19 +1333,21 @@ trace_realloc(void *arg, void *p_, size_t size)
 static void worker_thread(void *arg)
 {
 	worker_t *me = (worker_t *)arg;
+	int band_start;
 
 	do
 	{
 		DEBUG_THREADS(("Worker %d waiting\n", me->num));
 		mu_wait_semaphore(&me->start);
+		band_start = me->band_start;
 		DEBUG_THREADS(("Worker %d woken for band_start %d\n", me->num, me->band_start));
 		me->status = RENDER_OK;
-		if (me->band_start >= 0)
-			me->status = drawband(me->ctx, NULL, me->list, me->ctm, me->tbounds, &me->cookie, me->band_start, me->pix, &me->bit);
-		DEBUG_THREADS(("Worker %d completed band_start %d (status=%d)\n", me->num, me->band_start, me->status));
+		if (band_start >= 0)
+			me->status = drawband(me->ctx, NULL, me->list, me->ctm, me->tbounds, &me->cookie, band_start, me->pix, &me->bit);
+		DEBUG_THREADS(("Worker %d completed band_start %d (status=%d)\n", me->num, band_start, me->status));
 		mu_trigger_semaphore(&me->stop);
 	}
-	while (me->band_start >= 0);
+	while (band_start >= 0);
 }
 
 static void bgprint_worker(void *arg)
@@ -1569,7 +1584,7 @@ int main(int argc, char **argv)
 	{
 		int i;
 
-		for (i = 0; i < nelem(suffix_table); i++)
+		for (i = 0; i < (int)nelem(suffix_table); i++)
 		{
 			if (!strcmp(format, suffix_table[i].suffix+1))
 			{
@@ -1578,7 +1593,7 @@ int main(int argc, char **argv)
 				break;
 			}
 		}
-		if (i == nelem(suffix_table))
+		if (i == (int)nelem(suffix_table))
 		{
 			fprintf(stderr, "Unknown output format '%s'\n", format);
 			exit(1);
@@ -1589,7 +1604,7 @@ int main(int argc, char **argv)
 		char *suffix = output;
 		int i;
 
-		for (i = 0; i < nelem(suffix_table); i++)
+		for (i = 0; i < (int)nelem(suffix_table); i++)
 		{
 			char *s = strstr(suffix, suffix_table[i].suffix);
 

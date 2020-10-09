@@ -8,7 +8,16 @@
 int
 pdf_count_pages(fz_context *ctx, pdf_document *doc)
 {
+	/* FIXME: We should reset linear_page_count to 0 when editing starts
+	 * (or when linear loading ends) */
+	if (doc->linear_page_count != 0)
+		return doc->linear_page_count;
 	return pdf_to_int(ctx, pdf_dict_getp(ctx, pdf_trailer(ctx, doc), "Root/Pages/Count"));
+}
+
+int pdf_count_pages_imp(fz_context *ctx, fz_document *doc, int chapter)
+{
+	return pdf_count_pages(ctx, (pdf_document*)doc);
 }
 
 static int
@@ -18,35 +27,17 @@ pdf_load_page_tree_imp(fz_context *ctx, pdf_document *doc, pdf_obj *node, int id
 	if (pdf_name_eq(ctx, type, PDF_NAME(Pages)))
 	{
 		pdf_obj *kids = pdf_dict_get(ctx, node, PDF_NAME(Kids));
-		int count = pdf_dict_get_int(ctx, node, PDF_NAME(Count));
 		int i, n = pdf_array_len(ctx, kids);
 
-		/* if Kids length is same as Count, all children must be page objects */
-		if (n == count)
-		{
+		if (pdf_mark_obj(ctx, node))
+			fz_throw(ctx, FZ_ERROR_GENERIC, "cycle in page tree");
+		fz_try(ctx)
 			for (i = 0; i < n; ++i)
-			{
-				if (idx >= doc->rev_page_count)
-					fz_throw(ctx, FZ_ERROR_GENERIC, "too many kids in page tree");
-				doc->rev_page_map[idx].page = idx;
-				doc->rev_page_map[idx].object = pdf_to_num(ctx, pdf_array_get(ctx, kids, i));
-				++idx;
-			}
-		}
-
-		/* else Kids may contain intermediate nodes */
-		else
-		{
-			if (pdf_mark_obj(ctx, node))
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cycle in page tree");
-			fz_try(ctx)
-				for (i = 0; i < n; ++i)
-					idx = pdf_load_page_tree_imp(ctx, doc, pdf_array_get(ctx, kids, i), idx);
-			fz_always(ctx)
-				pdf_unmark_obj(ctx, node);
-			fz_catch(ctx)
-				fz_rethrow(ctx);
-		}
+				idx = pdf_load_page_tree_imp(ctx, doc, pdf_array_get(ctx, kids, i), idx);
+		fz_always(ctx)
+			pdf_unmark_obj(ctx, node);
+		fz_catch(ctx)
+			fz_rethrow(ctx);
 	}
 	else if (pdf_name_eq(ctx, type, PDF_NAME(Page)))
 	{
@@ -77,7 +68,7 @@ pdf_load_page_tree(fz_context *ctx, pdf_document *doc)
 	if (!doc->rev_page_map)
 	{
 		doc->rev_page_count = pdf_count_pages(ctx, doc);
-		doc->rev_page_map = fz_malloc_array(ctx, doc->rev_page_count, sizeof *doc->rev_page_map);
+		doc->rev_page_map = Memento_label(fz_malloc_array(ctx, doc->rev_page_count, pdf_rev_page_map), "pdf_rev_page_map");
 		pdf_load_page_tree_imp(ctx, doc, pdf_dict_getp(ctx, pdf_trailer(ctx, doc), "Root/Pages"), 0);
 		qsort(doc->rev_page_map, doc->rev_page_count, sizeof *doc->rev_page_map, cmp_rev_page_map);
 	}
@@ -127,11 +118,13 @@ pdf_lookup_page_loc_imp(fz_context *ctx, pdf_document *doc, pdf_obj *node, int *
 			{
 				if (stack == &local_stack[0])
 				{
-					stack = fz_malloc_array(ctx, stack_max * 2, sizeof(*stack));
+					stack = fz_malloc_array(ctx, stack_max * 2, pdf_obj*);
 					memcpy(stack, &local_stack[0], stack_max * sizeof(*stack));
 				}
 				else
-					stack = fz_resize_array(ctx, stack, stack_max * 2, sizeof(*stack));
+				{
+					stack = fz_realloc_array(ctx, stack, stack_max * 2, pdf_obj*);
+				}
 				stack_max *= 2;
 			}
 			stack[stack_len++] = node;
@@ -210,7 +203,7 @@ pdf_lookup_page_loc(fz_context *ctx, pdf_document *doc, int needle, pdf_obj **pa
 
 	hit = pdf_lookup_page_loc_imp(ctx, doc, node, &skip, parentp, indexp);
 	if (!hit)
-		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find page %d in page tree", needle);
+		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find page %d in page tree", needle+1);
 	return hit;
 }
 
@@ -361,6 +354,16 @@ pdf_flatten_inheritable_page_items(fz_context *ctx, pdf_obj *page)
 }
 
 /* We need to know whether to install a page-level transparency group */
+
+/*
+ * Object memo flags - allows us to secretly remember "a memo" (a bool) in an
+ * object, and to read back whether there was a memo, and if so, what it was.
+ */
+enum
+{
+	PDF_FLAGS_MEMO_BM = 0,
+	PDF_FLAGS_MEMO_OP = 1
+};
 
 static int pdf_resources_use_blending(fz_context *ctx, pdf_obj *rdb);
 
@@ -685,11 +688,12 @@ pdf_page_transform(fz_context *ctx, pdf_page *page, fz_rect *page_mediabox, fz_m
 }
 
 static void
-find_seps(fz_context *ctx, fz_separations **seps, pdf_obj *obj)
+find_seps(fz_context *ctx, fz_separations **seps, pdf_obj *obj, pdf_obj *clearme)
 {
 	int i, n;
-	pdf_obj *nameobj = pdf_array_get(ctx, obj, 0);
+	pdf_obj *nameobj, *cols;
 
+	nameobj = pdf_array_get(ctx, obj, 0);
 	if (pdf_name_eq(ctx, nameobj, PDF_NAME(Separation)))
 	{
 		fz_colorspace *cs;
@@ -711,29 +715,57 @@ find_seps(fz_context *ctx, fz_separations **seps, pdf_obj *obj)
 				return; /* Got that one already */
 		}
 
-		cs = pdf_load_colorspace(ctx, obj);
-		if (!*seps)
-			*seps = fz_new_separations(ctx, 0);
-		fz_add_separation(ctx, *seps, name, cs, 0);
-		fz_drop_colorspace(ctx, cs);
+		fz_try(ctx)
+			cs = pdf_load_colorspace(ctx, obj);
+		fz_catch(ctx)
+		{
+			fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
+			return; /* ignore broken colorspace */
+		}
+		fz_try(ctx)
+		{
+			if (!*seps)
+				*seps = fz_new_separations(ctx, 0);
+			fz_add_separation(ctx, *seps, name, cs, 0);
+		}
+		fz_always(ctx)
+			fz_drop_colorspace(ctx, cs);
+		fz_catch(ctx)
+			fz_rethrow(ctx);
 	}
 	else if (pdf_name_eq(ctx, nameobj, PDF_NAME(Indexed)))
 	{
-		find_seps(ctx, seps, pdf_array_get(ctx, obj, 1));
+		if (pdf_is_indirect(ctx, obj))
+		{
+			if (pdf_mark_obj(ctx, obj))
+				return; /* already been here */
+			/* remember to clear this colorspace dictionary at the end */
+			pdf_array_push(ctx, clearme, obj);
+		}
+
+		find_seps(ctx, seps, pdf_array_get(ctx, obj, 1), clearme);
 	}
 	else if (pdf_name_eq(ctx, nameobj, PDF_NAME(DeviceN)))
 	{
+		if (pdf_is_indirect(ctx, obj))
+		{
+			if (pdf_mark_obj(ctx, obj))
+				return; /* already been here */
+			/* remember to clear this colorspace dictionary at the end */
+			pdf_array_push(ctx, clearme, obj);
+		}
+
 		/* If the separation colorants exists for this DeviceN color space
 		 * add those prior to our search for DeviceN color */
-		pdf_obj *cols = pdf_dict_get(ctx, pdf_array_get(ctx, obj, 4), PDF_NAME(Colorants));
+		cols = pdf_dict_get(ctx, pdf_array_get(ctx, obj, 4), PDF_NAME(Colorants));
 		n = pdf_dict_len(ctx, cols);
 		for (i = 0; i < n; i++)
-			find_seps(ctx, seps, pdf_dict_get_val(ctx, cols, i));
+			find_seps(ctx, seps, pdf_dict_get_val(ctx, cols, i), clearme);
 	}
 }
 
 static void
-find_devn(fz_context *ctx, fz_separations **seps, pdf_obj *obj)
+find_devn(fz_context *ctx, fz_separations **seps, pdf_obj *obj, pdf_obj *clearme)
 {
 	int i, j, n, m;
 	pdf_obj *arr;
@@ -767,106 +799,118 @@ find_devn(fz_context *ctx, fz_separations **seps, pdf_obj *obj)
 
 		if (i == n)
 		{
-			cs = pdf_load_colorspace(ctx, obj);
-			if (!*seps)
-				*seps = fz_new_separations(ctx, 0);
-			fz_add_separation(ctx, *seps, name, cs, j);
-			fz_drop_colorspace(ctx, cs);
-		}
-	}
-}
-
-typedef void (res_finder_fn)(fz_context *ctx, fz_separations **seps, pdf_obj *obj);
-
-static void
-search_res(fz_context *ctx, fz_separations **seps, pdf_obj *res, res_finder_fn *fn)
-{
-	int i = 0;
-	int len = pdf_dict_len(ctx, res);
-
-	fz_var(i);
-
-	while (i < len)
-	{
-		fz_try(ctx)
-		{
-			do
+			fz_try(ctx)
+				cs = pdf_load_colorspace(ctx, obj);
+			fz_catch(ctx)
 			{
-				fn(ctx, seps, pdf_dict_get_val(ctx, res, i++));
+				fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
+				continue; /* ignore broken colorspace */
 			}
-			while (i < len);
-		}
-		fz_catch(ctx)
-		{
-			/* Don't die because a single separation failed to load */
+			fz_try(ctx)
+			{
+				if (!*seps)
+					*seps = fz_new_separations(ctx, 0);
+				fz_add_separation(ctx, *seps, name, cs, j);
+			}
+			fz_always(ctx)
+				fz_drop_colorspace(ctx, cs);
+			fz_catch(ctx)
+				fz_rethrow(ctx);
 		}
 	}
 }
 
-static void
-scan_page_seps(fz_context *ctx, pdf_obj *res, fz_separations **seps, res_finder_fn *fn)
-{
-	pdf_obj *forms;
-	pdf_obj *sh;
-	pdf_obj *xo = NULL;
-	int i, len;
+typedef void (res_finder_fn)(fz_context *ctx, fz_separations **seps, pdf_obj *obj, pdf_obj *clearme);
 
-	fz_var(xo);
+static void
+scan_page_seps(fz_context *ctx, pdf_obj *res, fz_separations **seps, res_finder_fn *fn, pdf_obj *clearme)
+{
+	pdf_obj *dict;
+	pdf_obj *obj;
+	int i, n;
 
 	if (pdf_mark_obj(ctx, res))
-		fz_throw(ctx, FZ_ERROR_GENERIC, "cycle in resources");
+		return; /* already been here */
 
-	fz_try(ctx)
+	/* remember to clear this resource dictionary at the end */
+	pdf_array_push(ctx, clearme, res);
+
+	dict = pdf_dict_get(ctx, res, PDF_NAME(ColorSpace));
+	n = pdf_dict_len(ctx, dict);
+	for (i = 0; i < n; i++)
 	{
-		search_res(ctx, seps, pdf_dict_get(ctx, res, PDF_NAME(ColorSpace)), fn);
-
-		sh = pdf_dict_get(ctx, res, PDF_NAME(Shading));
-		len = pdf_dict_len(ctx, sh);
-		for (i = 0; i < len; i++)
-			fn(ctx, seps, pdf_dict_get(ctx, pdf_dict_get_val(ctx, sh, i), PDF_NAME(ColorSpace)));
-
-		forms = pdf_dict_get(ctx, res, PDF_NAME(XObject));
-		len = pdf_dict_len(ctx, forms);
-
-		/* Recurse on the forms. Throw if we cycle */
-		for (i = 0; i < len; i++)
-		{
-			xo = pdf_dict_get_val(ctx, forms, i);
-
-			if (pdf_mark_obj(ctx, xo))
-				fz_throw(ctx, FZ_ERROR_GENERIC, "cycle in forms");
-
-			scan_page_seps(ctx, pdf_dict_get(ctx, xo, PDF_NAME(Resources)), seps, fn);
-			fn(ctx, seps, pdf_dict_get(ctx, xo, PDF_NAME(ColorSpace)));
-			pdf_unmark_obj(ctx, xo);
-			xo = NULL;
-		}
+		obj = pdf_dict_get_val(ctx, dict, i);
+		fn(ctx, seps, obj, clearme);
 	}
-	fz_always(ctx)
+
+	dict = pdf_dict_get(ctx, res, PDF_NAME(Shading));
+	n = pdf_dict_len(ctx, dict);
+	for (i = 0; i < n; i++)
 	{
-		pdf_unmark_obj(ctx, xo);
-		pdf_unmark_obj(ctx, res);
+		obj = pdf_dict_get_val(ctx, dict, i);
+		fn(ctx, seps, pdf_dict_get(ctx, obj, PDF_NAME(ColorSpace)), clearme);
 	}
-	fz_catch(ctx)
-		fz_rethrow(ctx);
+
+	dict = pdf_dict_get(ctx, res, PDF_NAME(XObject));
+	n = pdf_dict_len(ctx, dict);
+	for (i = 0; i < n; i++)
+	{
+		obj = pdf_dict_get_val(ctx, dict, i);
+		fn(ctx, seps, pdf_dict_get(ctx, obj, PDF_NAME(ColorSpace)), clearme);
+		/* Recurse on XObject forms. */
+		scan_page_seps(ctx, pdf_dict_get(ctx, obj, PDF_NAME(Resources)), seps, fn, clearme);
+	}
 }
 
 fz_separations *
 pdf_page_separations(fz_context *ctx, pdf_page *page)
 {
 	pdf_obj *res = pdf_page_resources(ctx, page);
+	pdf_obj *clearme = NULL;
 	fz_separations *seps = NULL;
 
-	/* Run through and look for separations first. This is
-	 * because separations are simplest to deal with, and
-	 * because DeviceN may be implemented on top of separations.
-	 */
-	scan_page_seps(ctx, res, &seps, find_seps);
+	clearme = pdf_new_array(ctx, page->doc, 100);
+	fz_try(ctx)
+	{
+		/* Run through and look for separations first. This is
+		 * because separations are simplest to deal with, and
+		 * because DeviceN may be implemented on top of separations.
+		 */
+		scan_page_seps(ctx, res, &seps, find_seps, clearme);
+	}
+	fz_always(ctx)
+	{
+		int i, n = pdf_array_len(ctx, clearme);
+		for (i = 0; i < n; ++i)
+			pdf_unmark_obj(ctx, pdf_array_get(ctx, clearme, i));
+		pdf_drop_obj(ctx, clearme);
+	}
+	fz_catch(ctx)
+	{
+		fz_drop_separations(ctx, seps);
+		fz_rethrow(ctx);
+	}
 
-	/* Now run through again, and look for DeviceNs. These may
-	 * have spot colors in that aren't defined in terms of
-	 * separations. */
-	scan_page_seps(ctx, res, &seps, find_devn);
+	clearme = pdf_new_array(ctx, page->doc, 100);
+	fz_try(ctx)
+	{
+		/* Now run through again, and look for DeviceNs. These may
+		 * have spot colors in that aren't defined in terms of
+		 * separations. */
+		scan_page_seps(ctx, res, &seps, find_devn, clearme);
+	}
+	fz_always(ctx)
+	{
+		int i, n = pdf_array_len(ctx, clearme);
+		for (i = 0; i < n; ++i)
+			pdf_unmark_obj(ctx, pdf_array_get(ctx, clearme, i));
+		pdf_drop_obj(ctx, clearme);
+	}
+	fz_catch(ctx)
+	{
+		fz_drop_separations(ctx, seps);
+		fz_rethrow(ctx);
+	}
 
 	return seps;
 }
@@ -880,15 +924,9 @@ pdf_page_uses_overprint(fz_context *ctx, pdf_page *page)
 static void
 pdf_drop_page_imp(fz_context *ctx, pdf_page *page)
 {
-	pdf_document *doc = page->doc;
-
-	/* We are about to destroy the annotation records for this page and so,
-	 * if doc->focus refers to one of them, it must be NULLed */
-	if (doc->focus && doc->focus->page == page)
-		doc->focus = NULL;
-
 	fz_drop_link(ctx, page->links);
 	pdf_drop_annots(ctx, page->annots);
+	pdf_drop_widgets(ctx, page->widgets);
 
 	pdf_drop_obj(ctx, page->obj);
 
@@ -905,8 +943,9 @@ pdf_new_page(fz_context *ctx, pdf_document *doc)
 	page->super.drop_page = (fz_page_drop_page_fn*)pdf_drop_page_imp;
 	page->super.load_links = (fz_page_load_links_fn*)pdf_load_links;
 	page->super.bound_page = (fz_page_bound_page_fn*)pdf_bound_page;
-	page->super.first_annot = (fz_page_first_annot_fn*)pdf_first_annot;
-	page->super.run_page_contents = (fz_page_run_page_contents_fn*)pdf_run_page_contents;
+	page->super.run_page_contents = (fz_page_run_page_fn*)pdf_run_page_contents;
+	page->super.run_page_annots = (fz_page_run_page_fn*)pdf_run_page_annots;
+	page->super.run_page_widgets = (fz_page_run_page_fn*)pdf_run_page_widgets;
 	page->super.page_presentation = (fz_page_page_presentation_fn*)pdf_page_presentation;
 	page->super.separations = (fz_page_separations_fn *)pdf_page_separations;
 	page->super.overprint = (fz_page_uses_overprint_fn *)pdf_page_uses_overprint;
@@ -917,7 +956,8 @@ pdf_new_page(fz_context *ctx, pdf_document *doc)
 	page->links = NULL;
 	page->annots = NULL;
 	page->annot_tailp = &page->annots;
-	page->incomplete = 0;
+	page->widgets = NULL;
+	page->widget_tailp = &page->widgets;
 
 	return page;
 }
@@ -928,52 +968,44 @@ pdf_load_default_colorspaces_imp(fz_context *ctx, fz_default_colorspaces *defaul
 	pdf_obj *cs_obj;
 
 	/* The spec says to ignore any colors we can't understand */
-	fz_try(ctx)
+
+	cs_obj = pdf_dict_get(ctx, obj, PDF_NAME(DefaultGray));
+	if (cs_obj)
 	{
-		cs_obj = pdf_dict_get(ctx, obj, PDF_NAME(DefaultGray));
-		if (cs_obj)
+		fz_try(ctx)
 		{
 			fz_colorspace *cs = pdf_load_colorspace(ctx, cs_obj);
 			fz_set_default_gray(ctx, default_cs, cs);
 			fz_drop_colorspace(ctx, cs);
 		}
-	}
-	fz_catch(ctx)
-	{
-		if (fz_caught(ctx) != FZ_ERROR_TRYLATER)
-			fz_warn(ctx, "Error while reading DefaultGray: %s", fz_caught_message(ctx));
+		fz_catch(ctx)
+			fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
 	}
 
-	fz_try(ctx)
+	cs_obj = pdf_dict_get(ctx, obj, PDF_NAME(DefaultRGB));
+	if (cs_obj)
 	{
-		cs_obj = pdf_dict_get(ctx, obj, PDF_NAME(DefaultRGB));
-		if (cs_obj)
+		fz_try(ctx)
 		{
 			fz_colorspace *cs = pdf_load_colorspace(ctx, cs_obj);
 			fz_set_default_rgb(ctx, default_cs, cs);
 			fz_drop_colorspace(ctx, cs);
 		}
-	}
-	fz_catch(ctx)
-	{
-		if (fz_caught(ctx) != FZ_ERROR_TRYLATER)
-			fz_warn(ctx, "Error while reading DefaultRGB: %s", fz_caught_message(ctx));
+		fz_catch(ctx)
+			fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
 	}
 
-	fz_try(ctx)
+	cs_obj = pdf_dict_get(ctx, obj, PDF_NAME(DefaultCMYK));
+	if (cs_obj)
 	{
-		cs_obj = pdf_dict_get(ctx, obj, PDF_NAME(DefaultCMYK));
-		if (cs_obj)
+		fz_try(ctx)
 		{
 			fz_colorspace *cs = pdf_load_colorspace(ctx, cs_obj);
 			fz_set_default_cmyk(ctx, default_cs, cs);
 			fz_drop_colorspace(ctx, cs);
 		}
-	}
-	fz_catch(ctx)
-	{
-		if (fz_caught(ctx) != FZ_ERROR_TRYLATER)
-			fz_warn(ctx, "Error while reading DefaultCMYK: %s", fz_caught_message(ctx));
+		fz_catch(ctx)
+			fz_rethrow_if(ctx, FZ_ERROR_TRYLATER);
 	}
 }
 
@@ -986,14 +1018,27 @@ pdf_load_default_colorspaces(fz_context *ctx, pdf_document *doc, pdf_page *page)
 	fz_colorspace *oi;
 
 	default_cs = fz_new_default_colorspaces(ctx);
-	res = pdf_page_resources(ctx, page);
-	obj = pdf_dict_get(ctx, res, PDF_NAME(ColorSpace));
-	if (obj)
-		pdf_load_default_colorspaces_imp(ctx, default_cs, obj);
 
-	oi = pdf_document_output_intent(ctx, doc);
-	if (oi)
-		fz_set_default_output_intent(ctx, default_cs, oi);
+	fz_try(ctx)
+	{
+		res = pdf_page_resources(ctx, page);
+		obj = pdf_dict_get(ctx, res, PDF_NAME(ColorSpace));
+		if (obj)
+			pdf_load_default_colorspaces_imp(ctx, default_cs, obj);
+
+		oi = pdf_document_output_intent(ctx, doc);
+		if (oi)
+			fz_set_default_output_intent(ctx, default_cs, oi);
+	}
+	fz_catch(ctx)
+	{
+		if (fz_caught(ctx) != FZ_ERROR_TRYLATER)
+		{
+			fz_drop_default_colorspaces(ctx, default_cs);
+			fz_rethrow(ctx);
+		}
+		page->super.incomplete = 1;
+	}
 
 	return default_cs;
 }
@@ -1009,7 +1054,13 @@ pdf_update_default_colorspaces(fz_context *ctx, fz_default_colorspaces *old_cs, 
 		return fz_keep_default_colorspaces(ctx, old_cs);
 
 	new_cs = fz_clone_default_colorspaces(ctx, old_cs);
-	pdf_load_default_colorspaces_imp(ctx, new_cs, obj);
+	fz_try(ctx)
+		pdf_load_default_colorspaces_imp(ctx, new_cs, obj);
+	fz_catch(ctx)
+	{
+		fz_drop_default_colorspaces(ctx, new_cs);
+		fz_rethrow(ctx);
+	}
 
 	return new_cs;
 }
@@ -1053,7 +1104,7 @@ pdf_load_page(fz_context *ctx, pdf_document *doc, int number)
 			fz_drop_page(ctx, &page->super);
 			fz_rethrow(ctx);
 		}
-		page->incomplete |= PDF_PAGE_INCOMPLETE_ANNOTS;
+		page->super.incomplete = 1;
 		fz_drop_link(ctx, page->links);
 		page->links = NULL;
 	}
@@ -1082,10 +1133,15 @@ pdf_load_page(fz_context *ctx, pdf_document *doc, int number)
 			fz_drop_page(ctx, &page->super);
 			fz_rethrow(ctx);
 		}
-		page->incomplete |= PDF_PAGE_INCOMPLETE_CONTENTS;
+		page->super.incomplete = 1;
 	}
 
 	return page;
+}
+
+fz_page *pdf_load_page_imp(fz_context *ctx, fz_document *doc, int chapter, int number)
+{
+	return (fz_page*)pdf_load_page(ctx, (pdf_document*)doc, number);
 }
 
 void

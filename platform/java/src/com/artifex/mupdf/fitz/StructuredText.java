@@ -18,7 +18,6 @@ public class StructuredText
 
 	public void destroy() {
 		finalize();
-		pointer = 0;
 	}
 
 	private StructuredText(long p) {
@@ -60,7 +59,7 @@ public class StructuredText
 		public void endTextBlock() {
 			TextBlock block = new TextBlock();
 			block.bbox = blockBbox;
-			block.lines = (TextLine[]) lines.toArray(new TextLine[0]);
+			block.lines = lines.toArray(new TextLine[0]);
 			blocks.add(block);
 		}
 
@@ -84,7 +83,7 @@ public class StructuredText
 		}
 
 		TextBlock[] getBlocks() {
-			return (TextBlock[]) blocks.toArray(new TextBlock[0]);
+			return blocks.toArray(new TextBlock[0]);
 		}
 	}
 

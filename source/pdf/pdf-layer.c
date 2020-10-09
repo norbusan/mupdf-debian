@@ -1,6 +1,5 @@
 #include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
-#include "pdf-imp.h"
 
 #include <string.h>
 
@@ -58,7 +57,7 @@ typedef struct
 	unsigned int locked : 1;
 } pdf_ocg_ui;
 
-struct pdf_ocg_descriptor_s
+struct pdf_ocg_descriptor
 {
 	int current;
 	int num_configs;

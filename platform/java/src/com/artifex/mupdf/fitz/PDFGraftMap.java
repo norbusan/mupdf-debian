@@ -12,10 +12,11 @@ public class PDFGraftMap
 
 	public void destroy() {
 		finalize();
-		pointer = 0;
 	}
 
 	public native PDFObject graftObject(PDFObject obj);
+
+	public native void graftPage(int pageTo, PDFDocument src, int pageFrom);
 
 	private PDFGraftMap(long p) {
 		pointer = p;

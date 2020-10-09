@@ -1,5 +1,8 @@
 #include "mupdf/fitz.h"
+
 #include "draw-imp.h"
+#include "glyph-imp.h"
+#include "pixmap-imp.h"
 
 #include <string.h>
 #include <assert.h>
@@ -640,15 +643,12 @@ template_span_with_color_1_da(byte * FZ_RESTRICT dp, const byte * FZ_RESTRICT mp
 		{
 			int ma = *mp++;
 			ma = FZ_EXPAND(ma);
-			if (ma == 0)
-			{
-			}
-			else if (ma == 256)
+			if (ma == 256)
 			{
 				dp[0] = g;
 				dp[1] = 255;
 			}
-			else
+			else if (ma != 0)
 			{
 				dp[0] = FZ_BLEND(g, dp[0], ma);
 				dp[1] = FZ_BLEND(255, dp[1], ma);
@@ -663,10 +663,7 @@ template_span_with_color_1_da(byte * FZ_RESTRICT dp, const byte * FZ_RESTRICT mp
 		{
 			int ma = *mp++;
 			ma = FZ_EXPAND(ma);
-			if (ma == 0)
-			{
-			}
-			else
+			if (ma != 0)
 			{
 				ma = FZ_COMBINE(ma, sa);
 				dp[0] = FZ_BLEND(g, dp[0], ma);
@@ -700,14 +697,11 @@ template_span_with_color_3_da(byte * FZ_RESTRICT dp, const byte * FZ_RESTRICT mp
 			unsigned int ma = *mp++;
 			dp += 4;
 			ma = FZ_EXPAND(ma);
-			if (ma == 0)
-			{
-			}
-			else if (ma == 256)
+			if (ma == 256)
 			{
 				((unsigned int *)dp)[-1] = rgba;
 			}
-			else
+			else if (ma != 0)
 			{
 				unsigned int RGBA = ((unsigned int *)dp)[-1];
 				unsigned int RB = (RGBA<<8) & mask;
@@ -759,10 +753,7 @@ template_span_with_color_4_da(byte * FZ_RESTRICT dp, const byte * FZ_RESTRICT mp
 		{
 			int ma = *mp++;
 			ma = FZ_EXPAND(ma);
-			if (ma == 0)
-			{
-			}
-			else if (ma == 256)
+			if (ma == 256)
 			{
 				dp[0] = c;
 				dp[1] = m;
@@ -770,7 +761,7 @@ template_span_with_color_4_da(byte * FZ_RESTRICT dp, const byte * FZ_RESTRICT mp
 				dp[3] = k;
 				dp[4] = 255;
 			}
-			else
+			else if (ma != 0)
 			{
 				dp[0] = FZ_BLEND(c, dp[0], ma);
 				dp[1] = FZ_BLEND(m, dp[1], ma);
@@ -788,10 +779,7 @@ template_span_with_color_4_da(byte * FZ_RESTRICT dp, const byte * FZ_RESTRICT mp
 		{
 			int ma = *mp++;
 			ma = FZ_EXPAND(ma);
-			if (ma == 0)
-			{
-			}
-			else
+			if (ma != 0)
 			{
 				ma = FZ_COMBINE(ma, sa);
 				dp[0] = FZ_BLEND(c, dp[0], ma);
@@ -820,10 +808,7 @@ template_span_with_color_N_general(byte * FZ_RESTRICT dp, const byte * FZ_RESTRI
 		{
 			int ma = *mp++;
 			ma = FZ_EXPAND(ma);
-			if (ma == 0)
-			{
-			}
-			else if (ma == 256)
+			if (ma == 256)
 			{
 				if (n1 > 0)
 					dp[0] = color[0];
@@ -836,7 +821,7 @@ template_span_with_color_N_general(byte * FZ_RESTRICT dp, const byte * FZ_RESTRI
 				if (da)
 					dp[n1] = 255;
 			}
-			else
+			else if (ma != 0)
 			{
 				for (k = 0; k < n1; k++)
 					dp[k] = FZ_BLEND(color[k], dp[k], ma);
@@ -877,10 +862,7 @@ template_span_with_color_N_general_op(byte * FZ_RESTRICT dp, const byte * FZ_RES
 		{
 			int ma = *mp++;
 			ma = FZ_EXPAND(ma);
-			if (ma == 0)
-			{
-			}
-			else if (ma == 256)
+			if (ma == 256)
 			{
 				if (n1 > 0)
 					if (fz_overprint_component(eop, 0))
@@ -897,7 +879,7 @@ template_span_with_color_N_general_op(byte * FZ_RESTRICT dp, const byte * FZ_RES
 				if (da)
 					dp[n1] = 255;
 			}
-			else
+			else if (ma != 0)
 			{
 				for (k = 0; k < n1; k++)
 					if (fz_overprint_component(eop, k))
@@ -2333,7 +2315,7 @@ fz_paint_pixmap_alpha(fz_pixmap * FZ_RESTRICT dst, const fz_pixmap * FZ_RESTRICT
 }
 
 void
-fz_paint_pixmap_with_overprint(fz_pixmap * FZ_RESTRICT dst, const fz_pixmap * FZ_RESTRICT src, const fz_overprint *eop)
+fz_paint_pixmap_with_overprint(fz_pixmap * FZ_RESTRICT dst, const fz_pixmap * FZ_RESTRICT src, const fz_overprint * FZ_RESTRICT eop)
 {
 	const unsigned char *sp;
 	unsigned char *dp;

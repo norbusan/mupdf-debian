@@ -20,7 +20,7 @@ static int showcolumn;
 static void usage(void)
 {
 	fprintf(stderr,
-		"usage: mutool show [options] file.pdf ( xref | outline | grep | <path> ) *\n"
+		"usage: mutool show [options] file.pdf ( trailer | xref | pages | grep | outline | js | form | <path> ) *\n"
 		"\t-p -\tpassword\n"
 		"\t-o -\toutput file\n"
 		"\t-e\tleave stream contents in their original form\n"
@@ -40,7 +40,7 @@ static void showtrailer(void)
 		fz_write_printf(ctx, out, "trailer ");
 	else
 		fz_write_printf(ctx, out, "trailer\n");
-	pdf_print_obj(ctx, out, pdf_trailer(ctx, doc), tight);
+	pdf_print_obj(ctx, out, pdf_trailer(ctx, doc), tight, 1);
 	fz_write_printf(ctx, out, "\n");
 }
 
@@ -48,7 +48,7 @@ static void showxref(void)
 {
 	int i;
 	int xref_len = pdf_xref_len(ctx, doc);
-	printf("xref\n0 %d\n", xref_len);
+	fz_write_printf(ctx, out, "xref\n0 %d\n", xref_len);
 	for (i = 0; i < xref_len; i++)
 	{
 		pdf_xref_entry *entry = pdf_get_xref_entry(ctx, doc, i);
@@ -136,13 +136,13 @@ static void showobject(pdf_obj *ref)
 			if (tight)
 			{
 				fz_write_printf(ctx, out, "%d 0 obj ", num);
-				pdf_print_obj(ctx, out, obj, 1);
+				pdf_print_obj(ctx, out, obj, 1, 1);
 				fz_write_printf(ctx, out, " stream\n");
 			}
 			else
 			{
 				fz_write_printf(ctx, out, "%d 0 obj\n", num);
-				pdf_print_obj(ctx, out, obj, 0);
+				pdf_print_obj(ctx, out, obj, 0, 1);
 				fz_write_printf(ctx, out, "\nstream\n");
 				showstream(num);
 				fz_write_printf(ctx, out, "endstream\n");
@@ -155,13 +155,13 @@ static void showobject(pdf_obj *ref)
 		if (tight)
 		{
 			fz_write_printf(ctx, out, "%d 0 obj ", num);
-			pdf_print_obj(ctx, out, obj, 1);
+			pdf_print_obj(ctx, out, obj, 1, 1);
 			fz_write_printf(ctx, out, "\n");
 		}
 		else
 		{
 			fz_write_printf(ctx, out, "%d 0 obj\n", num);
-			pdf_print_obj(ctx, out, obj, 0);
+			pdf_print_obj(ctx, out, obj, 0, 1);
 			fz_write_printf(ctx, out, "\nendobj\n");
 		}
 	}
@@ -185,6 +185,7 @@ static void showgrep(void)
 			}
 			fz_catch(ctx)
 			{
+				pdf_drop_obj(ctx, ref);
 				fz_warn(ctx, "skipping object (%d 0 R)", i);
 				continue;
 			}
@@ -192,7 +193,7 @@ static void showgrep(void)
 			pdf_sort_dict(ctx, obj);
 
 			fz_write_printf(ctx, out, "%d 0 obj ", i);
-			pdf_print_obj(ctx, out, obj, 1);
+			pdf_print_obj(ctx, out, obj, 1, 1);
 			if (pdf_is_stream(ctx, ref))
 				fz_write_printf(ctx, out, " stream");
 			fz_write_printf(ctx, out, "\n");
@@ -202,21 +203,26 @@ static void showgrep(void)
 	}
 
 	fz_write_printf(ctx, out, "trailer ");
-	pdf_print_obj(ctx, out, pdf_trailer(ctx, doc), 1);
+	pdf_print_obj(ctx, out, pdf_trailer(ctx, doc), 1, 1);
 	fz_write_printf(ctx, out, "\n");
 }
 
 static void
-fz_print_outline(fz_context *ctx, fz_output *out, fz_outline *outline, int level)
+print_outline(fz_outline *outline, int level)
 {
 	int i;
 	while (outline)
 	{
-		for (i = 0; i < level; i++)
-			fz_write_printf(ctx, out, "\t");
-		fz_write_printf(ctx, out, "%s\t%s\n", outline->title, outline->uri);
 		if (outline->down)
-			fz_print_outline(ctx, out, outline->down, level + 1);
+			fz_write_byte(ctx, out, outline->is_open ? '-' : '+');
+		else
+			fz_write_byte(ctx, out, '|');
+
+		for (i = 0; i < level; i++)
+			fz_write_byte(ctx, out, '\t');
+		fz_write_printf(ctx, out, "%Q\t%s\n", outline->title, outline->uri);
+		if (outline->down)
+			print_outline(outline->down, level + 1);
 		outline = outline->next;
 	}
 }
@@ -225,11 +231,164 @@ static void showoutline(void)
 {
 	fz_outline *outline = fz_load_outline(ctx, (fz_document*)doc);
 	fz_try(ctx)
-		fz_print_outline(ctx, fz_stdout(ctx), outline, 0);
+		print_outline(outline, 1);
 	fz_always(ctx)
 		fz_drop_outline(ctx, outline);
 	fz_catch(ctx)
 		fz_rethrow(ctx);
+}
+
+static void showtext(char *buf, int indent)
+{
+	int bol = 1;
+	int c = *buf;
+	while (*buf)
+	{
+		c = *buf++;
+		if (c == '\r')
+		{
+			if (*buf == '\n')
+				++buf;
+			c = '\n';
+		}
+		if (indent && bol)
+			fz_write_byte(ctx, out, '\t');
+		fz_write_byte(ctx, out, c);
+		bol = (c == '\n');
+	}
+	if (!bol)
+		fz_write_byte(ctx, out, '\n');
+}
+
+static void showjs(void)
+{
+	pdf_obj *tree;
+	int i;
+
+	tree = pdf_load_name_tree(ctx, doc, PDF_NAME(JavaScript));
+	for (i = 0; i < pdf_dict_len(ctx, tree); ++i)
+	{
+		pdf_obj *name = pdf_dict_get_key(ctx, tree, i);
+		pdf_obj *action = pdf_dict_get_val(ctx, tree, i);
+		pdf_obj *js = pdf_dict_get(ctx, action, PDF_NAME(JS));
+		char *src = pdf_load_stream_or_string_as_utf8(ctx, js);
+		fz_write_printf(ctx, out, "// %s\n", pdf_to_name(ctx, name));
+		showtext(src, 0);
+		fz_free(ctx, src);
+	}
+}
+
+static void showaction(pdf_obj *action, const char *name)
+{
+	if (action)
+	{
+		pdf_obj *js = pdf_dict_get(ctx, action, PDF_NAME(JS));
+		if (js)
+		{
+			char *src = pdf_load_stream_or_string_as_utf8(ctx, js);
+			fz_write_printf(ctx, out, "    %s: {\n", name);
+			showtext(src, 1);
+			fz_write_printf(ctx, out, "    }\n", name);
+			fz_free(ctx, src);
+		}
+		else
+		{
+			fz_write_printf(ctx, out, "    %s: ", name);
+			if (pdf_is_indirect(ctx, action))
+				action = pdf_resolve_indirect(ctx, action);
+			pdf_print_obj(ctx, out, action, 1, 1);
+			fz_write_printf(ctx, out, "\n");
+		}
+	}
+}
+
+static void showfield(pdf_obj *field)
+{
+	pdf_obj *kids, *ft, *parent;
+	const char *tu;
+	char *t;
+	int ff;
+	int i, n;
+
+	t = pdf_field_name(ctx, field);
+	tu = pdf_dict_get_text_string(ctx, field, PDF_NAME(TU));
+	ft = pdf_dict_get_inheritable(ctx, field, PDF_NAME(FT));
+	ff = pdf_field_flags(ctx, field);
+	parent = pdf_dict_get(ctx, field, PDF_NAME(Parent));
+
+	fz_write_printf(ctx, out, "field %d\n", pdf_to_num(ctx, field));
+	fz_write_printf(ctx, out, "    Type: %s\n", pdf_to_name(ctx, ft));
+	if (ff)
+	{
+		fz_write_printf(ctx, out, "    Flags:");
+		if (ff & PDF_FIELD_IS_READ_ONLY) fz_write_string(ctx, out, " readonly");
+		if (ff & PDF_FIELD_IS_REQUIRED) fz_write_string(ctx, out, " required");
+		if (ff & PDF_FIELD_IS_NO_EXPORT) fz_write_string(ctx, out, " noExport");
+		if (ft == PDF_NAME(Btn))
+		{
+			if (ff & PDF_BTN_FIELD_IS_NO_TOGGLE_TO_OFF) fz_write_string(ctx, out, " noToggleToOff");
+			if (ff & PDF_BTN_FIELD_IS_RADIO) fz_write_string(ctx, out, " radio");
+			if (ff & PDF_BTN_FIELD_IS_PUSHBUTTON) fz_write_string(ctx, out, " pushButton");
+			if (ff & PDF_BTN_FIELD_IS_RADIOS_IN_UNISON) fz_write_string(ctx, out, " radiosInUnison");
+		}
+		if (ft == PDF_NAME(Tx))
+		{
+			if (ff & PDF_TX_FIELD_IS_MULTILINE) fz_write_string(ctx, out, " multiline");
+			if (ff & PDF_TX_FIELD_IS_PASSWORD) fz_write_string(ctx, out, " password");
+			if (ff & PDF_TX_FIELD_IS_FILE_SELECT) fz_write_string(ctx, out, " fileSelect");
+			if (ff & PDF_TX_FIELD_IS_DO_NOT_SPELL_CHECK) fz_write_string(ctx, out, " dontSpellCheck");
+			if (ff & PDF_TX_FIELD_IS_DO_NOT_SCROLL) fz_write_string(ctx, out, " dontScroll");
+			if (ff & PDF_TX_FIELD_IS_COMB) fz_write_string(ctx, out, " comb");
+			if (ff & PDF_TX_FIELD_IS_RICH_TEXT) fz_write_string(ctx, out, " richText");
+		}
+		if (ft == PDF_NAME(Ch))
+		{
+			if (ff & PDF_CH_FIELD_IS_COMBO) fz_write_string(ctx, out, " combo");
+			if (ff & PDF_CH_FIELD_IS_EDIT) fz_write_string(ctx, out, " edit");
+			if (ff & PDF_CH_FIELD_IS_SORT) fz_write_string(ctx, out, " sort");
+			if (ff & PDF_CH_FIELD_IS_MULTI_SELECT) fz_write_string(ctx, out, " multiSelect");
+			if (ff & PDF_CH_FIELD_IS_DO_NOT_SPELL_CHECK) fz_write_string(ctx, out, " dontSpellCheck");
+			if (ff & PDF_CH_FIELD_IS_COMMIT_ON_SEL_CHANGE) fz_write_string(ctx, out, " commitOnSelChange");
+		}
+		fz_write_string(ctx, out, "\n");
+	}
+	fz_write_printf(ctx, out, "    Name: %(\n", t);
+	if (*tu)
+		fz_write_printf(ctx, out, "    Label: %q\n", tu);
+	if (parent)
+		fz_write_printf(ctx, out, "    Parent: %d\n", pdf_to_num(ctx, parent));
+
+	showaction(pdf_dict_getp(ctx, field, "A"), "Action");
+
+	showaction(pdf_dict_getp(ctx, field, "AA/K"), "Keystroke");
+	showaction(pdf_dict_getp(ctx, field, "AA/V"), "Validate");
+	showaction(pdf_dict_getp(ctx, field, "AA/F"), "Format");
+	showaction(pdf_dict_getp(ctx, field, "AA/C"), "Calculate");
+
+	showaction(pdf_dict_getp(ctx, field, "AA/E"), "Enter");
+	showaction(pdf_dict_getp(ctx, field, "AA/X"), "Exit");
+	showaction(pdf_dict_getp(ctx, field, "AA/D"), "Down");
+	showaction(pdf_dict_getp(ctx, field, "AA/U"), "Up");
+	showaction(pdf_dict_getp(ctx, field, "AA/Fo"), "Focus");
+	showaction(pdf_dict_getp(ctx, field, "AA/Bl"), "Blur");
+
+	fz_write_string(ctx, out, "\n");
+
+	kids = pdf_dict_get(ctx, field, PDF_NAME(Kids));
+	n = pdf_array_len(ctx, kids);
+	for (i = 0; i < n; ++i)
+		showfield(pdf_array_get(ctx, kids, i));
+}
+
+static void showform(void)
+{
+	pdf_obj *fields;
+	int i, n;
+
+	fields = pdf_dict_getp(ctx, pdf_trailer(ctx, doc), "Root/AcroForm/Fields");
+	n = pdf_array_len(ctx, fields);
+	for (i = 0; i < n; ++i)
+		showfield(pdf_array_get(ctx, fields, i));
 }
 
 #define SEP ".[]/"
@@ -286,16 +445,16 @@ static void showpath(char *path, pdf_obj *obj)
 				}
 				else
 				{
-					printf("null\n");
+					fz_write_string(ctx, out, "null\n");
 				}
 			}
-			else if (isnumber(part))
-				showpath(path, pdf_array_get(ctx, obj, atoi(part)));
+			else if (isnumber(part) && pdf_is_array(ctx, obj))
+				showpath(path, pdf_array_get(ctx, obj, atoi(part)-1));
 			else
 				showpath(path, pdf_dict_gets(ctx, obj, part));
 		}
 		else
-			printf("null\n");
+			fz_write_string(ctx, out, "null\n");
 	}
 	else
 	{
@@ -303,8 +462,8 @@ static void showpath(char *path, pdf_obj *obj)
 			showobject(obj);
 		else
 		{
-			pdf_print_obj(ctx, out, obj, tight);
-			printf("\n");
+			pdf_print_obj(ctx, out, obj, tight, 0);
+			fz_write_string(ctx, out, "\n");
 		}
 	}
 }
@@ -335,10 +494,10 @@ static void showpathpage(char *path)
 			else if (isnumber(part))
 				showpath(path, pdf_lookup_page_obj(ctx, doc, atoi(part)-1));
 			else
-				printf("null\n");
+				fz_write_string(ctx, out, "null\n");
 		}
 		else
-			printf("null\n");
+			fz_write_string(ctx, out, "null\n");
 	}
 	else
 	{
@@ -360,14 +519,18 @@ static void showpathroot(char *path)
 		else if (isnumber(part))
 		{
 			pdf_obj *num = pdf_new_indirect(ctx, doc, atoi(part), 0);
-			showpath(list, num);
-			pdf_drop_obj(ctx, num);
+			fz_try(ctx)
+				showpath(list, num);
+			fz_always(ctx)
+				pdf_drop_obj(ctx, num);
+			fz_catch(ctx)
+				;
 		}
 		else
 			showpath(list, pdf_dict_gets(ctx, pdf_trailer(ctx, doc), part));
 	}
 	else
-		printf("null\n");
+		fz_write_string(ctx, out, "null\n");
 }
 
 static void show(char *sel)
@@ -382,6 +545,10 @@ static void show(char *sel)
 		showgrep();
 	else if (!strcmp(sel, "outline"))
 		showoutline();
+	else if (!strcmp(sel, "js"))
+		showjs();
+	else if (!strcmp(sel, "form"))
+		showform();
 	else
 		showpathroot(sel);
 }
@@ -392,6 +559,7 @@ int pdfshow_main(int argc, char **argv)
 	char *filename = NULL;
 	char *output = NULL;
 	int c;
+	int errored = 0;
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx)
@@ -441,10 +609,11 @@ int pdfshow_main(int argc, char **argv)
 	}
 	fz_catch(ctx)
 	{
+		errored = 1;
 	}
 
 	fz_drop_output(ctx, out);
 	pdf_drop_document(ctx, doc);
 	fz_drop_context(ctx);
-	return 0;
+	return errored;
 }

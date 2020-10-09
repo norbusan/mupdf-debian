@@ -1,16 +1,14 @@
-#include "fitz-imp.h"
+#include "mupdf/fitz.h"
 
 #include <zlib.h>
 
 #include <string.h>
 
-typedef struct fz_leech_s fz_leech;
-
-struct fz_leech_s
+typedef struct
 {
 	fz_stream *chain;
 	fz_buffer *buffer;
-};
+} fz_leech;
 
 static int
 next_leech(fz_context *ctx, fz_stream *stm, size_t max)

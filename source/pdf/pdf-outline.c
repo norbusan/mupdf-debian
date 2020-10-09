@@ -24,12 +24,12 @@ pdf_load_outline_imp(fz_context *ctx, pdf_document *doc, pdf_obj *dict)
 
 			obj = pdf_dict_get(ctx, dict, PDF_NAME(Title));
 			if (obj)
-				node->title = fz_strdup(ctx, pdf_to_text_string(ctx, obj));
+				node->title = Memento_label(fz_strdup(ctx, pdf_to_text_string(ctx, obj)), "outline_title");
 
 			if ((obj = pdf_dict_get(ctx, dict, PDF_NAME(Dest))) != NULL)
-				node->uri = pdf_parse_link_dest(ctx, doc, obj);
+				node->uri = Memento_label(pdf_parse_link_dest(ctx, doc, obj), "outline_uri");
 			else if ((obj = pdf_dict_get(ctx, dict, PDF_NAME(A))) != NULL)
-				node->uri = pdf_parse_link_action(ctx, doc, obj, -1);
+				node->uri = Memento_label(pdf_parse_link_action(ctx, doc, obj, -1), "outline_uri");
 			else
 				node->uri = NULL;
 
@@ -71,19 +71,20 @@ pdf_load_outline(fz_context *ctx, pdf_document *doc)
 	pdf_obj *root, *obj, *first;
 	fz_outline *outline = NULL;
 
-	pdf_load_page_tree(ctx, doc); /* cache page tree for fast link destination lookups */
-	fz_try(ctx)
+	root = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(Root));
+	obj = pdf_dict_get(ctx, root, PDF_NAME(Outlines));
+	first = pdf_dict_get(ctx, obj, PDF_NAME(First));
+	if (first)
 	{
-		root = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(Root));
-		obj = pdf_dict_get(ctx, root, PDF_NAME(Outlines));
-		first = pdf_dict_get(ctx, obj, PDF_NAME(First));
-		if (first)
+		/* cache page tree for fast link destination lookups */
+		pdf_load_page_tree(ctx, doc);
+		fz_try(ctx)
 			outline = pdf_load_outline_imp(ctx, doc, first);
+		fz_always(ctx)
+			pdf_drop_page_tree(ctx, doc);
+		fz_catch(ctx)
+			fz_rethrow(ctx);
 	}
-	fz_always(ctx)
-		pdf_drop_page_tree(ctx, doc);
-	fz_catch(ctx)
-		fz_rethrow(ctx);
 
 	return outline;
 }

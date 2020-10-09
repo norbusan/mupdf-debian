@@ -1,4 +1,4 @@
-#include "fitz-imp.h"
+#include "mupdf/fitz.h"
 
 #include <string.h>
 
@@ -59,6 +59,7 @@ fz_buffer *
 fz_read_best(fz_context *ctx, fz_stream *stm, size_t initial, int *truncated)
 {
 	fz_buffer *buf = NULL;
+	int check_bomb = (initial > 0);
 	size_t n;
 
 	fz_var(buf);
@@ -78,10 +79,8 @@ fz_read_best(fz_context *ctx, fz_stream *stm, size_t initial, int *truncated)
 			if (buf->len == buf->cap)
 				fz_grow_buffer(ctx, buf);
 
-			if (buf->len >= MIN_BOMB && buf->len / 200 > initial)
-			{
+			if (check_bomb && buf->len >= MIN_BOMB && buf->len / 200 > initial)
 				fz_throw(ctx, FZ_ERROR_GENERIC, "compression bomb detected");
-			}
 
 			n = fz_read(ctx, stm, buf->data + buf->len, buf->cap - buf->len);
 			if (n == 0)
@@ -177,13 +176,6 @@ fz_seek(fz_context *ctx, fz_stream *stm, int64_t offset, int whence)
 		fz_warn(ctx, "cannot seek");
 }
 
-int fz_stream_meta(fz_context *ctx, fz_stream *stm, int key, int size, void *ptr)
-{
-	if (!stm || !stm->meta)
-		return -1;
-	return stm->meta(ctx, stm, key, size, ptr);
-}
-
 fz_buffer *
 fz_read_file(fz_context *ctx, const char *filename)
 {
@@ -211,100 +203,94 @@ fz_read_file(fz_context *ctx, const char *filename)
 
 uint16_t fz_read_uint16(fz_context *ctx, fz_stream *stm)
 {
-	uint32_t a = fz_read_byte(ctx, stm);
-	uint32_t b = fz_read_byte(ctx, stm);
-	uint32_t x = (a<<8) | (b);
+	int a = fz_read_byte(ctx, stm);
+	int b = fz_read_byte(ctx, stm);
 	if (a == EOF || b == EOF)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end of file in int16");
-	return x;
+	return ((uint16_t)a<<8) | ((uint16_t)b);
 }
 
 uint32_t fz_read_uint24(fz_context *ctx, fz_stream *stm)
 {
-	uint32_t a = fz_read_byte(ctx, stm);
-	uint32_t b = fz_read_byte(ctx, stm);
-	uint32_t c = fz_read_byte(ctx, stm);
-	uint32_t x = (a<<16) | (b<<8) | (c);
+	int a = fz_read_byte(ctx, stm);
+	int b = fz_read_byte(ctx, stm);
+	int c = fz_read_byte(ctx, stm);
 	if (a == EOF || b == EOF || c == EOF)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end of file in int24");
-	return x;
+	return ((uint32_t)a<<16) | ((uint32_t)b<<8) | ((uint32_t)c);
 }
 
 uint32_t fz_read_uint32(fz_context *ctx, fz_stream *stm)
 {
-	uint32_t a = fz_read_byte(ctx, stm);
-	uint32_t b = fz_read_byte(ctx, stm);
-	uint32_t c = fz_read_byte(ctx, stm);
-	uint32_t d = fz_read_byte(ctx, stm);
-	uint32_t x = (a<<24) | (b<<16) | (c<<8) | (d);
+	int a = fz_read_byte(ctx, stm);
+	int b = fz_read_byte(ctx, stm);
+	int c = fz_read_byte(ctx, stm);
+	int d = fz_read_byte(ctx, stm);
 	if (a == EOF || b == EOF || c == EOF || d == EOF)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end of file in int32");
-	return x;
+	return ((uint32_t)a<<24) | ((uint32_t)b<<16) | ((uint32_t)c<<8) | ((uint32_t)d);
 }
 
 uint64_t fz_read_uint64(fz_context *ctx, fz_stream *stm)
 {
-	uint64_t a = fz_read_byte(ctx, stm);
-	uint64_t b = fz_read_byte(ctx, stm);
-	uint64_t c = fz_read_byte(ctx, stm);
-	uint64_t d = fz_read_byte(ctx, stm);
-	uint64_t e = fz_read_byte(ctx, stm);
-	uint64_t f = fz_read_byte(ctx, stm);
-	uint64_t g = fz_read_byte(ctx, stm);
-	uint64_t h = fz_read_byte(ctx, stm);
-	uint64_t x = (a<<56) | (b<<48) | (c<<40) | (d<<32) | (e<<24) | (f<<16) | (g<<8) | (h);
+	int a = fz_read_byte(ctx, stm);
+	int b = fz_read_byte(ctx, stm);
+	int c = fz_read_byte(ctx, stm);
+	int d = fz_read_byte(ctx, stm);
+	int e = fz_read_byte(ctx, stm);
+	int f = fz_read_byte(ctx, stm);
+	int g = fz_read_byte(ctx, stm);
+	int h = fz_read_byte(ctx, stm);
 	if (a == EOF || b == EOF || c == EOF || d == EOF || e == EOF || f == EOF || g == EOF || h == EOF)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end of file in int64");
-	return x;
+	return ((uint64_t)a<<56) | ((uint64_t)b<<48) | ((uint64_t)c<<40) | ((uint64_t)d<<32)
+		| ((uint64_t)e<<24) | ((uint64_t)f<<16) | ((uint64_t)g<<8) | ((uint64_t)h);
 }
 
 uint16_t fz_read_uint16_le(fz_context *ctx, fz_stream *stm)
 {
-	uint32_t a = fz_read_byte(ctx, stm);
-	uint32_t b = fz_read_byte(ctx, stm);
-	uint32_t x = (a) | (b<<8);
+	int a = fz_read_byte(ctx, stm);
+	int b = fz_read_byte(ctx, stm);
 	if (a == EOF || b == EOF)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end of file in int16");
-	return x;
+	return ((uint16_t)a) | ((uint16_t)b<<8);
 }
 
 uint32_t fz_read_uint24_le(fz_context *ctx, fz_stream *stm)
 {
-	uint32_t a = fz_read_byte(ctx, stm);
-	uint32_t b = fz_read_byte(ctx, stm);
-	uint32_t c = fz_read_byte(ctx, stm);
-	uint32_t x = (a) | (b<<8) | (c<<16);
+	int a = fz_read_byte(ctx, stm);
+	int b = fz_read_byte(ctx, stm);
+	int c = fz_read_byte(ctx, stm);
 	if (a == EOF || b == EOF || c == EOF)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end of file in int24");
-	return x;
+	return ((uint32_t)a) | ((uint32_t)b<<8) | ((uint32_t)c<<16);
 }
 
 uint32_t fz_read_uint32_le(fz_context *ctx, fz_stream *stm)
 {
-	uint32_t a = fz_read_byte(ctx, stm);
-	uint32_t b = fz_read_byte(ctx, stm);
-	uint32_t c = fz_read_byte(ctx, stm);
-	uint32_t d = fz_read_byte(ctx, stm);
-	uint32_t x = (a) | (b<<8) | (c<<16) | (d<<24);
+	int a = fz_read_byte(ctx, stm);
+	int b = fz_read_byte(ctx, stm);
+	int c = fz_read_byte(ctx, stm);
+	int d = fz_read_byte(ctx, stm);
 	if (a == EOF || b == EOF || c == EOF || d == EOF)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end of file in int32");
-	return x;
+	return ((uint32_t)a) | ((uint32_t)b<<8) | ((uint32_t)c<<16) | ((uint32_t)d<<24);
 }
 
 uint64_t fz_read_uint64_le(fz_context *ctx, fz_stream *stm)
 {
-	uint64_t a = fz_read_byte(ctx, stm);
-	uint64_t b = fz_read_byte(ctx, stm);
-	uint64_t c = fz_read_byte(ctx, stm);
-	uint64_t d = fz_read_byte(ctx, stm);
-	uint64_t e = fz_read_byte(ctx, stm);
-	uint64_t f = fz_read_byte(ctx, stm);
-	uint64_t g = fz_read_byte(ctx, stm);
-	uint64_t h = fz_read_byte(ctx, stm);
-	uint64_t x = (a) | (b<<8) | (c<<16) | (d<<24) | (e<<32) | (f<<40) | (g<<48) | (h<<56);
+	int a = fz_read_byte(ctx, stm);
+	int b = fz_read_byte(ctx, stm);
+	int c = fz_read_byte(ctx, stm);
+	int d = fz_read_byte(ctx, stm);
+	int e = fz_read_byte(ctx, stm);
+	int f = fz_read_byte(ctx, stm);
+	int g = fz_read_byte(ctx, stm);
+	int h = fz_read_byte(ctx, stm);
 	if (a == EOF || b == EOF || c == EOF || d == EOF || e == EOF || f == EOF || g == EOF || h == EOF)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "premature end of file in int64");
-	return x;
+	return ((uint64_t)a) | ((uint64_t)b<<8) | ((uint64_t)c<<16) | ((uint64_t)d<<24)
+		| ((uint64_t)e<<32) | ((uint64_t)f<<40) | ((uint64_t)g<<48) | ((uint64_t)h<<56);
 }
 
 int16_t fz_read_int16(fz_context *ctx, fz_stream *stm) { return (int16_t)fz_read_uint16(ctx, stm); }
@@ -314,6 +300,24 @@ int64_t fz_read_int64(fz_context *ctx, fz_stream *stm) { return (int64_t)fz_read
 int16_t fz_read_int16_le(fz_context *ctx, fz_stream *stm) { return (int16_t)fz_read_uint16_le(ctx, stm); }
 int32_t fz_read_int32_le(fz_context *ctx, fz_stream *stm) { return (int32_t)fz_read_uint32_le(ctx, stm); }
 int64_t fz_read_int64_le(fz_context *ctx, fz_stream *stm) { return (int64_t)fz_read_uint64_le(ctx, stm); }
+
+float
+fz_read_float_le(fz_context *ctx, fz_stream *stm)
+{
+	union {float f;int32_t i;} u;
+
+	u.i = fz_read_int32_le(ctx, stm);
+	return u.f;
+}
+
+float
+fz_read_float(fz_context *ctx, fz_stream *stm)
+{
+	union {float f;int32_t i;} u;
+
+	u.i = fz_read_int32(ctx, stm);
+	return u.f;
+}
 
 void fz_read_string(fz_context *ctx, fz_stream *stm, char *buffer, int len)
 {

@@ -12,7 +12,6 @@ public class DisplayList
 
 	public void destroy() {
 		finalize();
-		pointer = 0;
 	}
 
 	private native long newNative(Rect mediabox);
@@ -32,7 +31,7 @@ public class DisplayList
 		return toStructuredText(null);
 	}
 
-	public native Rect[] search(String needle);
+	public native Quad[] search(String needle);
 
 	public native void run(Device dev, Matrix ctm, Rect scissor, Cookie cookie);
 

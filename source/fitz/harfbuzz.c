@@ -4,7 +4,6 @@
  */
 
 #include "mupdf/fitz.h"
-#include "fitz-imp.h"
 
 #include "hb.h"
 
@@ -133,7 +132,7 @@ void *fz_hb_malloc(size_t size)
 
 	assert(ctx != NULL);
 
-	return fz_malloc_no_throw(ctx, size);
+	return Memento_label(fz_malloc_no_throw(ctx, size), "hb");
 }
 
 void *fz_hb_calloc(size_t n, size_t size)
@@ -142,7 +141,7 @@ void *fz_hb_calloc(size_t n, size_t size)
 
 	assert(ctx != NULL);
 
-	return fz_calloc_no_throw(ctx, n, size);
+	return Memento_label(fz_calloc_no_throw(ctx, n, size), "hb");
 }
 
 void *fz_hb_realloc(void *ptr, size_t size)
@@ -151,7 +150,7 @@ void *fz_hb_realloc(void *ptr, size_t size)
 
 	assert(ctx != NULL);
 
-	return fz_resize_array_no_throw(ctx, ptr, 1, size);
+	return Memento_label(fz_realloc_no_throw(ctx, ptr, size), "hb");
 }
 
 void fz_hb_free(void *ptr)

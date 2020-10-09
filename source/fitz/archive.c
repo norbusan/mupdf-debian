@@ -31,6 +31,7 @@ fz_list_archive_entry(fz_context *ctx, fz_archive *arch, int idx)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot list archive entries");
 	return arch->list_entry(ctx, arch, idx);
 }
+
 int
 fz_count_archive_entries(fz_context *ctx, fz_archive *arch)
 {

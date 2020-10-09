@@ -31,8 +31,7 @@ public final class AndroidDrawDevice extends NativeDevice
 	}
 
 	public static Bitmap drawPage(Page page, Matrix ctm) {
-		Rect fbox = page.getBounds().transform(ctm);
-		RectI ibox = new RectI((int)fbox.x0, (int)fbox.y0, (int)fbox.x1, (int)fbox.y1);
+		RectI ibox = new RectI(page.getBounds().transform(ctm));
 		int w = ibox.x1 - ibox.x0;
 		int h = ibox.y1 - ibox.y0;
 		Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
@@ -78,4 +77,6 @@ public final class AndroidDrawDevice extends NativeDevice
 	public static Bitmap drawPageFitWidth(Page page, int fitW) {
 		return drawPage(page, fitPageWidth(page, fitW));
 	}
+
+	public native final void invertLuminance();
 }

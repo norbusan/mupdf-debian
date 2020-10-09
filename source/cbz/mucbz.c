@@ -5,14 +5,13 @@
 
 #define DPI 72.0f
 
-typedef struct cbz_document_s cbz_document;
-typedef struct cbz_page_s cbz_page;
-
 static const char *cbz_ext_list[] = {
 	".bmp",
 	".gif",
 	".hdp",
 	".j2k",
+	".jb2",
+	".jbig2",
 	".jp2",
 	".jpeg",
 	".jpg",
@@ -21,6 +20,7 @@ static const char *cbz_ext_list[] = {
 	".pam",
 	".pbm",
 	".pgm",
+	".pkm",
 	".png",
 	".pnm",
 	".ppm",
@@ -30,19 +30,19 @@ static const char *cbz_ext_list[] = {
 	NULL
 };
 
-struct cbz_page_s
+typedef struct
 {
 	fz_page super;
 	fz_image *image;
-};
+} cbz_page;
 
-struct cbz_document_s
+typedef struct
 {
 	fz_document super;
 	fz_archive *arch;
 	int page_count;
 	const char **page;
-};
+} cbz_document;
 
 static inline int cbz_isdigit(int c)
 {
@@ -101,7 +101,7 @@ cbz_create_page_list(fz_context *ctx, cbz_document *doc)
 	count = fz_count_archive_entries(ctx, arch);
 
 	doc->page_count = 0;
-	doc->page = fz_malloc_array(ctx, count, sizeof *doc->page);
+	doc->page = fz_malloc_array(ctx, count, const char *);
 
 	for (i = 0; i < count; i++)
 	{
@@ -129,7 +129,7 @@ cbz_drop_document(fz_context *ctx, fz_document *doc_)
 }
 
 static int
-cbz_count_pages(fz_context *ctx, fz_document *doc_)
+cbz_count_pages(fz_context *ctx, fz_document *doc_, int chapter)
 {
 	cbz_document *doc = (cbz_document*)doc_;
 	return doc->page_count;
@@ -163,7 +163,7 @@ cbz_run_page(fz_context *ctx, fz_page *page_, fz_device *dev, fz_matrix ctm, fz_
 	w = image->w * DPI / xres;
 	h = image->h * DPI / yres;
 	local_ctm = fz_pre_scale(ctm, w, h);
-	fz_fill_image(ctx, dev, image, local_ctm, 1, NULL);
+	fz_fill_image(ctx, dev, image, local_ctm, 1, fz_default_color_params);
 }
 
 static void
@@ -174,14 +174,14 @@ cbz_drop_page(fz_context *ctx, fz_page *page_)
 }
 
 static fz_page *
-cbz_load_page(fz_context *ctx, fz_document *doc_, int number)
+cbz_load_page(fz_context *ctx, fz_document *doc_, int chapter, int number)
 {
 	cbz_document *doc = (cbz_document*)doc_;
 	cbz_page *page = NULL;
 	fz_buffer *buf = NULL;
 
 	if (number < 0 || number >= doc->page_count)
-		return NULL;
+		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot load page %d", number);
 
 	fz_var(page);
 
@@ -215,8 +215,8 @@ static int
 cbz_lookup_metadata(fz_context *ctx, fz_document *doc_, const char *key, char *buf, int size)
 {
 	cbz_document *doc = (cbz_document*)doc_;
-	if (!strcmp(key, "format"))
-		return (int) fz_strlcpy(buf, fz_archive_format(ctx, doc->arch), size);
+	if (!strcmp(key, FZ_META_FORMAT))
+		return 1 + (int) fz_strlcpy(buf, fz_archive_format(ctx, doc->arch), size);
 	return -1;
 }
 
@@ -256,6 +256,7 @@ static const char *cbz_extensions[] =
 
 static const char *cbz_mimetypes[] =
 {
+	"application/vnd.comicbook+zip",
 	"application/x-cbt",
 	"application/x-cbz",
 	"application/x-tar",
@@ -269,5 +270,7 @@ fz_document_handler cbz_document_handler =
 	NULL,
 	cbz_open_document_with_stream,
 	cbz_extensions,
-	cbz_mimetypes
+	cbz_mimetypes,
+	NULL,
+	NULL
 };

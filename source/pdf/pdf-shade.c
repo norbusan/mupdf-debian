@@ -1,9 +1,6 @@
 #include "mupdf/fitz.h"
 #include "mupdf/pdf.h"
 
-/* FIXME: Remove this somehow */
-#define FUNSEGS 32 /* size of sampled mesh for function-based shadings */
-
 /* Sample various functions into lookup tables */
 
 static void
@@ -48,6 +45,8 @@ pdf_sample_shade_function(fz_context *ctx, fz_shade *shade, int funcs, pdf_funct
 
 /* Type 1-3 -- Function-based, linear and radial shadings */
 
+#define FUNSEGS 64 /* size of sampled mesh for function-based shadings */
+
 static void
 pdf_load_function_based_shading(fz_context *ctx, pdf_document *doc, fz_shade *shade, pdf_obj *dict, pdf_function *func)
 {
@@ -72,7 +71,7 @@ pdf_load_function_based_shading(fz_context *ctx, pdf_document *doc, fz_shade *sh
 	shade->u.f.matrix = pdf_dict_get_matrix(ctx, dict, PDF_NAME(Matrix));
 	shade->u.f.xdivs = FUNSEGS;
 	shade->u.f.ydivs = FUNSEGS;
-	shade->u.f.fn_vals = fz_malloc(ctx, (FUNSEGS+1)*(FUNSEGS+1)*n*sizeof(float));
+	shade->u.f.fn_vals = Memento_label(fz_malloc(ctx, (FUNSEGS+1)*(FUNSEGS+1)*n*sizeof(float)), "shade_fn_vals");
 	shade->u.f.domain[0][0] = x0;
 	shade->u.f.domain[0][1] = y0;
 	shade->u.f.domain[1][0] = x1;

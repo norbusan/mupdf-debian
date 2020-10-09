@@ -35,9 +35,9 @@
 /*
 	Types
 */
-typedef struct mu_thread_s mu_thread;
-typedef struct mu_semaphore_s mu_semaphore;
-typedef struct mu_mutex_s mu_mutex;
+typedef struct mu_thread mu_thread;
+typedef struct mu_semaphore mu_semaphore;
+typedef struct mu_mutex mu_mutex;
 
 /*
 	Semaphores
@@ -51,7 +51,7 @@ typedef struct mu_mutex_s mu_mutex;
 */
 
 /*
-	mu_create_semaphore: Create a semaphore.
+	Create a semaphore.
 
 	sem: Pointer to a mu_semaphore to populate.
 
@@ -60,7 +60,7 @@ typedef struct mu_mutex_s mu_mutex;
 int mu_create_semaphore(mu_semaphore *sem);
 
 /*
-	mu_destroy_semaphore: Destroy a semaphore.
+	Destroy a semaphore.
 	Semaphores may safely be destroyed multiple
 	times. Any semaphore initialised to zeros is
 	safe to destroy.
@@ -74,7 +74,7 @@ int mu_create_semaphore(mu_semaphore *sem);
 void mu_destroy_semaphore(mu_semaphore *sem);
 
 /*
-	mu_trigger_semaphore: Increment the value of the
+	Increment the value of the
 	semaphore. Never blocks.
 
 	sem: The semaphore to increment.
@@ -84,7 +84,7 @@ void mu_destroy_semaphore(mu_semaphore *sem);
 int mu_trigger_semaphore(mu_semaphore *sem);
 
 /*
-	mu_wait_semaphore: Decrement the value of the
+	Decrement the value of the
 	semaphore, blocking if this would involve making
 	the value negative.
 
@@ -106,7 +106,7 @@ int mu_wait_semaphore(mu_semaphore *sem);
 typedef void (mu_thread_fn)(void *arg);
 
 /*
-	mu_create_thread: Create a thread to run the
+	Create a thread to run the
 	supplied function with the supplied argument.
 
 	th: Pointer to mu_thread to populate with created
@@ -119,7 +119,7 @@ typedef void (mu_thread_fn)(void *arg);
 int mu_create_thread(mu_thread *th, mu_thread_fn *fn, void *arg);
 
 /*
-	mu_destroy_thread: Destroy a thread. This function
+	Destroy a thread. This function
 	blocks until a thread has terminated normally, and
 	destroys its storage. A mu_thread may safely be destroyed
 	multiple times, as may any mu_thread initialised with
@@ -137,7 +137,7 @@ void mu_destroy_thread(mu_thread *th);
 */
 
 /*
-	mu_create_mutex: Create a mutex.
+	Create a mutex.
 
 	mutex: pointer to a mu_mutex to populate.
 
@@ -146,7 +146,7 @@ void mu_destroy_thread(mu_thread *th);
 int mu_create_mutex(mu_mutex *mutex);
 
 /*
-	mu_destroy_mutex: Destroy a mutex. A mu_mutex may
+	Destroy a mutex. A mu_mutex may
 	safely be destroyed several times, as may a mu_mutex
 	initialised with zeros. Never destroy locked mu_mutex.
 
@@ -155,14 +155,14 @@ int mu_create_mutex(mu_mutex *mutex);
 void mu_destroy_mutex(mu_mutex *mutex);
 
 /*
-	mu_lock_mutex: Lock a mutex.
+	Lock a mutex.
 
 	mutex: Mutex to lock.
 */
 void mu_lock_mutex(mu_mutex *mutex);
 
 /*
-	mu_unlock_mutex: Unlock a mutex.
+	Unlock a mutex.
 
 	mutex: Mutex to unlock.
 */
@@ -177,17 +177,17 @@ void mu_unlock_mutex(mu_mutex *mutex);
 #ifdef DISABLE_MUTHREADS
 
 /* Null implementation */
-struct mu_semaphore_s
+struct mu_semaphore
 {
 	int dummy;
 };
 
-struct mu_thread_s
+struct mu_thread
 {
 	int dummy;
 };
 
-struct mu_mutex_s
+struct mu_mutex
 {
 	int dummy;
 };
@@ -197,19 +197,19 @@ struct mu_mutex_s
 #include <windows.h>
 
 /* Windows threads */
-struct mu_semaphore_s
+struct mu_semaphore
 {
 	HANDLE handle;
 };
 
-struct mu_thread_s
+struct mu_thread
 {
 	HANDLE handle;
 	mu_thread_fn *fn;
 	void *arg;
 };
 
-struct mu_mutex_s
+struct mu_mutex
 {
 	CRITICAL_SECTION mutex;
 };
@@ -221,27 +221,27 @@ struct mu_mutex_s
 
 	Neither ios nor OSX supports unnamed semaphores.
 	Named semaphores are a pain to use, so we implement
-	our own sempahores using condition variables and
+	our own semaphores using condition variables and
 	mutexes.
 */
 
 #include <pthread.h>
 
-struct mu_semaphore_s
+struct mu_semaphore
 {
 	int count;
 	pthread_mutex_t mutex;
 	pthread_cond_t cond;
 };
 
-struct mu_thread_s
+struct mu_thread
 {
 	pthread_t thread;
 	mu_thread_fn *fn;
 	void *arg;
 };
 
-struct mu_mutex_s
+struct mu_mutex
 {
 	pthread_mutex_t mutex;
 };

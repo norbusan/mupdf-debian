@@ -5,13 +5,20 @@
 #include <float.h>
 #include <assert.h>
 
+/* Number of fraction bits for fixed point math */
+#define PREC 14
+#define MASK ((1<<PREC)-1)
+#define ONE (1<<PREC)
+#define HALF (1<<(PREC-1))
+#define LIMIT (1<<(31-PREC))
+
 typedef unsigned char byte;
 
-typedef void (paintfn_t)(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRICT sp, int sw, int sh, int ss, int sa, int u, int v, int fa, int fb, int w, int dn, int sn, int alpha, const byte * FZ_RESTRICT color, byte * FZ_RESTRICT hp, byte * FZ_RESTRICT gp, const fz_overprint *eop);
+typedef void (paintfn_t)(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRICT sp, int sw, int sh, int ss, int sa, int u, int v, int fa, int fb, int w, int dn, int sn, int alpha, const byte * FZ_RESTRICT color, byte * FZ_RESTRICT hp, byte * FZ_RESTRICT gp, const fz_overprint * FZ_RESTRICT eop);
 
 static inline int lerp(int a, int b, int t)
 {
-	return a + (((b - a) * t) >> 16);
+	return a + (((b - a) * t) >> PREC);
 }
 
 static inline int bilerp(int a, int b, int c, int d, int u, int v)
@@ -23,8 +30,8 @@ static inline const byte *sample_nearest(const byte *s, int w, int h, int str, i
 {
 	if (u < 0) u = 0;
 	if (v < 0) v = 0;
-	if (u >= (w>>16)) u = (w>>16) - 1;
-	if (v >= (h>>16)) v = (h>>16) - 1;
+	if (u >= (w>>PREC)) u = (w>>PREC) - 1;
+	if (v >= (h>>PREC)) v = (h>>PREC) - 1;
 	return s + v * str + u * n;
 }
 
@@ -37,12 +44,12 @@ template_affine_alpha_N_lerp(byte * FZ_RESTRICT dp, int da, const byte * FZ_REST
 
 	do
 	{
-		if (u + 32768 >= 0 && u + 65536 < sw && v + 32768 >= 0 && v + 65536 < sh)
+		if (u + HALF >= 0 && u + ONE < sw && v + HALF >= 0 && v + ONE < sh)
 		{
-			int ui = u >> 16;
-			int vi = v >> 16;
-			int uf = u & 0xffff;
-			int vf = v & 0xffff;
+			int ui = u >> PREC;
+			int vi = v >> PREC;
+			int uf = u & MASK;
+			int vf = v & MASK;
 			const byte *a = sample_nearest(sp, sw, sh, ss, sn1+sa, ui, vi);
 			const byte *b = sample_nearest(sp, sw, sh, ss, sn1+sa, ui+1, vi);
 			const byte *c = sample_nearest(sp, sw, sh, ss, sn1+sa, ui, vi+1);
@@ -85,12 +92,12 @@ template_affine_alpha_N_lerp_op(byte * FZ_RESTRICT dp, int da, const byte * FZ_R
 
 	do
 	{
-		if (u + 32768 >= 0 && u + 65536 < sw && v + 32768 >= 0 && v + 65536 < sh)
+		if (u + HALF >= 0 && u + ONE < sw && v + HALF >= 0 && v + ONE < sh)
 		{
-			int ui = u >> 16;
-			int vi = v >> 16;
-			int uf = u & 0xffff;
-			int vf = v & 0xffff;
+			int ui = u >> PREC;
+			int vi = v >> PREC;
+			int uf = u & MASK;
+			int vf = v & MASK;
 			const byte *a = sample_nearest(sp, sw, sh, ss, sn1+sa, ui, vi);
 			const byte *b = sample_nearest(sp, sw, sh, ss, sn1+sa, ui+1, vi);
 			const byte *c = sample_nearest(sp, sw, sh, ss, sn1+sa, ui, vi+1);
@@ -136,12 +143,12 @@ template_affine_alpha_g2rgb_lerp(byte * FZ_RESTRICT dp, int da, const byte * FZ_
 {
 	do
 	{
-		if (u + 32768 >= 0 && u + 65536 < sw && v + 32768 >= 0 && v + 65536 < sh)
+		if (u + HALF >= 0 && u + ONE < sw && v + HALF >= 0 && v + ONE < sh)
 		{
-			int ui = u >> 16;
-			int vi = v >> 16;
-			int uf = u & 0xffff;
-			int vf = v & 0xffff;
+			int ui = u >> PREC;
+			int vi = v >> PREC;
+			int uf = u & MASK;
+			int vf = v & MASK;
 			const byte *a = sample_nearest(sp, sw, sh, ss, 1+sa, ui, vi);
 			const byte *b = sample_nearest(sp, sw, sh, ss, 1+sa, ui+1, vi);
 			const byte *c = sample_nearest(sp, sw, sh, ss, 1+sa, ui, vi+1);
@@ -164,7 +171,7 @@ template_affine_alpha_g2rgb_lerp(byte * FZ_RESTRICT dp, int da, const byte * FZ_
 					gp[0] = ya + fz_mul255(gp[0], t);
 			}
 		}
-		dp += 4;
+		dp += 3+da;
 		if (hp)
 			hp++;
 		if (gp)
@@ -179,14 +186,14 @@ static inline void
 template_affine_alpha_N_near_fa0(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRICT sp, int sw, int sh, int ss, int sa, int u, int v, int fa, int fb, int w, int dn1, int sn1, int alpha, byte * FZ_RESTRICT hp, byte * FZ_RESTRICT gp)
 {
 	int k;
-	int ui = u >> 16;
+	int ui = u >> PREC;
 	TRACK_FN();
 	if (ui < 0 || ui >= sw)
 		return;
 	sp += ui * (sn1+sa);
 	do
 	{
-		int vi = v >> 16;
+		int vi = v >> PREC;
 		if (vi >= 0 && vi < sh)
 		{
 			const byte *sample = sp + (vi * ss);
@@ -221,13 +228,13 @@ static inline void
 template_affine_alpha_N_near_fb0(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRICT sp, int sw, int sh, int ss, int sa, int u, int v, int fa, int fb, int w, int dn1, int sn1, int alpha, byte * FZ_RESTRICT hp, byte * FZ_RESTRICT gp)
 {
 	int k;
-	int vi = v >> 16;
+	int vi = v >> PREC;
 	if (vi < 0 || vi >= sh)
 		return;
 	sp += vi * ss;
 	do
 	{
-		int ui = u >> 16;
+		int ui = u >> PREC;
 		if (ui >= 0 && ui < sw)
 		{
 			const byte *sample = sp + (ui * (sn1+sa));
@@ -265,8 +272,8 @@ template_affine_alpha_N_near(byte * FZ_RESTRICT dp, int da, const byte * FZ_REST
 
 	do
 	{
-		int ui = u >> 16;
-		int vi = v >> 16;
+		int ui = u >> PREC;
+		int vi = v >> PREC;
 		if (ui >= 0 && ui < sw && vi >= 0 && vi < sh)
 		{
 			const byte *sample = sp + (vi * ss) + (ui * (sn1+sa));
@@ -305,8 +312,8 @@ template_affine_alpha_N_near_op(byte * FZ_RESTRICT dp, int da, const byte * FZ_R
 
 	do
 	{
-		int ui = u >> 16;
-		int vi = v >> 16;
+		int ui = u >> PREC;
+		int vi = v >> PREC;
 		if (ui >= 0 && ui < sw && vi >= 0 && vi < sh)
 		{
 			const byte *sample = sp + (vi * ss) + (ui * (sn1+sa));
@@ -343,13 +350,13 @@ template_affine_alpha_N_near_op(byte * FZ_RESTRICT dp, int da, const byte * FZ_R
 static inline void
 template_affine_alpha_g2rgb_near_fa0(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRICT sp, int sw, int sh, int ss, int sa, int u, int v, int fa, int fb, int w, int alpha, byte * FZ_RESTRICT hp, byte * FZ_RESTRICT gp)
 {
-	int ui = u >> 16;
+	int ui = u >> PREC;
 	if (ui < 0 || ui >= sw)
 		return;
 	sp += ui * (1+sa);
 	do
 	{
-		int vi = v >> 16;
+		int vi = v >> PREC;
 		if (vi >= 0 && vi < sh)
 		{
 			const byte *sample = sp + (vi * ss);
@@ -383,13 +390,13 @@ template_affine_alpha_g2rgb_near_fa0(byte * FZ_RESTRICT dp, int da, const byte *
 static inline void
 template_affine_alpha_g2rgb_near_fb0(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRICT sp, int sw, int sh, int ss, int sa, int u, int v, int fa, int fb, int w, int alpha, byte * FZ_RESTRICT hp, byte * FZ_RESTRICT gp)
 {
-	int vi = v >> 16;
+	int vi = v >> PREC;
 	if (vi < 0 || vi >= sh)
 		return;
 	sp += vi * ss;
 	do
 	{
-		int ui = u >> 16;
+		int ui = u >> PREC;
 		if (ui >= 0 && ui < sw)
 		{
 			const byte *sample = sp + (ui * (1+sa));
@@ -425,8 +432,8 @@ template_affine_alpha_g2rgb_near(byte * FZ_RESTRICT dp, int da, const byte * FZ_
 {
 	do
 	{
-		int ui = u >> 16;
-		int vi = v >> 16;
+		int ui = u >> PREC;
+		int vi = v >> PREC;
 		if (ui >= 0 && ui < sw && vi >= 0 && vi < sh)
 		{
 			const byte *sample = sp + (vi * ss) + (ui * (1+sa));
@@ -466,12 +473,12 @@ template_affine_N_lerp(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRICT s
 
 	do
 	{
-		if (u + 32768 >= 0 && u + 65536 < sw && v + 32768 >= 0 && v + 65536 < sh)
+		if (u + HALF >= 0 && u + ONE < sw && v + HALF >= 0 && v + ONE < sh)
 		{
-			int ui = u >> 16;
-			int vi = v >> 16;
-			int uf = u & 0xffff;
-			int vf = v & 0xffff;
+			int ui = u >> PREC;
+			int vi = v >> PREC;
+			int uf = u & MASK;
+			int vf = v & MASK;
 			const byte *a = sample_nearest(sp, sw, sh, ss, sn1+sa, ui, vi);
 			const byte *b = sample_nearest(sp, sw, sh, ss, sn1+sa, ui+1, vi);
 			const byte *c = sample_nearest(sp, sw, sh, ss, sn1+sa, ui, vi+1);
@@ -513,12 +520,12 @@ template_affine_N_lerp_op(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRIC
 
 	do
 	{
-		if (u + 32768 >= 0 && u + 65536 < sw && v + 32768 >= 0 && v + 65536 < sh)
+		if (u + HALF >= 0 && u + ONE < sw && v + HALF >= 0 && v + ONE < sh)
 		{
-			int ui = u >> 16;
-			int vi = v >> 16;
-			int uf = u & 0xffff;
-			int vf = v & 0xffff;
+			int ui = u >> PREC;
+			int vi = v >> PREC;
+			int uf = u & MASK;
+			int vf = v & MASK;
 			const byte *a = sample_nearest(sp, sw, sh, ss, sn1+sa, ui, vi);
 			const byte *b = sample_nearest(sp, sw, sh, ss, sn1+sa, ui+1, vi);
 			const byte *c = sample_nearest(sp, sw, sh, ss, sn1+sa, ui, vi+1);
@@ -560,12 +567,12 @@ template_affine_solid_g2rgb_lerp(byte * FZ_RESTRICT dp, int da, const byte * FZ_
 {
 	do
 	{
-		if (u + 32768 >= 0 && u + 65536 < sw && v + 32768 >= 0 && v + 65536 < sh)
+		if (u + HALF >= 0 && u + ONE < sw && v + HALF >= 0 && v + ONE < sh)
 		{
-			int ui = u >> 16;
-			int vi = v >> 16;
-			int uf = u & 0xffff;
-			int vf = v & 0xffff;
+			int ui = u >> PREC;
+			int vi = v >> PREC;
+			int uf = u & MASK;
+			int vf = v & MASK;
 			const byte *a = sample_nearest(sp, sw, sh, ss, 1+sa, ui, vi);
 			const byte *b = sample_nearest(sp, sw, sh, ss, 1+sa, ui+1, vi);
 			const byte *c = sample_nearest(sp, sw, sh, ss, 1+sa, ui, vi+1);
@@ -601,13 +608,13 @@ static inline void
 template_affine_N_near_fa0(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRICT sp, int sw, int sh, int ss, int sa, int u, int v, int fa, int fb, int w, int dn1, int sn1, byte * FZ_RESTRICT hp, byte * FZ_RESTRICT gp)
 {
 	int k;
-	int ui = u >> 16;
+	int ui = u >> PREC;
 	if (ui < 0 || ui >= sw)
 		return;
 	sp += ui*(sn1+sa);
 	do
 	{
-		int vi = v >> 16;
+		int vi = v >> PREC;
 		if (vi >= 0 && vi < sh)
 		{
 			const byte *sample = sp + (vi * ss);
@@ -670,13 +677,13 @@ static inline void
 template_affine_N_near_fb0(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRICT sp, int sw, int sh, int ss, int sa, int u, int v, int fa, int fb, int w, int dn1, int sn1, byte * FZ_RESTRICT hp, byte * FZ_RESTRICT gp)
 {
 	int k;
-	int vi = v >> 16;
+	int vi = v >> PREC;
 	if (vi < 0 || vi >= sh)
 		return;
 	sp += vi * ss;
 	do
 	{
-		int ui = u >> 16;
+		int ui = u >> PREC;
 		if (ui >= 0 && ui < sw)
 		{
 			const byte *sample = sp + (ui * (sn1+sa));
@@ -742,8 +749,8 @@ template_affine_N_near(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRICT s
 
 	do
 	{
-		int ui = u >> 16;
-		int vi = v >> 16;
+		int ui = u >> PREC;
+		int vi = v >> PREC;
 		if (ui >= 0 && ui < sw && vi >= 0 && vi < sh)
 		{
 			const byte *sample = sp + (vi * ss) + (ui * (sn1+sa));
@@ -810,8 +817,8 @@ template_affine_N_near_op(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRIC
 
 	do
 	{
-		int ui = u >> 16;
-		int vi = v >> 16;
+		int ui = u >> PREC;
+		int vi = v >> PREC;
 		if (ui >= 0 && ui < sw && vi >= 0 && vi < sh)
 		{
 			const byte *sample = sp + (vi * ss) + (ui * (sn1+sa));
@@ -874,13 +881,13 @@ template_affine_N_near_op(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRIC
 static inline void
 template_affine_solid_g2rgb_near_fa0(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRICT sp, int sw, int sh, int ss, int sa, int u, int v, int fa, int fb, int w, byte * FZ_RESTRICT hp, byte * FZ_RESTRICT gp)
 {
-	int ui = u >> 16;
+	int ui = u >> PREC;
 	if (ui < 0 || ui >= sw)
 		return;
 	sp += ui * (1+sa);
 	do
 	{
-		int vi = v >> 16;
+		int vi = v >> PREC;
 		if (vi >= 0 && vi < sh)
 		{
 			const byte *sample = sp + (vi * ss);
@@ -928,13 +935,13 @@ template_affine_solid_g2rgb_near_fa0(byte * FZ_RESTRICT dp, int da, const byte *
 static inline void
 template_affine_solid_g2rgb_near_fb0(byte * FZ_RESTRICT dp, int da, const byte * FZ_RESTRICT sp, int sw, int sh, int ss, int sa, int u, int v, int fa, int fb, int w, byte * FZ_RESTRICT hp, byte * FZ_RESTRICT gp)
 {
-	int vi = v >> 16;
+	int vi = v >> PREC;
 	if (vi < 0 || vi >= sh)
 		return;
 	sp += vi * ss;
 	do
 	{
-		int ui = u >> 16;
+		int ui = u >> PREC;
 		if (ui >= 0 && ui < sw)
 		{
 			const byte *sample = sp + (ui * (1+sa));
@@ -984,8 +991,8 @@ template_affine_solid_g2rgb_near(byte * FZ_RESTRICT dp, int da, const byte * FZ_
 {
 	do
 	{
-		int ui = u >> 16;
-		int vi = v >> 16;
+		int ui = u >> PREC;
+		int vi = v >> PREC;
 		if (ui >= 0 && ui < sw && vi >= 0 && vi < sh)
 		{
 			const byte *sample = sp + (vi * ss) + (ui * (1+sa));
@@ -1041,12 +1048,12 @@ template_affine_color_N_lerp(byte * FZ_RESTRICT dp, int da, const byte * FZ_REST
 
 	do
 	{
-		if (u + 32768 >= 0 && u + 65536 < sw && v + 32768 >= 0 && v + 65536 < sh)
+		if (u + HALF >= 0 && u + ONE < sw && v + HALF >= 0 && v + ONE < sh)
 		{
-			int ui = u >> 16;
-			int vi = v >> 16;
-			int uf = u & 0xffff;
-			int vf = v & 0xffff;
+			int ui = u >> PREC;
+			int vi = v >> PREC;
+			int uf = u & MASK;
+			int vf = v & MASK;
 			const byte *a = sample_nearest(sp, sw, sh, ss, 1, ui, vi);
 			const byte *b = sample_nearest(sp, sw, sh, ss, 1, ui+1, vi);
 			const byte *c = sample_nearest(sp, sw, sh, ss, 1, ui, vi+1);
@@ -1084,12 +1091,12 @@ template_affine_color_N_lerp_op(byte * FZ_RESTRICT dp, int da, const byte * FZ_R
 
 	do
 	{
-		if (u + 32768 >= 0 && u + 65536 < sw && v + 32768 >= 0 && v + 65536 < sh)
+		if (u + HALF >= 0 && u + ONE < sw && v + HALF >= 0 && v + ONE < sh)
 		{
-			int ui = u >> 16;
-			int vi = v >> 16;
-			int uf = u & 0xffff;
-			int vf = v & 0xffff;
+			int ui = u >> PREC;
+			int vi = v >> PREC;
+			int uf = u & MASK;
+			int vf = v & MASK;
 			const byte *a = sample_nearest(sp, sw, sh, ss, 1, ui, vi);
 			const byte *b = sample_nearest(sp, sw, sh, ss, 1, ui+1, vi);
 			const byte *c = sample_nearest(sp, sw, sh, ss, 1, ui, vi+1);
@@ -1128,8 +1135,8 @@ template_affine_color_N_near(byte * FZ_RESTRICT dp, int da, const byte * FZ_REST
 
 	do
 	{
-		int ui = u >> 16;
-		int vi = v >> 16;
+		int ui = u >> PREC;
+		int vi = v >> PREC;
 		if (ui >= 0 && ui < sw && vi >= 0 && vi < sh)
 		{
 			int ma = sp[vi * ss + ui];
@@ -1165,8 +1172,8 @@ template_affine_color_N_near_op(byte * FZ_RESTRICT dp, int da, const byte * FZ_R
 
 	do
 	{
-		int ui = u >> 16;
-		int vi = v >> 16;
+		int ui = u >> PREC;
+		int vi = v >> PREC;
 		if (ui >= 0 && ui < sw && vi >= 0 && vi < sh)
 		{
 			int ma = sp[vi * ss + ui];
@@ -1720,7 +1727,6 @@ fz_paint_affine_lerp_spots(int da, int sa, int fa, int fb, int dn, int sn, int a
 	return NULL;
 }
 #endif /* FZ_ENABLE_SPOT_RENDERING */
-
 
 #if FZ_PLOTTERS_RGB
 static void
@@ -3670,7 +3676,7 @@ static paintfn_t *
 fz_paint_affine_color_near_spots(int da, int sa, int fa, int fb, int dn, int sn, int alpha, const fz_overprint * FZ_RESTRICT eop)
 {
 	if (fz_overprint_required(eop))
-		return paint_affine_color_near_N_op;
+		return da ? paint_affine_color_near_da_N_op : paint_affine_color_near_N_op;
 	return da ? paint_affine_color_near_da_N : paint_affine_color_near_N;
 }
 #endif /* FZ_ENABLE_SPOT_RENDERING */
@@ -3688,10 +3694,11 @@ fz_paint_affine_color_near_spots(int da, int sa, int fa, int fb, int dn, int sn,
  * 'safe' in all cases, is to expand an image out to fill a box that entirely
  * covers all the pixels touched by the current image. This is our 'standard'
  * mechanism.
+ *
  * The alternative, used when we know images are tiled across a page, is to
  * round the edge of each image to the closest integer pixel boundary. This
  * would not be safe in the general case, but gives less distortion across
- * neighbouring images when tiling is used. We use this for .gproof files.
+ * neighbouring images when tiling is used.
  */
 fz_matrix
 fz_gridfit_matrix(int as_tiled, fz_matrix m)
@@ -3868,7 +3875,18 @@ fz_gridfit_matrix(int as_tiled, fz_matrix m)
 /* Draw an image with an affine transform on destination */
 
 static void
-fz_paint_image_imp(fz_pixmap *dst, const fz_irect *scissor, fz_pixmap *shape, fz_pixmap *group_alpha, const fz_pixmap *img, fz_matrix ctm, const byte *color, int alpha, int lerp_allowed, int as_tiled, const fz_overprint *eop)
+fz_paint_image_imp(fz_context *ctx,
+	fz_pixmap *dst,
+	const fz_irect *scissor,
+	fz_pixmap *shape,
+	fz_pixmap *group_alpha,
+	fz_pixmap *img,
+	fz_matrix ctm,
+	const byte *color,
+	int alpha,
+	int lerp_allowed,
+	int as_tiled,
+	const fz_overprint *eop)
 {
 	byte *dp, *sp, *hp, *gp;
 	int u, v, fa, fb, fc, fd;
@@ -3936,12 +3954,12 @@ fz_paint_image_imp(fz_pixmap *dst, const fz_irect *scissor, fz_pixmap *shape, fz
 	ctm = fz_pre_scale(ctm, 1.0f / img->w, 1.0f / img->h);
 	ctm = fz_invert_matrix(ctm);
 
-	fa = (int)(ctm.a *= 65536.0f);
-	fb = (int)(ctm.b *= 65536.0f);
-	fc = (int)(ctm.c *= 65536.0f);
-	fd = (int)(ctm.d *= 65536.0f);
-	ctm.e *= 65536.0f;
-	ctm.f *= 65536.0f;
+	fa = (int)(ctm.a *= ONE);
+	fb = (int)(ctm.b *= ONE);
+	fc = (int)(ctm.c *= ONE);
+	fd = (int)(ctm.d *= ONE);
+	ctm.e *= ONE;
+	ctm.f *= ONE;
 
 	/* Calculate initial texture positions. Do a half step to start. */
 	/* Bug 693021: Keep calculation in float for as long as possible to
@@ -3977,6 +3995,13 @@ fz_paint_image_imp(fz_pixmap *dst, const fz_irect *scissor, fz_pixmap *shape, fz
 	{
 		gs = 0;
 		gp = NULL;
+	}
+
+	/* image size overflows fixed point math */
+	if (sw >= LIMIT || sh >= LIMIT)
+	{
+		fz_warn(ctx, "image too large for fixed point math: %d x %d", sw, sh);
+		return;
 	}
 
 	/* TODO: if (fb == 0 && fa == 1) call fz_paint_span */
@@ -4044,14 +4069,10 @@ fz_paint_image_imp(fz_pixmap *dst, const fz_irect *scissor, fz_pixmap *shape, fz
 
 	if (dolerp)
 	{
-		/* image size overflows 16.16 fixed point math */
-		if (sw >= 32768 || sh >= 32768)
-			return;
-
-		u -= 32768;
-		v -= 32768;
-		sw = (sw<<16) + 32768;
-		sh = (sh<<16) + 32768;
+		u -= HALF;
+		v -= HALF;
+		sw = (sw<<PREC) + HALF;
+		sh = (sh<<PREC) + HALF;
 	}
 
 	while (h--)
@@ -4066,14 +4087,14 @@ fz_paint_image_imp(fz_pixmap *dst, const fz_irect *scissor, fz_pixmap *shape, fz
 }
 
 void
-fz_paint_image_with_color(fz_pixmap *dst, const fz_irect *scissor, fz_pixmap *shape, fz_pixmap *group_alpha, const fz_pixmap *img, fz_matrix ctm, const byte *color, int lerp_allowed, int as_tiled, const fz_overprint *eop)
+fz_paint_image_with_color(fz_context *ctx, fz_pixmap * FZ_RESTRICT dst, const fz_irect * FZ_RESTRICT scissor, fz_pixmap * FZ_RESTRICT shape, fz_pixmap * FZ_RESTRICT group_alpha, fz_pixmap * FZ_RESTRICT img, fz_matrix ctm, const byte * FZ_RESTRICT color, int lerp_allowed, int as_tiled, const fz_overprint * FZ_RESTRICT eop)
 {
 	assert(img->n == 1);
-	fz_paint_image_imp(dst, scissor, shape, group_alpha, img, ctm, color, 255, lerp_allowed, as_tiled, eop);
+	fz_paint_image_imp(ctx, dst, scissor, shape, group_alpha, img, ctm, color, 255, lerp_allowed, as_tiled, eop);
 }
 
 void
-fz_paint_image(fz_pixmap *dst, const fz_irect *scissor, fz_pixmap *shape, fz_pixmap *group_alpha, const fz_pixmap *img, fz_matrix ctm, int alpha, int lerp_allowed, int as_tiled, const fz_overprint *eop)
+fz_paint_image(fz_context *ctx, fz_pixmap * FZ_RESTRICT dst, const fz_irect * FZ_RESTRICT scissor, fz_pixmap * FZ_RESTRICT shape, fz_pixmap * FZ_RESTRICT group_alpha, fz_pixmap * FZ_RESTRICT img, fz_matrix ctm, int alpha, int lerp_allowed, int as_tiled, const fz_overprint * FZ_RESTRICT eop)
 {
-	fz_paint_image_imp(dst, scissor, shape, group_alpha, img, ctm, NULL, alpha, lerp_allowed, as_tiled, eop);
+	fz_paint_image_imp(ctx, dst, scissor, shape, group_alpha, img, ctm, NULL, alpha, lerp_allowed, as_tiled, eop);
 }

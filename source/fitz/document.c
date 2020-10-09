@@ -1,5 +1,4 @@
 #include "mupdf/fitz.h"
-#include "fitz-imp.h"
 
 #include <string.h>
 
@@ -12,7 +11,7 @@ enum
 #define DEFH (600)
 #define DEFEM (12)
 
-struct fz_document_handler_context_s
+struct fz_document_handler_context
 {
 	int refs;
 	int count;
@@ -129,7 +128,7 @@ extern fz_document_handler pdf_document_handler;
 #endif
 
 fz_document *
-fz_open_document_with_stream(fz_context *ctx, const char *magic, fz_stream *stream)
+fz_open_accelerated_document_with_stream(fz_context *ctx, const char *magic, fz_stream *stream, fz_stream *accel)
 {
 	const fz_document_handler *handler;
 
@@ -143,16 +142,34 @@ fz_open_document_with_stream(fz_context *ctx, const char *magic, fz_stream *stre
 #else
 		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find document handler for file type: %s", magic);
 #endif
-
+	if (handler->open_accel_with_stream)
+		if (accel || handler->open_with_stream == NULL)
+			return handler->open_accel_with_stream(ctx, stream, accel);
+	if (accel)
+	{
+		/* We've had an accelerator passed to a format that doesn't
+		 * handle it. This should never happen, as how did the
+		 * accelerator get created? */
+		fz_drop_stream(ctx, accel);
+	}
 	return handler->open_with_stream(ctx, stream);
 }
 
 fz_document *
-fz_open_document(fz_context *ctx, const char *filename)
+fz_open_document_with_stream(fz_context *ctx, const char *magic, fz_stream *stream)
+{
+	return fz_open_accelerated_document_with_stream(ctx, magic, stream, NULL);
+}
+
+fz_document *
+fz_open_accelerated_document(fz_context *ctx, const char *filename, const char *accel)
 {
 	const fz_document_handler *handler;
 	fz_stream *file;
+	fz_stream *afile = NULL;
 	fz_document *doc = NULL;
+
+	fz_var(afile);
 
 	if (filename == NULL)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "no document to open");
@@ -165,19 +182,77 @@ fz_open_document(fz_context *ctx, const char *filename)
 		fz_throw(ctx, FZ_ERROR_GENERIC, "cannot find document handler for file: %s", filename);
 #endif
 
-	if (handler->open)
+	if (accel) {
+		if (handler->open_accel)
+			return handler->open_accel(ctx, filename, accel);
+		if (handler->open_accel_with_stream == NULL)
+		{
+			/* We're not going to be able to use the accelerator - this
+			 * should never happen, as how can one have been created? */
+			accel = NULL;
+		}
+	}
+	if (!accel && handler->open)
 		return handler->open(ctx, filename);
 
 	file = fz_open_file(ctx, filename);
 
 	fz_try(ctx)
-		doc = handler->open_with_stream(ctx, file);
+	{
+		if (accel || handler->open_with_stream == NULL)
+		{
+			if (accel)
+				afile = fz_open_file(ctx, accel);
+			doc = handler->open_accel_with_stream(ctx, file, afile);
+		}
+		else
+			doc = handler->open_with_stream(ctx, file);
+	}
 	fz_always(ctx)
+	{
+		fz_drop_stream(ctx, afile);
 		fz_drop_stream(ctx, file);
+	}
 	fz_catch(ctx)
 		fz_rethrow(ctx);
 
 	return doc;
+}
+
+fz_document *
+fz_open_document(fz_context *ctx, const char *filename)
+{
+	return fz_open_accelerated_document(ctx, filename, NULL);
+}
+
+void fz_save_accelerator(fz_context *ctx, fz_document *doc, const char *accel)
+{
+	if (doc == NULL)
+		return;
+	if (doc->output_accelerator == NULL)
+		return;
+
+	fz_output_accelerator(ctx, doc, fz_new_output_with_path(ctx, accel, 0));
+}
+
+void fz_output_accelerator(fz_context *ctx, fz_document *doc, fz_output *accel)
+{
+	if (doc == NULL || accel == NULL)
+		return;
+	if (doc->output_accelerator == NULL)
+	{
+		fz_drop_output(ctx, accel);
+		fz_throw(ctx, FZ_ERROR_GENERIC, "Document does not support writing an accelerator");
+	}
+
+	doc->output_accelerator(ctx, doc, accel);
+}
+
+int fz_document_supports_accelerator(fz_context *ctx, fz_document *doc)
+{
+	if (doc == NULL)
+		return 0;
+	return (doc->output_accelerator) != NULL;
 }
 
 void *
@@ -221,18 +296,18 @@ fz_is_document_reflowable(fz_context *ctx, fz_document *doc)
 	return doc ? doc->is_reflowable : 0;
 }
 
-fz_bookmark fz_make_bookmark(fz_context *ctx, fz_document *doc, int page)
+fz_bookmark fz_make_bookmark(fz_context *ctx, fz_document *doc, fz_location loc)
 {
 	if (doc && doc->make_bookmark)
-		return doc->make_bookmark(ctx, doc, page);
-	return (fz_bookmark)page;
+		return doc->make_bookmark(ctx, doc, loc);
+	return (loc.chapter<<16) + loc.page;
 }
 
-int fz_lookup_bookmark(fz_context *ctx, fz_document *doc, fz_bookmark mark)
+fz_location fz_lookup_bookmark(fz_context *ctx, fz_document *doc, fz_bookmark mark)
 {
 	if (doc && doc->lookup_bookmark)
 		return doc->lookup_bookmark(ctx, doc, mark);
-	return (int)mark;
+	return fz_make_location((mark>>16) & 0xffff, mark & 0xffff);
 }
 
 int
@@ -268,7 +343,7 @@ fz_load_outline(fz_context *ctx, fz_document *doc)
 	return NULL;
 }
 
-int
+fz_location
 fz_resolve_link(fz_context *ctx, fz_document *doc, const char *uri, float *xp, float *yp)
 {
 	fz_ensure_layout(ctx, doc);
@@ -276,7 +351,7 @@ fz_resolve_link(fz_context *ctx, fz_document *doc, const char *uri, float *xp, f
 	if (yp) *yp = 0;
 	if (doc && doc->resolve_link)
 		return doc->resolve_link(ctx, doc, uri, xp, yp);
-	return -1;
+	return fz_make_location(-1, -1);
 }
 
 void
@@ -290,12 +365,129 @@ fz_layout_document(fz_context *ctx, fz_document *doc, float w, float h, float em
 }
 
 int
-fz_count_pages(fz_context *ctx, fz_document *doc)
+fz_count_chapters(fz_context *ctx, fz_document *doc)
+{
+	fz_ensure_layout(ctx, doc);
+	if (doc && doc->count_chapters)
+		return doc->count_chapters(ctx, doc);
+	return 1;
+}
+
+int
+fz_count_chapter_pages(fz_context *ctx, fz_document *doc, int chapter)
 {
 	fz_ensure_layout(ctx, doc);
 	if (doc && doc->count_pages)
-		return doc->count_pages(ctx, doc);
+		return doc->count_pages(ctx, doc, chapter);
 	return 0;
+}
+
+int
+fz_count_pages(fz_context *ctx, fz_document *doc)
+{
+	int i, c, n = 0;
+	c = fz_count_chapters(ctx, doc);
+	for (i = 0; i < c; ++i)
+		n += fz_count_chapter_pages(ctx, doc, i);
+	return n;
+}
+
+fz_page *
+fz_load_page(fz_context *ctx, fz_document *doc, int number)
+{
+	int i, n = fz_count_chapters(ctx, doc);
+	int start = 0;
+	for (i = 0; i < n; ++i)
+	{
+		int m = fz_count_chapter_pages(ctx, doc, i);
+		if (number < start + m)
+			return fz_load_chapter_page(ctx, doc, i, number - start);
+		start += m;
+	}
+	fz_throw(ctx, FZ_ERROR_GENERIC, "Page not found: %d", number+1);
+}
+
+fz_location fz_last_page(fz_context *ctx, fz_document *doc)
+{
+	int nc = fz_count_chapters(ctx, doc);
+	int np = fz_count_chapter_pages(ctx, doc, nc-1);
+	return fz_make_location(nc-1, np-1);
+}
+
+fz_location fz_next_page(fz_context *ctx, fz_document *doc, fz_location loc)
+{
+	int nc = fz_count_chapters(ctx, doc);
+	int np = fz_count_chapter_pages(ctx, doc, loc.chapter);
+	if (loc.page + 1 == np)
+	{
+		if (loc.chapter + 1 < nc)
+		{
+			return fz_make_location(loc.chapter + 1, 0);
+		}
+	}
+	else
+	{
+		return fz_make_location(loc.chapter, loc.page + 1);
+	}
+	return loc;
+}
+
+fz_location fz_previous_page(fz_context *ctx, fz_document *doc, fz_location loc)
+{
+	if (loc.page == 0)
+	{
+		if (loc.chapter > 0)
+		{
+			int np = fz_count_chapter_pages(ctx, doc, loc.chapter - 1);
+			return fz_make_location(loc.chapter - 1, np - 1);
+		}
+	}
+	else
+	{
+		return fz_make_location(loc.chapter, loc.page - 1);
+	}
+	return loc;
+}
+
+fz_location fz_clamp_location(fz_context *ctx, fz_document *doc, fz_location loc)
+{
+	int nc = fz_count_chapters(ctx, doc);
+	int np;
+	if (loc.chapter < 0) loc.chapter = 0;
+	if (loc.chapter >= nc) loc.chapter = nc - 1;
+	np = fz_count_chapter_pages(ctx, doc, loc.chapter);
+	if (loc.page < 0) loc.page = 0;
+	if (loc.page >= np) loc.page = np - 1;
+	return loc;
+}
+
+fz_location fz_location_from_page_number(fz_context *ctx, fz_document *doc, int number)
+{
+	int i, m = 0, n = fz_count_chapters(ctx, doc);
+	int start = 0;
+	if (number < 0)
+		number = 0;
+	for (i = 0; i < n; ++i)
+	{
+		m = fz_count_chapter_pages(ctx, doc, i);
+		if (number < start + m)
+			return fz_make_location(i, number - start);
+		start += m;
+	}
+	return fz_make_location(i-1, m-1);
+}
+
+int fz_page_number_from_location(fz_context *ctx, fz_document *doc, fz_location loc)
+{
+	int i, n, start = 0;
+	n = fz_count_chapters(ctx, doc);
+	for (i = 0; i < n; ++i)
+	{
+		if (i == loc.chapter)
+			return start + loc.page;
+		start += fz_count_chapter_pages(ctx, doc, i);
+	}
+	return -1;
 }
 
 int
@@ -317,26 +509,42 @@ fz_document_output_intent(fz_context *ctx, fz_document *doc)
 }
 
 fz_page *
-fz_load_page(fz_context *ctx, fz_document *doc, int number)
+fz_load_chapter_page(fz_context *ctx, fz_document *doc, int chapter, int number)
 {
 	fz_page *page;
 
+	if (doc == NULL)
+		return NULL;
+
 	fz_ensure_layout(ctx, doc);
 
+	/* Protect modifications to the page list to cope with
+	 * destruction of pages on other threads. */
+	fz_lock(ctx, FZ_LOCK_ALLOC);
 	for (page = doc->open; page; page = page->next)
-		if (page->number == number)
+		if (page->chapter == chapter && page->number == number)
+		{
+			fz_unlock(ctx, FZ_LOCK_ALLOC);
 			return fz_keep_page(ctx, page);
+		}
+	fz_unlock(ctx, FZ_LOCK_ALLOC);
 
-	if (doc && doc->load_page)
+	if (doc->load_page)
 	{
-		page = doc->load_page(ctx, doc, number);
+		page = doc->load_page(ctx, doc, chapter, number);
+		page->chapter = chapter;
 		page->number = number;
 
 		/* Insert new page at the head of the list of open pages. */
-		if ((page->next = doc->open) != NULL)
-			doc->open->prev = &page->next;
-		doc->open = page;
-		page->prev = &doc->open;
+		if (!page->incomplete)
+		{
+			fz_lock(ctx, FZ_LOCK_ALLOC);
+			if ((page->next = doc->open) != NULL)
+				doc->open->prev = &page->next;
+			doc->open = page;
+			page->prev = &doc->open;
+			fz_unlock(ctx, FZ_LOCK_ALLOC);
+		}
 		return page;
 	}
 
@@ -359,34 +567,10 @@ fz_bound_page(fz_context *ctx, fz_page *page)
 	return fz_empty_rect;
 }
 
-fz_annot *
-fz_first_annot(fz_context *ctx, fz_page *page)
-{
-	if (page && page->first_annot)
-		return page->first_annot(ctx, page);
-	return NULL;
-}
-
-fz_annot *
-fz_next_annot(fz_context *ctx, fz_annot *annot)
-{
-	if (annot && annot->next_annot)
-		return annot->next_annot(ctx, annot);
-	return NULL;
-}
-
-fz_rect
-fz_bound_annot(fz_context *ctx, fz_annot *annot)
-{
-	if (annot && annot->bound_annot)
-		return annot->bound_annot(ctx, annot);
-	return fz_empty_rect;
-}
-
 void
 fz_run_page_contents(fz_context *ctx, fz_page *page, fz_device *dev, fz_matrix transform, fz_cookie *cookie)
 {
-	if (page && page->run_page_contents && page)
+	if (page && page->run_page_contents)
 	{
 		fz_try(ctx)
 		{
@@ -394,6 +578,7 @@ fz_run_page_contents(fz_context *ctx, fz_page *page, fz_device *dev, fz_matrix t
 		}
 		fz_catch(ctx)
 		{
+			dev->close_device = NULL; /* aborted run, don't warn about unclosed device */
 			if (fz_caught(ctx) != FZ_ERROR_ABORT)
 				fz_rethrow(ctx);
 		}
@@ -401,16 +586,35 @@ fz_run_page_contents(fz_context *ctx, fz_page *page, fz_device *dev, fz_matrix t
 }
 
 void
-fz_run_annot(fz_context *ctx, fz_annot *annot, fz_device *dev, fz_matrix transform, fz_cookie *cookie)
+fz_run_page_annots(fz_context *ctx, fz_page *page, fz_device *dev, fz_matrix transform, fz_cookie *cookie)
 {
-	if (annot && annot->run_annot)
+	if (page && page->run_page_annots)
 	{
 		fz_try(ctx)
 		{
-			annot->run_annot(ctx, annot, dev, transform, cookie);
+			page->run_page_annots(ctx, page, dev, transform, cookie);
 		}
 		fz_catch(ctx)
 		{
+			dev->close_device = NULL; /* aborted run, don't warn about unclosed device */
+			if (fz_caught(ctx) != FZ_ERROR_ABORT)
+				fz_rethrow(ctx);
+		}
+	}
+}
+
+void
+fz_run_page_widgets(fz_context *ctx, fz_page *page, fz_device *dev, fz_matrix transform, fz_cookie *cookie)
+{
+	if (page && page->run_page_widgets)
+	{
+		fz_try(ctx)
+		{
+			page->run_page_widgets(ctx, page, dev, transform, cookie);
+		}
+		fz_catch(ctx)
+		{
+			dev->close_device = NULL; /* aborted run, don't warn about unclosed device */
 			if (fz_caught(ctx) != FZ_ERROR_ABORT)
 				fz_rethrow(ctx);
 		}
@@ -420,55 +624,9 @@ fz_run_annot(fz_context *ctx, fz_annot *annot, fz_device *dev, fz_matrix transfo
 void
 fz_run_page(fz_context *ctx, fz_page *page, fz_device *dev, fz_matrix transform, fz_cookie *cookie)
 {
-	fz_annot *annot;
-
 	fz_run_page_contents(ctx, page, dev, transform, cookie);
-
-	if (cookie && cookie->progress_max != -1)
-	{
-		int count = 1;
-		for (annot = fz_first_annot(ctx, page); annot; annot = fz_next_annot(ctx, annot))
-			count++;
-		cookie->progress_max += count;
-	}
-
-	for (annot = fz_first_annot(ctx, page); annot; annot = fz_next_annot(ctx, annot))
-	{
-		/* Check the cookie for aborting */
-		if (cookie)
-		{
-			if (cookie->abort)
-				break;
-			cookie->progress++;
-		}
-
-		fz_run_annot(ctx, annot, dev, transform, cookie);
-	}
-}
-
-fz_annot *
-fz_new_annot_of_size(fz_context *ctx, int size)
-{
-	fz_annot *annot = Memento_label(fz_calloc(ctx, 1, size), "fz_annot");
-	annot->refs = 1;
-	return annot;
-}
-
-fz_annot *
-fz_keep_annot(fz_context *ctx, fz_annot *annot)
-{
-	return fz_keep_imp(ctx, annot, &annot->refs);
-}
-
-void
-fz_drop_annot(fz_context *ctx, fz_annot *annot)
-{
-	if (fz_drop_imp(ctx, annot, &annot->refs))
-	{
-		if (annot->drop_annot)
-			annot->drop_annot(ctx, annot);
-		fz_free(ctx, annot);
-	}
+	fz_run_page_annots(ctx, page, dev, transform, cookie);
+	fz_run_page_widgets(ctx, page, dev, transform, cookie);
 }
 
 fz_page *
@@ -491,10 +649,12 @@ fz_drop_page(fz_context *ctx, fz_page *page)
 	if (fz_drop_imp(ctx, page, &page->refs))
 	{
 		/* Remove page from the list of open pages */
+		fz_lock(ctx, FZ_LOCK_ALLOC);
 		if (page->next != NULL)
 			page->next->prev = page->prev;
 		if (page->prev != NULL)
 			*page->prev = page->next;
+		fz_unlock(ctx, FZ_LOCK_ALLOC);
 
 		if (page->drop_page)
 			page->drop_page(ctx, page);

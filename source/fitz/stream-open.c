@@ -4,7 +4,6 @@
 #endif
 
 #include "mupdf/fitz.h"
-#include "fitz-imp.h"
 
 #include <string.h>
 #include <errno.h>
@@ -35,7 +34,8 @@ fz_new_stream(fz_context *ctx, void *state, fz_stream_next_fn *next, fz_stream_d
 	}
 	fz_catch(ctx)
 	{
-		drop(ctx, state);
+		if (drop)
+			drop(ctx, state);
 		fz_rethrow(ctx);
 	}
 
@@ -80,7 +80,7 @@ fz_drop_stream(fz_context *ctx, fz_stream *stm)
 // TODO: WIN32: HANDLE CreateFileW(), etc.
 // TODO: POSIX: int creat(), read(), write(), lseeko, etc.
 
-typedef struct fz_file_stream_s
+typedef struct
 {
 	FILE *file;
 	unsigned char buffer[4096];

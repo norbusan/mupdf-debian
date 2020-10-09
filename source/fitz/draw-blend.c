@@ -1,5 +1,7 @@
 #include "mupdf/fitz.h"
+
 #include "draw-imp.h"
+#include "pixmap-imp.h"
 
 #include <string.h>
 #include <math.h>
@@ -30,7 +32,7 @@ The formula shown above is a simplification of the following formula:
 
  Ar * Cr = [(1-As)*Ab*Cb] + [(1-Ab)*As*Cs] + [Ab*As*B(Cb, Cs)]
 
-At first glange this always appears to be a mistake to me, as it looks
+At first glance this always appears to be a mistake to me, as it looks
 like they have make a mistake in the division.
 
 However, if we consider the result alpha equation:
@@ -52,7 +54,6 @@ And thus:
  Ar * Cr = (1 - As) * Ab * Cb + As * [ (1-Ab)*Cs + Ab * B(Cb,Cs) ]
 
 as required.
-
 
 Alpha blending on top of compositing:
 =====================================
@@ -108,16 +109,16 @@ static const char *fz_blendmode_names[] =
 int fz_lookup_blendmode(const char *name)
 {
 	int i;
-	for (i = 0; i < nelem(fz_blendmode_names); i++)
+	for (i = 0; i < (int)nelem(fz_blendmode_names); i++)
 		if (!strcmp(name, fz_blendmode_names[i]))
 			return i;
 	return FZ_BLEND_NORMAL;
 }
 
-char *fz_blendmode_name(int blendmode)
+const char *fz_blendmode_name(int blendmode)
 {
-	if (blendmode >= 0 && blendmode < nelem(fz_blendmode_names))
-		return (char*)fz_blendmode_names[blendmode];
+	if (blendmode >= 0 && blendmode < (int)nelem(fz_blendmode_names))
+		return fz_blendmode_names[blendmode];
 	return "Normal";
 }
 
@@ -446,10 +447,10 @@ fz_blend_nonseparable_gray(byte * FZ_RESTRICT bp, int bal, const byte * FZ_RESTR
 				case FZ_BLEND_HUE:
 				case FZ_BLEND_SATURATION:
 				case FZ_BLEND_COLOR:
-					bp[0] = fz_mul255(bp[n], bg);
+					bp[0] = bal ? fz_mul255(bp[n], bg) : bg;
 					break;
 				case FZ_BLEND_LUMINOSITY:
-					bp[0] = fz_mul255(bp[n], sg);
+					bp[0] = bal ? fz_mul255(bp[n], sg) : sg;
 					break;
 				}
 
@@ -461,7 +462,6 @@ fz_blend_nonseparable_gray(byte * FZ_RESTRICT bp, int bal, const byte * FZ_RESTR
 				}
 				if (bal)
 					bp[n] = ba + sa - saba;
-
 			}
 		}
 		sp += n + sal;
@@ -494,7 +494,7 @@ fz_blend_nonseparable(byte * FZ_RESTRICT bp, int bal, const byte * FZ_RESTRICT s
 
 				/* ugh, division to get non-premul components */
 				int invsa = sa ? 255 * 256 / sa : 0;
-				int invba = ba ? 255 * 256 / ba : 0;
+				int invba = 255 * 256 / ba;
 
 				int sr = (sp[0] * invsa) >> 8;
 				int sg = (sp[1] * invsa) >> 8;
@@ -551,10 +551,10 @@ fz_blend_nonseparable(byte * FZ_RESTRICT bp, int bal, const byte * FZ_RESTRICT s
 					case FZ_BLEND_HUE:
 					case FZ_BLEND_SATURATION:
 					case FZ_BLEND_COLOR:
-						bp[3] = fz_mul255(bp[n], bk);
+						bp[3] = bal ? fz_mul255(bp[n], bk) : bk;
 						break;
 					case FZ_BLEND_LUMINOSITY:
-						bp[3] = fz_mul255(bp[n], sk);
+						bp[3] = bal ? fz_mul255(bp[n], sk) : sk;
 						break;
 					}
 				}
@@ -1113,6 +1113,9 @@ fz_blend_pixmap(fz_context *ctx, fz_pixmap * FZ_RESTRICT dst, fz_pixmap * FZ_RES
 	sa = src->alpha;
 	dp = dst->samples + (unsigned int)((y - dst->y) * dst->stride + (x - dst->x) * dst->n);
 	da = dst->alpha;
+
+	if (n == 1)
+		sa = da = 0;
 
 #ifdef PARANOID_PREMULTIPLY
 	if (sa)

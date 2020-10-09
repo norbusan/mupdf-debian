@@ -6,6 +6,14 @@
 #include <float.h>
 #include <stdlib.h>
 
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
+#ifdef _WIN32
+#include <windows.h> /* for MultiByteToWideChar etc. */
+#endif
+
 static inline int
 fz_tolower(int c)
 {
@@ -18,7 +26,17 @@ size_t
 fz_strnlen(const char *s, size_t n)
 {
 	const char *p = memchr(s, 0, n);
-	return p ? p - s : n;
+	return p ? (size_t) (p - s) : n;
+}
+
+int
+fz_strncasecmp(const char *a, const char *b, size_t n)
+{
+	if (!n--)
+		return 0;
+	for (; *a && *b && n && (*a == *b || fz_tolower(*a) == fz_tolower(*b)); a++, b++, n--)
+		;
+	return fz_tolower(*a) - fz_tolower(*b);
 }
 
 int
@@ -117,6 +135,34 @@ fz_dirname(char *dir, const char *path, size_t n)
 	dir[i+1] = 0;
 }
 
+#ifdef _WIN32
+
+char *fz_realpath(const char *path, char buf[PATH_MAX])
+{
+	wchar_t wpath[PATH_MAX];
+	wchar_t wbuf[PATH_MAX];
+	int i;
+	if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, PATH_MAX))
+		return NULL;
+	if (!GetFullPathNameW(wpath, PATH_MAX, wbuf, NULL))
+		return NULL;
+	if (!WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, buf, PATH_MAX, NULL, NULL))
+		return NULL;
+	for (i=0; buf[i]; ++i)
+		if (buf[i] == '\\')
+			buf[i] = '/';
+	return buf;
+}
+
+#else
+
+char *fz_realpath(const char *path, char buf[PATH_MAX])
+{
+	return realpath(path, buf);
+}
+
+#endif
+
 static inline int ishex(int a)
 {
 	return (a >= 'A' && a <= 'F') ||
@@ -187,7 +233,7 @@ fz_format_output_path(fz_context *ctx, char *path, size_t size, const char *fmt,
 
 	if (z < 1)
 		z = 1;
-	while (i < z && i < sizeof num)
+	while (i < z && i < (int)sizeof num)
 		num[i++] = '0';
 	n = s - fmt;
 	if (n + i + strlen(p) >= size)
@@ -450,6 +496,9 @@ float fz_atof(const char *s)
 {
 	float result;
 
+	if (s == NULL)
+		return 0;
+
 	errno = 0;
 	result = fz_strtof(s, NULL);
 	if ((errno == ERANGE && result == 0) || isnan(result))
@@ -613,7 +662,7 @@ static char *twoway_memmem(const unsigned char *h, const unsigned char *z, const
 	/* Search loop */
 	for (;;) {
 		/* If remainder of haystack is shorter than needle, done */
-		if (z-h < l) return 0;
+		if ((size_t)(z-h) < l) return 0;
 
 		/* Check last byte first; advance by shift on mismatch */
 		if (BITOP(byteset, h[l-1], &)) {

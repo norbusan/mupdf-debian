@@ -30,6 +30,10 @@ double fz_erand48(fz_context *ctx, uint16_t s[3])
 	return x.f - 1.0;
 }
 
+/*
+	Pseudo-random numbers using a linear congruential algorithm and 48-bit
+	integer arithmetic.
+*/
 double fz_drand48(fz_context *ctx)
 {
 	return fz_erand48(ctx, ctx->seed48);
@@ -76,6 +80,10 @@ void fz_srand48(fz_context *ctx, int32_t seed)
 
 void fz_memrnd(fz_context *ctx, unsigned char *data, int len)
 {
+#ifdef CLUSTER
+	memset(data, 0x55, len);
+#else
 	while (len-- > 0)
 		*data++ = (unsigned char)fz_lrand48(ctx);
+#endif
 }
